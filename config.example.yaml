@@ -1,28 +1,23 @@
 # Moomoo日本株モメンタム検証ツール 設定ファイル
 # config.yaml としてコピーして使用してください
 
-# OpenD接続設定
 opend:
   host: "127.0.0.1"
   port: 11111
   timeout: 10
 
-# マーケットデータ設定
 market_data:
   require_paid_quote_card: false
   use_order_book: false
   use_tick: false
   use_realtime_push: false
 
-# 相場データ設定
 quote:
   market: "JP"
   data_types:
     - "SNAPSHOT"
     - "K_DAY"
 
-# 取引時間設定（東証現物市場）
-# MVPの制限: 祝日・休場日・臨時休場には完全対応しません。平日のみの簡易判定です。
 trading_hours:
   enabled: true
   morning:
@@ -33,12 +28,19 @@ trading_hours:
     close: "15:30"
   skip_weekends: true
 
-# 銘柄リスト設定
 watchlist:
   symbols_file: "data/symbols.json"
   max_symbols: 50
 
-# シグナル判定設定
+# 銘柄ユニバース設定
+# role=trade_candidate かつ tradable=true かつ価格レンジ内のみ買い候補/仮想注文対象
+universe:
+  min_trade_price: 500
+  max_trade_price: 20000
+  allow_expensive_watch_only: true
+  exclude_low_price_stocks: true
+  auto_downgrade_expensive_to_watch: true
+
 signals:
   ma_periods:
     short: 5
@@ -47,9 +49,8 @@ signals:
   turnover_threshold_yen: 10.0
   relative_strength:
     benchmark_code: "JP.1306"
-    period_days: 20
+    period_days: 5
 
-# スクリーニング設定
 screening:
   min_turnover: 1000000000
   min_volume_ratio: 1.2
@@ -60,7 +61,6 @@ screening:
   min_history_days: 25
   downgrade_extreme_volume_ratio: true
 
-# スコアリング設定
 scoring:
   enable_risk_penalty: true
   score_threshold_candidate: 70
@@ -73,7 +73,6 @@ scoring:
     high_20d: 10
     risk_warning: -30
 
-# ベンチマーク設定
 benchmark:
   primary:
     code: "JP.2559"
@@ -86,11 +85,9 @@ benchmark:
     - code: "JP.2558"
       name: "MAXIS米国株式（S&P500）"
 
-# データベース設定
 database:
   path: "data/moomoo.db"
 
-# 出力設定
 output:
   csv: true
   html: true
@@ -99,13 +96,11 @@ output:
 report:
   output_dir: "reports"
 
-# アプリ設定
 app:
   title: "Moomoo Strategy Monitor"
   timezone: "Asia/Tokyo"
   default_benchmark: "JP.2559"
 
-# アラート設定
 alerts:
   enabled: false
   console: true
@@ -118,7 +113,6 @@ alerts:
   notify_sell_watch: true
   notify_stale_data: true
 
-# スケジューラ設定
 scheduler:
   enabled: false
   timezone: "Asia/Tokyo"
@@ -142,9 +136,23 @@ scheduler:
       enabled: true
       cron: "30 16 * * 5"
 
-# ペーパートレード設定
-# moomoo JP / FUTUJP では、OpenAPI経由の日本株SIMULATE注文が利用できないため、
-# JP市場では使用しません。US市場向け experimental のみ残します。
+# アプリ内仮想ペーパートレード設定
+# moomoo APIには注文を送信しない。SQLite上の仮想売買のみ。
+virtual_trade:
+  enabled: true
+  initial_cash: 100000
+  max_position_amount: 20000
+  max_total_positions: 5
+  max_position_per_symbol: 1
+  market_fill_mode: "next_day_open"
+  score_threshold_for_order: 70
+  allow_fractional: false
+  commission: 0
+  slippage_bps: 10
+  tax_enabled: false
+  default_benchmark: "JP.2559"
+
+# moomoo OpenAPIのSIMULATE取引はJP市場では使わない
 paper_trade:
   enabled: false
   jp_api_simulate_supported: false
