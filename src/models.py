@@ -7,14 +7,11 @@
 関連ファイル: data_store.py, config.py
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Optional
 
 
-# SQLiteテーブル定義SQL
 CREATE_TABLES_SQL = """
--- 銘柄リスト
 CREATE TABLE IF NOT EXISTS symbols (
     code TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -30,7 +27,6 @@ CREATE TABLE IF NOT EXISTS symbols (
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
--- リアルタイム株価
 CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -44,7 +40,6 @@ CREATE TABLE IF NOT EXISTS quotes (
     FOREIGN KEY (code) REFERENCES symbols(code)
 );
 
--- 日足
 CREATE TABLE IF NOT EXISTS daily_bars (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -59,7 +54,6 @@ CREATE TABLE IF NOT EXISTS daily_bars (
     UNIQUE(code, date)
 );
 
--- 分足（1分足・5分足）
 CREATE TABLE IF NOT EXISTS intraday_bars (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -75,7 +69,6 @@ CREATE TABLE IF NOT EXISTS intraday_bars (
     UNIQUE(code, timestamp, ktype)
 );
 
--- 指標計算結果
 CREATE TABLE IF NOT EXISTS indicators (
     code TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -99,7 +92,6 @@ CREATE TABLE IF NOT EXISTS indicators (
     PRIMARY KEY (code, date)
 );
 
--- シグナル
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -113,7 +105,6 @@ CREATE TABLE IF NOT EXISTS signals (
     UNIQUE(code, date)
 );
 
--- 手動売買ログ
 CREATE TABLE IF NOT EXISTS trades_manual (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -129,7 +120,6 @@ CREATE TABLE IF NOT EXISTS trades_manual (
     FOREIGN KEY (code) REFERENCES symbols(code)
 );
 
--- ベンチマーク価格
 CREATE TABLE IF NOT EXISTS benchmark_prices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     benchmark_code TEXT NOT NULL,
@@ -141,7 +131,6 @@ CREATE TABLE IF NOT EXISTS benchmark_prices (
     UNIQUE(benchmark_code, date)
 );
 
--- シグナル事後検証
 CREATE TABLE IF NOT EXISTS signal_backtests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     signal_id INTEGER,
@@ -161,7 +150,6 @@ CREATE TABLE IF NOT EXISTS signal_backtests (
     FOREIGN KEY (code) REFERENCES symbols(code)
 );
 
--- ポートフォリオスナップショット
 CREATE TABLE IF NOT EXISTS performance_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL UNIQUE,
@@ -171,7 +159,6 @@ CREATE TABLE IF NOT EXISTS performance_snapshots (
     memo TEXT
 );
 
--- アラートログ
 CREATE TABLE IF NOT EXISTS alert_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -183,7 +170,6 @@ CREATE TABLE IF NOT EXISTS alert_logs (
     UNIQUE(code, date, alert_type)
 );
 
--- ペーパートレード注文
 CREATE TABLE IF NOT EXISTS paper_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id TEXT,
@@ -199,7 +185,6 @@ CREATE TABLE IF NOT EXISTS paper_orders (
     raw_response TEXT
 );
 
--- ペーパートレードポジション
 CREATE TABLE IF NOT EXISTS paper_positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -212,7 +197,6 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     UNIQUE(code, trd_env)
 );
 
--- ペーパートレード約定
 CREATE TABLE IF NOT EXISTS paper_fills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id TEXT NOT NULL,
@@ -225,7 +209,6 @@ CREATE TABLE IF NOT EXISTS paper_fills (
     raw_response TEXT
 );
 
--- 仮想注文（アプリ内ペーパートレード）
 CREATE TABLE IF NOT EXISTS virtual_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_name TEXT NOT NULL,
@@ -245,7 +228,6 @@ CREATE TABLE IF NOT EXISTS virtual_orders (
     updated_at TEXT
 );
 
--- 仮想ポジション
 CREATE TABLE IF NOT EXISTS virtual_positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_name TEXT NOT NULL,
@@ -260,10 +242,9 @@ CREATE TABLE IF NOT EXISTS virtual_positions (
     UNIQUE(strategy_name, code)
 );
 
--- 仮想約定
 CREATE TABLE IF NOT EXISTS virtual_fills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL UNIQUE,
     strategy_name TEXT NOT NULL,
     code TEXT NOT NULL,
     side TEXT NOT NULL,
@@ -274,7 +255,6 @@ CREATE TABLE IF NOT EXISTS virtual_fills (
     created_at TEXT
 );
 
--- 仮想エクイティカーブ
 CREATE TABLE IF NOT EXISTS virtual_equity_curve (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_name TEXT NOT NULL,
@@ -290,7 +270,6 @@ CREATE TABLE IF NOT EXISTS virtual_equity_curve (
     UNIQUE(strategy_name, date)
 );
 
--- インデックス作成
 CREATE INDEX IF NOT EXISTS idx_quotes_code ON quotes(code);
 CREATE INDEX IF NOT EXISTS idx_quotes_timestamp ON quotes(timestamp);
 CREATE INDEX IF NOT EXISTS idx_daily_bars_code ON daily_bars(code);
@@ -303,6 +282,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_manual_code ON trades_manual(code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_code ON benchmark_prices(benchmark_code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_date ON benchmark_prices(date);
 CREATE INDEX IF NOT EXISTS idx_signal_backtests_code ON signal_backtests(code);
+CREATE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side, status);
+CREATE INDEX IF NOT EXISTS idx_virtual_fills_order ON virtual_fills(order_id);
 """
 
 
@@ -312,7 +293,12 @@ class Symbol:
     code: str
     name: str
     market: str = "JP"
+    type: str = "stock"
+    role: str = "trade_candidate"
+    tradable: bool = True
     sector: Optional[str] = None
+    benchmark_group: Optional[str] = None
+    notes: Optional[str] = None
     enabled: bool = True
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -320,7 +306,6 @@ class Symbol:
 
 @dataclass
 class Quote:
-    """リアルタイム株価"""
     code: str
     timestamp: str
     price: Optional[float] = None
@@ -333,7 +318,6 @@ class Quote:
 
 @dataclass
 class DailyBar:
-    """日足"""
     code: str
     date: str
     open: Optional[float] = None
@@ -346,7 +330,6 @@ class DailyBar:
 
 @dataclass
 class Indicator:
-    """指標計算結果"""
     code: str
     date: str
     close: Optional[float] = None
@@ -358,16 +341,18 @@ class Indicator:
     volume_ma20: Optional[float] = None
     volume_ratio: Optional[float] = None
     return_5d: Optional[float] = None
+    return_5d_vs_benchmark: Optional[float] = None
+    return_20d_vs_benchmark: Optional[float] = None
+    return_60d_vs_benchmark: Optional[float] = None
     turnover: Optional[float] = None
     updated_at: Optional[str] = None
 
 
 @dataclass
 class Signal:
-    """シグナル"""
     code: str
     date: str
-    signal_type: str  # "BUY_CANDIDATE", "WATCH", "EXCLUDE", "RISK_WARNING"
+    signal_type: str
     score: Optional[float] = None
     reason: Optional[str] = None
     risk_warnings: Optional[str] = None
@@ -377,7 +362,6 @@ class Signal:
 
 @dataclass
 class TradeManual:
-    """手動売買ログ"""
     code: str
     side: str
     quantity: int
@@ -390,7 +374,6 @@ class TradeManual:
 
 @dataclass
 class BenchmarkPrice:
-    """ベンチマーク価格"""
     benchmark_code: str
     date: str
     price: Optional[float] = None
@@ -398,7 +381,6 @@ class BenchmarkPrice:
 
 @dataclass
 class PerformanceSnapshot:
-    """ポートフォリオスナップショット"""
     date: str
     portfolio_value: Optional[float] = None
     benchmark_value: Optional[float] = None
