@@ -1,0 +1,201 @@
+# Moomoo日本株モメンタム検証ツール 設定ファイル
+# config.yaml としてコピーして使用してください
+
+# OpenD接続設定
+opend:
+  host: "127.0.0.1"
+  port: 11111
+  # タイムアウト（秒）
+  timeout: 10
+
+# マーケットデータ設定
+market_data:
+  # 有料行情カードを必要としない（MVPでは false）
+  require_paid_quote_card: false
+  # 板情報は使わない
+  use_order_book: false
+  # ティックは使わない
+  use_tick: false
+  # リアルタイムプッシュは使わない
+  use_realtime_push: false
+
+# 相場データ設定
+quote:
+  # 行情レベル: MVPでは不要
+  market: "JP"
+  # 取得するデータ種別（MVPでは日足とスナップショットのみ）
+  data_types:
+    - "SNAPSHOT"      # スナップショット（現在値・出来高・売買代金）
+    - "K_DAY"         # 日足
+
+# 取引時間設定（東証現物市場）
+# MVPの制限: 祝日・休場日・臨時休場には完全対応しません。平日のみの簡易判定です。
+trading_hours:
+  enabled: true
+  # 前場: 9:00〜11:30
+  morning:
+    open: "09:00"
+    close: "11:30"
+  # 後場: 12:30〜15:30（2024年11月5日以降）
+  afternoon:
+    open: "12:30"
+    close: "15:30"
+  # クロージング・オークションは15:30に実施
+  # ローソク足の最終バーは15:30で確定
+  # 土日祝日は取得しない（簡易判定: weekday()で平日のみ）
+  skip_weekends: true
+
+# 銘柄リスト設定
+watchlist:
+  # 銘柄リストファイル
+  symbols_file: "data/symbols.json"
+  # 最大監視銘柄数（購読枠の制約を考慮）
+  max_symbols: 50
+
+# シグナル判定設定
+signals:
+  # 移動平均の期間
+  ma_periods:
+    short: 5
+    medium: 25
+  # 出来高の閾値（20日平均に対する倍率）
+  volume_ratio_threshold: 1.5
+  # 売買代金の閾値（億円）
+  turnover_threshold_yen: 10.0
+  # 相対強度の比較基准
+  relative_strength:
+    benchmark_code: "000001.T"  # TOPIX
+    period_days: 20
+
+# スコアリング設定
+scoring:
+  # 各項目の配点
+  weights:
+    trend: 30        # トレンド（移動平均の並び）
+    volume: 20       # 出来高
+    relative_strength: 25  # 相対強度
+    liquidity: 15    # 流動性（売買代金）
+    risk_warning: -30  # リスク警告（減点）
+  # 候補と判定するスコア閾値
+  candidate_threshold: 60
+
+# ベンチマーク設定
+benchmark:
+  # 第一ベンチマーク
+  primary:
+    code: "JP.2559"  # MAXIS全世界株式（オール・カントリー）上場投信
+    name: "MAXIS全世界株式（オール・カントリー）"
+  # 補助ベンチマーク
+  secondary:
+    - code: "JP.1306"  # TOPIX連動ETF
+      name: "TOPIX連動ETF"
+    - code: "JP.1320"  # 日経平均連動ETF（iFreeETF日経225）
+      name: "日経平均連動ETF"
+    - code: "JP.2558"  # MAXIS米国株式（S&P500）上場投信
+      name: "MAXIS米国株式（S&P500）"
+
+# データベース設定
+database:
+  path: "data/moomoo.db"
+
+# スケジューリング設定
+schedule:
+  # 相場データ取得間隔（分）
+  quote_interval_minutes: 5
+  # 日足取得時刻（日本時間）
+  daily_fetch_time: "16:00"
+  # シグナル判定時刻（日本時間）
+  signal_check_time: "16:30"
+
+# スクリーニング設定
+screening:
+  # 売買代金の最低閾値（円）
+  min_turnover: 1000000000  # 10億円
+  # 出来高比率の最低閾値（20日平均に対する倍率）
+  min_volume_ratio: 1.2
+  # 20日高値からの最大乖離率（%）
+  max_distance_from_high_20d: 5.0
+  # リスク警告: 当日リターン閾値（%）
+  risk_daily_return_threshold: 8.0
+  # リスク警告: 5日リターン閾値（%）
+  risk_return_5d_threshold: 15.0
+  # リスク警告: 出来高比率閾値
+  risk_volume_ratio_threshold: 5.0
+  # 最低履歴日数（営業日）
+  min_history_days: 25
+  # 出来高比率5倍以上の銘柄を監視に落とす（ETFは警告のみ）
+  downgrade_extreme_volume_ratio: true
+
+# スコアリング設定
+scoring:
+  # リスク減点を有効にする
+  enable_risk_penalty: true
+  # 候補と判定するスコア閾値
+  score_threshold_candidate: 70
+  # 監視候補と判定するスコア閾値
+  score_threshold_watch: 50
+  # 各項目の配点
+  weights:
+    trend: 30        # トレンド（移動平均の並び）
+    volume: 20       # 出来高
+    relative_strength: 25  # 相対強度
+    liquidity: 15    # 流動性（売買代金）
+    high_20d: 10     # 20日高値圏
+    risk_warning: -30  # リスク警告（減点）
+
+# 出力設定
+output:
+  csv: true
+  html: true
+  sqlite: true
+
+# アプリ設定
+app:
+  title: "Moomoo Strategy Monitor"
+  timezone: "Asia/Tokyo"
+  default_benchmark: "JP.2559"
+
+# アラート設定
+alerts:
+  enabled: false
+  console: true
+  file: true
+  webhook:
+    enabled: false
+    url: ""
+  score_threshold: 90
+  notify_new_candidates: true
+  notify_sell_watch: true
+  notify_stale_data: true
+
+# スケジューラ設定
+scheduler:
+  enabled: false
+  timezone: "Asia/Tokyo"
+  jobs:
+    connection_check:
+      enabled: true
+      cron: "45 8 * * 1-5"
+    daily_update:
+      enabled: true
+      cron: "45 15 * * 1-5"
+    screen_candidates:
+      enabled: true
+      cron: "50 15 * * 1-5"
+    performance_report:
+      enabled: true
+      cron: "0 16 * * 1-5"
+    send_alerts:
+      enabled: true
+      cron: "5 16 * * 1-5"
+    weekly_report:
+      enabled: true
+      cron: "30 16 * * 5"
+
+# ペーパートレード設定
+# moomoo JP / FUTUJP では、OpenAPI経由の日本株SIMULATE注文が利用できないため、
+# 本プロジェクトでは使用しません。
+paper_trade:
+  enabled: false
+  jp_api_simulate_supported: false
+  note: "moomoo JP/FUTUJPでは日本株のAPI SIMULATE注文が利用できない可能性が高いため、本プロジェクトでは使用しません。"
