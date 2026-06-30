@@ -329,14 +329,23 @@ def tab_daily_ops():
         st.error(f"データ: {status.latest_date}（古すぎます）")
 
     if st.button("日次サイクル Dry-Run"):
-        import subprocess
-        result = subprocess.run([sys.executable, "run_daily_cycle.py", "--dry-run"], capture_output=True, text=True, timeout=60)
-        st.success("Dry-run 成功") if result.returncode == 0 else st.error(f"Dry-run 失敗: {result.stderr[:200]}")
+        from run_daily_cycle import run_cycle
+        from datetime import datetime
+        try:
+            results = run_cycle(datetime.now().strftime("%Y-%m-%d"), dry_run=True)
+            st.success(f"Dry-run 成功: {results}")
+        except Exception as e:
+            st.error(f"Dry-run 失敗: {e}")
 
     if st.button("仮想トレードレポート出力"):
-        import subprocess
-        result = subprocess.run([sys.executable, "virtual_order.py", "--report"], capture_output=True, text=True, timeout=30)
-        st.success("レポート出力完了") if result.returncode == 0 else st.error(f"レポート出力失敗: {result.stderr[:200]}")
+        from virtual_order import show_performance
+        from src.virtual_trade import VirtualTradeManager
+        try:
+            manager = VirtualTradeManager(load_config_cached())
+            show_performance(manager, "default")
+            st.success("レポート出力完了")
+        except Exception as e:
+            st.error(f"レポート出力失敗: {e}")
 
 
 def main() -> None:

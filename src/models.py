@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS virtual_orders (
     limit_price REAL,
     status TEXT NOT NULL,
     signal_id INTEGER,
+    exit_reason TEXT,
     submitted_at TEXT NOT NULL,
     filled_at TEXT,
     cancelled_at TEXT,

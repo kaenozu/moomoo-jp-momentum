@@ -351,6 +351,7 @@ class VirtualTradeManager:
         limit_price: Optional[float] = None,
         signal_id: Optional[int] = None,
         submitted_at: Optional[str] = None,
+        exit_reason: Optional[str] = None,
     ) -> Optional[VirtualOrder]:
         """仮想注文を作成する。moomooには注文を送信しない。"""
         if not self.enabled:
@@ -387,10 +388,10 @@ class VirtualTradeManager:
                 """
                 INSERT INTO virtual_orders
                 (strategy_name, code, side, quantity, order_type, limit_price,
-                 status, signal_id, submitted_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+                 status, signal_id, exit_reason, submitted_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
                 """,
-                (strategy_name, code, side, quantity, order_type, limit_price, signal_id, submit_value, now, now),
+                (strategy_name, code, side, quantity, order_type, limit_price, signal_id, exit_reason, submit_value, now, now),
             )
             order_id = cursor.lastrowid
 
@@ -703,7 +704,8 @@ class VirtualTradeManager:
                         should_exit = current_price < ma25
 
             if should_exit:
-                order = self.place_order(strategy_name, pos.code, "SELL", pos.quantity, "MARKET_SIM", submitted_at=target_date)
+                reason = "stop_loss" if current_price <= pos.avg_cost * (1 + stop_loss_pct / 100) else "ma25_cross"
+                order = self.place_order(strategy_name, pos.code, "SELL", pos.quantity, "MARKET_SIM", submitted_at=target_date, exit_reason=reason)
                 if order:
                     exit_orders.append(order)
         return exit_orders

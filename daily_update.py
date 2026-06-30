@@ -74,28 +74,29 @@ def fetch_and_save_daily_klines(
 
 
 def add_relative_strength(indicators_df: pd.DataFrame, benchmark_code: str = "JP.1306") -> pd.DataFrame:
-    """同一日付のベンチマークリターンとの差分を計算する。"""
+    """同一日付のベンチマークリターンとの差分を日付でjoinして計算する。"""
     if indicators_df.empty or benchmark_code not in set(indicators_df["code"]):
         return indicators_df
 
     df = indicators_df.copy()
-    bench = df[df["code"] == benchmark_code].sort_values("date").tail(1)
+    bench = df[df["code"] == benchmark_code][["date", "return_5d", "return_20d", "return_60d"]]
     if bench.empty:
         return df
 
-    bench_5d = bench.iloc[0].get("return_5d")
-    bench_20d = bench.iloc[0].get("return_20d")
-    bench_60d = bench.iloc[0].get("return_60d")
+    bench = bench.rename(columns={
+        "return_5d": "bench_return_5d",
+        "return_20d": "bench_return_20d",
+        "return_60d": "bench_return_60d",
+    })
 
-    if pd.notna(bench_5d):
-        df["return_5d_vs_benchmark"] = df["return_5d"] - bench_5d
-    if "return_20d" in df.columns and pd.notna(bench_20d):
-        df["return_20d_vs_benchmark"] = df["return_20d"] - bench_20d
-    if "return_60d" in df.columns and pd.notna(bench_60d):
-        df["return_60d_vs_benchmark"] = df["return_60d"] - bench_60d
-
-    if "return_5d_vs_benchmark" in df.columns:
-        df["relative_strength_rank"] = df["return_5d_vs_benchmark"].rank(ascending=False, method="min")
+    df = df.merge(bench, on="date", how="left")
+    df["return_5d_vs_benchmark"] = df["return_5d"] - df["bench_return_5d"]
+    if "return_20d" in df.columns:
+        df["return_20d_vs_benchmark"] = df["return_20d"] - df["bench_return_20d"]
+    if "return_60d" in df.columns:
+        df["return_60d_vs_benchmark"] = df["return_60d"] - df["bench_return_60d"]
+    df["relative_strength_rank"] = df["return_5d_vs_benchmark"].rank(ascending=False, method="min")
+    df = df.drop(columns=["bench_return_5d", "bench_return_20d", "bench_return_60d"], errors="ignore")
 
     return df
 
