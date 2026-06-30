@@ -46,6 +46,8 @@ class StockIndicators:
     prev_close: Optional[float] = None
     daily_return: Optional[float] = None
     return_5d: Optional[float] = None
+    return_20d: Optional[float] = None
+    return_60d: Optional[float] = None
 
     history_days: int = 0
 
@@ -63,40 +65,32 @@ def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
     """futu-api取得DFとDB取得DFの両方を計算しやすい形に正規化する。"""
     if df.empty:
         return df
-
     df = df.copy()
     if "time_key" not in df.columns and "date" in df.columns:
         df["time_key"] = df["date"]
-
     for col in ["close", "open", "high", "low", "volume", "turnover"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-
     return df.sort_values("time_key", ascending=False).reset_index(drop=True)
 
 
-def calculate_indicators(
-    df: pd.DataFrame,
-    code: str,
-    name: Optional[str] = None,
-) -> Optional[StockIndicators]:
-    """
-    日足データから指標を計算する。
+def _period_return(df: pd.DataFrame, days: int) -> Optional[float]:
+    if len(df) < days + 1:
+        return None
+    close_now = float(df["close"].iloc[0])
+    close_then = float(df["close"].iloc[days])
+    if close_then <= 0:
+        return None
+    return (close_now - close_then) / close_then * 100
 
-    Args:
-        df: 日足データ。time_key または date を含むDataFrame。
-        code: 銘柄コード
-        name: 銘柄名
 
-    Returns:
-        StockIndicators。データ不足の場合はNone。
-    """
+def calculate_indicators(df: pd.DataFrame, code: str, name: Optional[str] = None) -> Optional[StockIndicators]:
+    """日足データから指標を計算する。"""
     if df.empty or len(df) < 5:
         logger.warning("データ不足: %s (%s件)", code, len(df))
         return None
 
     df = _normalize_daily_df(df)
-
     latest = df.iloc[0]
     date = str(latest.get("time_key", ""))[:10]
     close = float(latest.get("close", 0) or 0)
@@ -106,17 +100,10 @@ def calculate_indicators(
     volume = int(latest.get("volume", 0) or 0)
     turnover = float(latest.get("turnover", 0) or 0)
 
-    ma5 = None
-    ma5_deviation = None
-    if len(df) >= 5:
-        ma5 = float(df["close"].iloc[:5].mean())
-        ma5_deviation = close - ma5
-
-    ma25 = None
-    ma25_deviation = None
-    if len(df) >= 25:
-        ma25 = float(df["close"].iloc[:25].mean())
-        ma25_deviation = close - ma25
+    ma5 = float(df["close"].iloc[:5].mean()) if len(df) >= 5 else None
+    ma25 = float(df["close"].iloc[:25].mean()) if len(df) >= 25 else None
+    ma5_deviation = close - ma5 if ma5 is not None else None
+    ma25_deviation = close - ma25 if ma25 is not None else None
 
     volume_ma20 = None
     volume_ratio = None
@@ -139,11 +126,9 @@ def calculate_indicators(
         if prev_close > 0:
             daily_return = (close - prev_close) / prev_close * 100
 
-    return_5d = None
-    if len(df) >= 6:
-        close_5d_ago = float(df["close"].iloc[5])
-        if close_5d_ago > 0:
-            return_5d = (close - close_5d_ago) / close_5d_ago * 100
+    return_5d = _period_return(df, 5)
+    return_20d = _period_return(df, 20)
+    return_60d = _period_return(df, 60)
 
     return StockIndicators(
         code=code,
@@ -167,6 +152,8 @@ def calculate_indicators(
         prev_close=prev_close,
         daily_return=daily_return,
         return_5d=return_5d,
+        return_20d=return_20d,
+        return_60d=return_60d,
         history_days=len(df),
     )
 
@@ -175,15 +162,12 @@ def calculate_indicators_batch(
     data_dict: dict[str, pd.DataFrame],
     symbols_info: Optional[dict[str, str]] = None,
 ) -> list[StockIndicators]:
-    """複数銘柄の指標を一括計算する"""
     results = []
-
     for code, df in data_dict.items():
         name = symbols_info.get(code) if symbols_info else None
         indicators = calculate_indicators(df, code, name)
         if indicators:
             results.append(indicators)
-
     logger.info("指標計算完了: %s/%s銘柄", len(results), len(data_dict))
     return results
 
@@ -217,10 +201,15 @@ def indicators_to_dataframe(indicators: list[StockIndicators]) -> pd.DataFrame:
             "prev_close": ind.prev_close,
             "daily_return": ind.daily_return,
             "return_5d": ind.return_5d,
+            "return_20d": ind.return_20d,
+            "return_60d": ind.return_60d,
             "history_days": ind.history_days,
+            "return_5d_vs_benchmark": ind.return_5d_vs_benchmark,
+            "return_20d_vs_benchmark": ind.return_20d_vs_benchmark,
+            "return_60d_vs_benchmark": ind.return_60d_vs_benchmark,
+            "relative_strength_rank": ind.relative_strength_rank,
             "score": ind.score,
             "signal_type": ind.signal_type,
             "reason": ind.reason,
         })
-
     return pd.DataFrame(records)
