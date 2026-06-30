@@ -157,12 +157,7 @@ def export_to_csv(indicators_df: pd.DataFrame, output_dir: str = "reports") -> s
 
 
 def ensure_symbols_loaded(data_store: DataStore, symbols_file: str) -> int:
-    symbols = data_store.get_enabled_symbols(include_benchmarks=True)
-    if symbols:
-        return len(symbols)
-    if not Path(symbols_file).exists():
-        return 0
-    data_store.load_symbols_from_json(symbols_file)
+    data_store.sync_symbols_from_json(symbols_file)
     return len(data_store.get_enabled_symbols(include_benchmarks=True))
 
 

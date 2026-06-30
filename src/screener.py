@@ -40,6 +40,7 @@ class Candidate:
     turnover: Optional[float] = None
     score: float = 0.0
     signal_type: str = "EXCLUDE"
+    strategy_name: str = "momentum"
     reason: str = ""
     risk_warnings: str = ""
     updated_at: str = ""
@@ -246,10 +247,10 @@ class Screener:
         now = datetime.now().isoformat()
         sql = """
             INSERT OR REPLACE INTO signals
-            (code, date, signal_type, score, reason, risk_warnings, price_at_signal, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (code, date, signal_type, strategy_name, score, reason, risk_warnings, price_at_signal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = [(c.code, c.date, c.signal_type, c.score, c.reason, c.risk_warnings, c.close, now) for c in rows]
+        params = [(c.code, c.date, c.signal_type, c.strategy_name, c.score, c.reason, c.risk_warnings, c.close, now) for c in rows]
         with sqlite3.connect(self.db_path) as conn:
             conn.executemany(sql, params)
         return len(rows)

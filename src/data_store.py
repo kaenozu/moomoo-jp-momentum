@@ -109,6 +109,15 @@ class DataStore:
         logger.info("銘柄リストを読み込みました: %s件", len(params))
         return len(params)
 
+    def sync_symbols_from_json(self, json_path: str | None = None) -> int:
+        """
+        毎回実行用の同期処理。load_symbols_from_json と同じ。
+        日次更新・日次サイクル起動時に毎回呼び出して symbols.json の変更をDBに反映する。
+        """
+        if json_path is None:
+            json_path = self.config.watchlist_file
+        return self.load_symbols_from_json(json_path)
+
     def get_enabled_symbols(self, include_benchmarks: bool = False) -> list[Symbol]:
         """有効な銘柄リストを取得する。"""
         query = """

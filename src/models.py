@@ -97,12 +97,13 @@ CREATE TABLE IF NOT EXISTS signals (
     code TEXT NOT NULL,
     date TEXT NOT NULL,
     signal_type TEXT NOT NULL,
+    strategy_name TEXT NOT NULL DEFAULT 'momentum',
     score REAL,
     reason TEXT,
     risk_warnings TEXT,
     price_at_signal REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    UNIQUE(code, date)
+    UNIQUE(strategy_name, code, date)
 );
 
 CREATE TABLE IF NOT EXISTS trades_manual (
@@ -282,7 +283,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_manual_code ON trades_manual(code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_code ON benchmark_prices(benchmark_code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_date ON benchmark_prices(date);
 CREATE INDEX IF NOT EXISTS idx_signal_backtests_code ON signal_backtests(code);
-CREATE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_virtual_fills_order ON virtual_fills(order_id);
 """
 

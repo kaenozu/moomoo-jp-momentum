@@ -143,12 +143,13 @@ class VirtualTradeManager:
         quantity: int,
         order_type: str,
         limit_price: Optional[float],
+        submitted_at: str | None = None,
     ) -> tuple[bool, str]:
         ok, reason = self._symbol_universe_status(conn, code)
         if not ok:
             return False, reason
 
-        ref_price = limit_price if order_type == "LIMIT_SIM" else self._latest_close(conn, code)
+        ref_price = limit_price if order_type == "LIMIT_SIM" else self._latest_close(conn, code, submitted_at)
         if ref_price is None or ref_price <= 0:
             return False, "参照価格を取得できません"
         if ref_price < self.min_trade_price:
@@ -157,7 +158,7 @@ class VirtualTradeManager:
             return False, f"価格が上限{self.max_trade_price:,.0f}円を超えています"
         if ref_price * quantity > self.max_position_amount:
             return False, f"注文金額が1銘柄上限{self.max_position_amount:,.0f}円を超えています"
-        if ref_price * quantity + self.commission > self.get_cash(strategy_name):
+        if ref_price * quantity + self.commission > self.get_cash(strategy_name, submitted_at):
             return False, "仮想cashが不足しています"
 
         positions = self.get_positions(strategy_name)
@@ -208,16 +209,26 @@ class VirtualTradeManager:
             return False, "同一銘柄の未約定SELL注文が既に存在します"
         return True, ""
 
-    def get_cash(self, strategy_name: str = "default") -> float:
+    def get_cash(self, strategy_name: str = "default", as_of_date: str | None = None) -> float:
         with self._get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT cash FROM virtual_equity_curve
-                WHERE strategy_name = ?
-                ORDER BY date DESC LIMIT 1
-                """,
-                (strategy_name,),
-            ).fetchone()
+            if as_of_date:
+                row = conn.execute(
+                    """
+                    SELECT cash FROM virtual_equity_curve
+                    WHERE strategy_name = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 1
+                    """,
+                    (strategy_name, as_of_date),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT cash FROM virtual_equity_curve
+                    WHERE strategy_name = ?
+                    ORDER BY date DESC LIMIT 1
+                    """,
+                    (strategy_name,),
+                ).fetchone()
             if row and row["cash"] is not None:
                 return float(row["cash"])
         return self.initial_cash
@@ -360,7 +371,7 @@ class VirtualTradeManager:
 
         with self._get_connection() as conn:
             if side == "BUY":
-                ok, reason = self._validate_buy_order(conn, strategy_name, code, quantity, order_type, limit_price)
+                ok, reason = self._validate_buy_order(conn, strategy_name, code, quantity, order_type, limit_price, submitted_at)
             else:
                 ok, reason = self._validate_sell_order(conn, strategy_name, code, quantity)
             if not ok:

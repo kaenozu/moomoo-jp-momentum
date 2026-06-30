@@ -43,14 +43,6 @@ def run_cycle(target_date: str, dry_run: bool = False) -> dict:
     config = load_config("config.yaml")
 
     if not dry_run:
-        guard = DataFreshnessGuard(config)
-        status = guard.check_freshness()
-        if status.level == "error" and status.days_stale < 9000:
-            raise SystemError(f"データが古すぎるため処理を停止します: {status.message}")
-        if status.level == "warning":
-            logger.warning("データが古いですが処理を続行します: %s", status.message)
-
-    if not dry_run:
         opend_conn = OpenDConnection(config)
         status = opend_conn.connect()
         if not status.connected:
@@ -63,8 +55,7 @@ def run_cycle(target_date: str, dry_run: bool = False) -> dict:
     results["connection"] = True
 
     data_store = DataStore(config)
-    if not data_store.get_enabled_symbols(include_benchmarks=True):
-        data_store.load_symbols_from_json(config.watchlist_file)
+    data_store.sync_symbols_from_json(config.watchlist_file)
     symbols = data_store.get_enabled_symbols(include_benchmarks=True)
     codes = [s.code for s in symbols]
     symbols_info = {s.code: s.name for s in symbols}
@@ -95,6 +86,15 @@ def run_cycle(target_date: str, dry_run: bool = False) -> dict:
     else:
         results["indicators"] = 0
         results["benchmark_prices"] = 0
+
+    # 鮮度チェック（日足更新後、シグナル判定前）
+    if not dry_run:
+        guard = DataFreshnessGuard(config)
+        status = guard.check_freshness()
+        if status.level == "error" and status.days_stale < 9000:
+            raise SystemError(f"データが古すぎるため処理を停止します: {status.message}")
+        if status.level == "warning":
+            logger.warning("データが古いですが処理を続行します: %s", status.message)
 
     if not dry_run:
         screener = Screener(config)

@@ -34,8 +34,8 @@ class TestIdempotency:
             """, ("JP.7203", "2026-07-01", "BUY_CANDIDATE", 85.0, "dup", 1000.0, now))
         conn.close()
 
-    def test_dup_order_not_created(self):
-        """同一戦術・同一コードの注文が重複しない"""
+    def test_dup_order_blocked_by_db(self):
+        """同一戦術・同一コード・同一sideのPENDING注文はDB制約で重複不可"""
         import sqlite3
         conn = sqlite3.connect(":memory:")
         from src.models import CREATE_TABLES_SQL
@@ -46,14 +46,14 @@ class TestIdempotency:
             (strategy_name, code, side, quantity, order_type, status, submitted_at, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, ("default", "JP.7203", "BUY", 1, "MARKET_SIM", "PENDING", now, now, now))
-        conn.execute("""
-            INSERT INTO virtual_orders
-            (strategy_name, code, side, quantity, order_type, status, submitted_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, ("default", "JP.7203", "BUY", 1, "MARKET_SIM", "PENDING", now, now, now))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("""
+                INSERT INTO virtual_orders
+                (strategy_name, code, side, quantity, order_type, status, submitted_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, ("default", "JP.7203", "BUY", 1, "MARKET_SIM", "PENDING", now, now, now))
         cursor = conn.execute("SELECT COUNT(*) FROM virtual_orders")
-        # UNIQUE制約がないため重複は許容される（仮想注文は複数回可能）
-        assert cursor.fetchone()[0] == 2
+        assert cursor.fetchone()[0] == 1  # 1件のみで重複なし
         conn.close()
 
     def test_upsert_equity_curve(self):
