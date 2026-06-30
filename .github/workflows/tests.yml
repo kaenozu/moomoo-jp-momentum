@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install futu-api pandas pyyaml
+          pip install pytest apscheduler matplotlib jinja2 python-dotenv
+      - name: Create data dir
+        run: mkdir -p data reports logs
+      - name: Create placeholder config
+        run: cp config.example.yaml config.yaml
+      - name: Run tests
+        run: python -m pytest tests/ -v
+      - name: Test dry-run
+        run: python run_daily_cycle.py --dry-run
