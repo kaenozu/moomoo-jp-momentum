@@ -15,11 +15,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install futu-api pandas pyyaml
-          pip install pytest apscheduler matplotlib jinja2 python-dotenv
+          pip install pytest apscheduler matplotlib jinja2 python-dotenv requests
       - name: Create data dir
         run: mkdir -p data reports logs
       - name: Create placeholder config
-        run: cp config.example.yaml config.yaml
+        run: |
+          cp config.example.yaml config.yaml
+          mkdir -p data
       - name: Run tests
         run: python -m pytest tests/ -v
       - name: Test dry-run
