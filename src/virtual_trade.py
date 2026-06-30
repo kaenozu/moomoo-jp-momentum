@@ -658,3 +658,391 @@ class VirtualTradeManager:
             "initial_cash": self.initial_cash,
             "return_pct": (total_equity - self.initial_cash) / self.initial_cash * 100,
         }
+
+    def get_fills(
+        self,
+        strategy_name: str = "default",
+        limit: int = 100,
+    ) -> list[VirtualFill]:
+        """
+        約定一覧を取得する
+
+        Args:
+            strategy_name: 戦術名
+            limit: 取得件数
+
+        Returns:
+            list[VirtualFill]: 約定リスト
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM virtual_fills
+                WHERE strategy_name = ?
+                ORDER BY filled_at DESC
+                LIMIT ?
+                """,
+                (strategy_name, limit),
+            )
+            rows = cursor.fetchall()
+
+        return [
+            VirtualFill(
+                id=row["id"],
+                order_id=row["order_id"],
+                strategy_name=row["strategy_name"],
+                code=row["code"],
+                side=row["side"],
+                quantity=row["quantity"],
+                price=row["price"],
+                filled_at=row["filled_at"],
+                fill_mode=row["fill_mode"],
+            )
+            for row in rows
+        ]
+
+    def get_equity_curve(
+        self,
+        strategy_name: str = "default",
+        limit: int = 200,
+    ) -> list[dict]:
+        """
+        エクイティカーブを取得する
+
+        Args:
+            strategy_name: 戦術名
+            limit: 取得件数
+
+        Returns:
+            list[dict]: 時系列データ
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM virtual_equity_curve
+                WHERE strategy_name = ?
+                ORDER BY date DESC
+                LIMIT ?
+                """,
+                (strategy_name, limit),
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "date": row["date"],
+                "cash": row["cash"],
+                "position_value": row["position_value"],
+                "total_equity": row["total_equity"],
+                "daily_return": row["daily_return"],
+                "benchmark_code": row["benchmark_code"],
+                "benchmark_return": row["benchmark_return"],
+                "excess_return": row["excess_return"],
+            }
+            for row in rows
+        ]
+
+    def generate_exits(
+        self,
+        strategy_name: str = "default",
+        target_date: Optional[str] = None,
+        stop_loss_pct: float = -5.0,
+    ) -> list[VirtualOrder]:
+        """
+        保有ポジションの自動売却注文を生成する
+
+        条件:
+        - 買値から指定%下落
+        - 終値 < 25日移動平均
+        - 保有20営業日経過
+
+        Args:
+            strategy_name: 戦術名
+            target_date: 基準日
+            stop_loss_pct: ストップロス幅
+
+        Returns:
+            list[VirtualOrder]: 生成された売却注文
+        """
+        from datetime import datetime, timedelta
+
+        if target_date is None:
+            target_date = datetime.now().strftime("%Y-%m-%d")
+
+        positions = self.get_positions(strategy_name)
+        exit_orders = []
+
+        for pos in positions:
+            # 最新の終値を取得
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT close FROM daily_bars
+                    WHERE code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 1
+                    """,
+                    (pos.code, target_date),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    continue
+                current_price = row["close"]
+
+            # 条件1: 買値から -5% 下落
+            if current_price <= pos.avg_cost * (1 + stop_loss_pct / 100):
+                order = self.place_order(
+                    strategy_name=strategy_name,
+                    code=pos.code,
+                    side="SELL",
+                    quantity=pos.quantity,
+                    order_type="MARKET_SIM",
+                )
+                if order:
+                    exit_orders.append(order)
+                continue
+
+            # 条件2: 終値 < 25日移動平均
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT date, close FROM daily_bars
+                    WHERE code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 25
+                    """,
+                    (pos.code, target_date),
+                )
+                bars = cursor.fetchall()
+
+            if len(bars) >= 25:
+                ma25 = sum(b["close"] for b in bars) / 25
+                if current_price < ma25:
+                    order = self.place_order(
+                        strategy_name=strategy_name,
+                        code=pos.code,
+                        side="SELL",
+                        quantity=pos.quantity,
+                        order_type="MARKET_SIM",
+                    )
+                    if order:
+                        exit_orders.append(order)
+                    continue
+
+            # 条件3: 保有20営業日経過（注文のsubmitted_atから計算）
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT submitted_at FROM virtual_orders
+                    WHERE strategy_name = ? AND code = ? AND side = 'BUY'
+                    AND status = 'FILLED'
+                    ORDER BY submitted_at ASC LIMIT 1
+                    """,
+                    (strategy_name, pos.code),
+                )
+                order_row = cursor.fetchone()
+
+            if order_row:
+                try:
+                    buy_date = datetime.strptime(order_row["submitted_at"][:10], "%Y-%m-%d")
+                    target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                    holding_days = (target_dt - buy_date).days
+                    if holding_days >= 20:
+                        order = self.place_order(
+                            strategy_name=strategy_name,
+                            code=pos.code,
+                            side="SELL",
+                            quantity=pos.quantity,
+                            order_type="MARKET_SIM",
+                        )
+                        if order:
+                            exit_orders.append(order)
+                except ValueError:
+                    pass
+
+        return exit_orders
+
+    def save_equity_curve(
+        self,
+        strategy_name: str = "default",
+        target_date: Optional[str] = None,
+        benchmark_code: Optional[str] = None,
+    ) -> dict:
+        """
+        エクイティカーブを保存する（UPSERT）
+
+        Args:
+            strategy_name: 戦術名
+            target_date: 基準日
+            benchmark_code: 比較ベンチマークコード
+
+        Returns:
+            dict: 保存したデータ
+        """
+        from datetime import datetime
+
+        if target_date is None:
+            target_date = datetime.now().strftime("%Y-%m-%d")
+        if benchmark_code is None:
+            benchmark_code = self.default_benchmark
+
+        cash = self.get_cash(strategy_name)
+        positions = self.get_positions(strategy_name)
+        position_value = sum(
+            (p.market_price or p.avg_cost) * p.quantity for p in positions
+        )
+        total_equity = cash + position_value
+
+        # 前日との差分で日次リターン
+        prev_equity = total_equity
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT total_equity FROM virtual_equity_curve
+                WHERE strategy_name = ? AND date < ?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (strategy_name, target_date),
+            )
+            row = cursor.fetchone()
+            if row:
+                prev_equity = row["total_equity"]
+
+        daily_return = (total_equity - prev_equity) / prev_equity * 100 if prev_equity > 0 else 0
+
+        # ベンチマークリターン
+        benchmark_return = None
+        excess_return = None
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT daily_return FROM benchmark_prices
+                WHERE benchmark_code = ? AND date = ?
+                """,
+                (benchmark_code, target_date),
+            )
+            row = cursor.fetchone()
+            if row:
+                benchmark_return = row["daily_return"]
+                if benchmark_return is not None:
+                    excess_return = daily_return - benchmark_return
+
+        now = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO virtual_equity_curve
+                (strategy_name, date, cash, position_value, total_equity,
+                 daily_return, benchmark_code, benchmark_return, excess_return, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    strategy_name, target_date, cash, position_value,
+                    total_equity, daily_return, benchmark_code,
+                    benchmark_return, excess_return, now,
+                ),
+            )
+
+        return {
+            "date": target_date,
+            "cash": cash,
+            "position_value": position_value,
+            "total_equity": total_equity,
+            "daily_return": daily_return,
+            "benchmark_return": benchmark_return,
+            "excess_return": excess_return,
+        }
+
+    def generate_report(self, strategy_name: str = "default") -> dict:
+        """
+        仮想トレード検証レポートを生成する
+
+        Returns:
+            dict: レポートデータ
+        """
+        perf = self.get_strategy_performance(strategy_name)
+        equity = self.get_equity_curve(strategy_name, limit=500)
+        fills = self.get_fills(strategy_name)
+        pending = self.get_pending_orders(strategy_name)
+
+        # 勝敗
+        wins = [f for f in fills if f.side == "SELL"]
+        avg_win = sum(f.price - 0 for f in wins) / len(wins) if wins else 0
+
+        # 最大ドローダウン
+        max_dd = 0
+        peak = 0
+        for e in equity:
+            eq = e["total_equity"]
+            if eq > peak:
+                peak = eq
+            dd = (peak - eq) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
+
+        # cash推移
+        cash_history = [e["cash"] for e in equity]
+
+        return {
+            "period_return": perf["return_pct"],
+            "excess_return_vs_2559": None,
+            "excess_return_vs_1306": None,
+            "win_count": len(wins),
+            "total_trades": len(fills),
+            "avg_win": avg_win,
+            "max_drawdown": max_dd,
+            "position_count_history": len(perf.get("positions", [])),
+            "cash_history": cash_history,
+            "fill_count": len(fills),
+            "pending_count": len(pending),
+        }
+        return report
+
+    def update_market_prices(
+        self,
+        strategy_name: str = "default",
+        target_date: Optional[str] = None,
+    ) -> int:
+        """ポジションの現在値を更新する
+
+        Args:
+            strategy_name: 戦術名
+            target_date: 基準日
+
+        Returns:
+            int: 更新件数
+        """
+        from datetime import datetime
+
+        if target_date is None:
+            target_date = datetime.now().strftime("%Y-%m-%d")
+
+        positions = self.get_positions(strategy_name)
+        updated = 0
+
+        for pos in positions:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT close FROM daily_bars
+                    WHERE code = ? AND date <= ?
+                    ORDER BY date DESC LIMIT 1
+                    """,
+                    (pos.code, target_date),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    continue
+                market_price = row["close"]
+                market_value = market_price * pos.quantity
+                unrealized_pl = (market_price - pos.avg_cost) * pos.quantity
+
+                conn.execute(
+                    """
+                    UPDATE virtual_positions
+                    SET market_price = ?, market_value = ?, unrealized_pl = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (market_price, market_value, unrealized_pl, datetime.now().isoformat(), pos.id),
+                )
+                updated += 1
+
+        return updated

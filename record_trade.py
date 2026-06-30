@@ -5,18 +5,12 @@
 何をするか: CLIで手動売買を記録する
 なぜ存在するか: 売買記録を手動で入力するため
 関連ファイル: src/trade_log.py, src/config.py
-
-使い方:
-    python record_trade.py --code JP.4502 --side BUY --quantity 1 --price 4823 --reason "買い候補94点"
-    python record_trade.py --code JP.4502 --side SELL --quantity 1 --price 5000 --reason "利確"
-    python record_trade.py --list
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-# プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import load_config
@@ -52,56 +46,18 @@ def list_trades(trade_log: TradeLog) -> None:
 
 def main() -> int:
     """メイン関数"""
-    parser = argparse.ArgumentParser(
-        description="Moomoo 手動売買記録"
-    )
-    parser.add_argument(
-        "--code",
-        help="銘柄コード（例: JP.4502）",
-    )
-    parser.add_argument(
-        "--side",
-        choices=["BUY", "SELL"],
-        help="売買方向（BUY or SELL）",
-    )
-    parser.add_argument(
-        "--quantity",
-        type=int,
-        help="数量",
-    )
-    parser.add_argument(
-        "--price",
-        type=float,
-        help="価格",
-    )
-    parser.add_argument(
-        "--reason",
-        default="",
-        help="理由",
-    )
-    parser.add_argument(
-        "--exit-rule",
-        default="",
-        help="売りルール",
-    )
-    parser.add_argument(
-        "--memo",
-        default="",
-        help="メモ",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="売買記録を一覧表示",
-    )
-    parser.add_argument(
-        "--config",
-        default="config.yaml",
-        help="設定ファイルパス",
-    )
+    parser = argparse.ArgumentParser(description="Moomoo 手動売買記録")
+    parser.add_argument("--code", help="銘柄コード（例: JP.4502）")
+    parser.add_argument("--side", choices=["BUY", "SELL"], help="売買方向（BUY or SELL）")
+    parser.add_argument("--quantity", type=int, help="数量")
+    parser.add_argument("--price", type=float, help="価格")
+    parser.add_argument("--reason", default="", help="理由")
+    parser.add_argument("--exit-rule", default="", help="売りルール")
+    parser.add_argument("--memo", default="", help="メモ")
+    parser.add_argument("--list", action="store_true", help="売買記録を一覧表示")
+    parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
     args = parser.parse_args()
 
-    # 設定読み込み
     try:
         config = load_config(args.config)
     except FileNotFoundError as e:
@@ -110,19 +66,25 @@ def main() -> int:
 
     trade_log = TradeLog(config)
 
-    # 一覧表示
     if args.list:
         list_trades(trade_log)
         return 0
 
-    # 売買記録
     if not args.code or not args.side or args.quantity is None or args.price is None:
         print("[ERROR] 売買記録には --code, --side, --quantity, --price が必要です")
         parser.print_help()
         return 1
 
+    if args.quantity <= 0:
+        print("[ERROR] 数量は1以上を指定してください")
+        return 1
+
+    if args.price <= 0:
+        print("[ERROR] 価格は0より大きい値を指定してください")
+        return 1
+
     trade_id = trade_log.record_trade(
-        code=args.code,
+        code=args.code.strip(),
         side=args.side,
         quantity=args.quantity,
         price=args.price,

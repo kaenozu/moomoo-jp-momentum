@@ -13,6 +13,12 @@ pyyaml>=6.0
 # スケジューリング
 apscheduler>=3.10.0
 
+# Web UI
+streamlit>=1.30.0
+
+# 通知/Webhook
+requests>=2.31.0
+
 # 可視化（レポート出力用）
 matplotlib>=3.7.0
 

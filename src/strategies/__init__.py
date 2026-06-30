@@ -1,14 +1,14 @@
 """
 戦術基底クラス
 
-ファイルパス: src/strategies/base.py
+ファイルパス: src/strategies/__init__.py
 何をするか: 全戦術に共通するインターフェースを定義する
 なぜ存在するか: 複数戦術を統一的に扱うため
 関連ファイル: signals.py, scoring.py, config.py
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from ..indicators import StockIndicators
@@ -33,9 +33,6 @@ class StrategyResult:
     return_20d_vs_benchmark: Optional[float] = None
     return_60d_vs_benchmark: Optional[float] = None
     relative_strength_rank: Optional[int] = None
-
-
-from dataclasses import field
 
 
 class BaseStrategy(ABC):

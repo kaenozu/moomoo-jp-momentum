@@ -41,19 +41,9 @@ def test_connection(manager: PaperTradeManager) -> bool:
     print("[TEST 1] 接続確認")
     print("=" * 60)
 
-    # 口座一覧取得
-    accounts = manager.get_accounts()
-    if not accounts:
-        print("[FAIL] 口座が取得できませんでした")
-        print("  OpenDが起動しているか確認してください")
-        return False
-
-    print(f"[OK] 口座取得成功: {len(accounts)}件")
-    for acc in accounts:
-        print(f"  アカウントID: {acc.get('acc_id')}")
-        print(f"  環境: SIMULATE")
-
-    return True
+    print("[INFO] JP市場のペーパートレードは非対応です")
+    print("  moomoo JP / FUTUJP では、OpenAPI経由の日本株SIMULATE注文が利用できません")
+    return False
 
 
 def test_order_possibility(manager: PaperTradeManager) -> dict:
@@ -88,7 +78,7 @@ def test_order_possibility(manager: PaperTradeManager) -> dict:
     params = {
         "market": "JP",
         "trd_env": "SIMULATE",
-        "acc_id": accounts[0].get("acc_id") if accounts else "N/A",
+        "acc_id": "N/A（JP市場は非対応）",
         "code": "JP.7203",
         "quantity": 1,
         "price": test_price,

@@ -8,8 +8,9 @@
 """
 
 import logging
+import math
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -18,8 +19,8 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators
-from .scoring import ScoreBreakdown, Scorer
-from .signals import SignalDetector, SignalResult
+from .scoring import Scorer
+from .signals import SignalDetector
 
 logger = logging.getLogger(__name__)
 
@@ -46,32 +47,29 @@ class Candidate:
     updated_at: str = ""
 
 
+def _none_if_nan(value):
+    """pandasのNaNをNoneに変換する"""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    return value
+
+
 class Screener:
     """スクリーナークラス"""
 
     def __init__(self, config: Config):
-        """
-        Args:
-            config: 設定オブジェクト
-        """
         self.config = config
         self.db_path = Path(config.database_path)
 
-    def get_latest_indicators(
-        self,
-        date: Optional[str] = None,
-    ) -> pd.DataFrame:
-        """
-        最新の指標データを取得する
-
-        Args:
-            date: 基準日（YYYY-MM-DD）。Noneなら最新
-
-        Returns:
-            pd.DataFrame: 指標データ
-        """
+    def get_latest_indicators(self, date: Optional[str] = None) -> pd.DataFrame:
+        """最新の指標データを取得する"""
         if not self.db_path.exists():
-            logger.error(f"データベースが見つかりません: {self.db_path}")
+            logger.error("データベースが見つかりません: %s", self.db_path)
             return pd.DataFrame()
 
         with sqlite3.connect(self.db_path) as conn:
@@ -81,6 +79,8 @@ class Screener:
                     FROM indicators i
                     LEFT JOIN symbols s ON i.code = s.code
                     WHERE i.date = ?
+                      AND COALESCE(s.enabled, 1) = 1
+                      AND COALESCE(s.role, 'trade_candidate') != 'benchmark'
                     ORDER BY i.code
                 """
                 df = pd.read_sql_query(query, conn, params=[date])
@@ -90,103 +90,80 @@ class Screener:
                     FROM indicators i
                     LEFT JOIN symbols s ON i.code = s.code
                     WHERE i.date = (SELECT MAX(date) FROM indicators)
+                      AND COALESCE(s.enabled, 1) = 1
+                      AND COALESCE(s.role, 'trade_candidate') != 'benchmark'
                     ORDER BY i.code
                 """
                 df = pd.read_sql_query(query, conn)
 
         return df
 
-    def get_indicators_history(
-        self,
-        code: str,
-        days: int = 30,
-    ) -> pd.DataFrame:
-        """
-        銘柄の指標履歴を取得する
-
-        Args:
-            code: 銘柄コード
-            days: 取得日数
-
-        Returns:
-            pd.DataFrame: 指標履歴
-        """
+    def get_indicators_history(self, code: str, days: int = 30) -> pd.DataFrame:
+        """銘柄の指標履歴を取得する"""
         if not self.db_path.exists():
             return pd.DataFrame()
 
         with sqlite3.connect(self.db_path) as conn:
-            query = """
+            df = pd.read_sql_query(
+                """
                 SELECT *
                 FROM indicators
                 WHERE code = ?
                 ORDER BY date DESC
                 LIMIT ?
-            """
-            df = pd.read_sql_query(query, conn, params=[code, days])
+                """,
+                conn,
+                params=[code, days],
+            )
 
         return df
 
-    def screen_candidates(
-        self,
-        date: Optional[str] = None,
-    ) -> list[Candidate]:
-        """
-        候補をスクリーニングする
+    def _row_to_indicators(self, row: pd.Series) -> StockIndicators:
+        """indicators行をStockIndicatorsへ変換する"""
+        return StockIndicators(
+            code=_none_if_nan(row.get("code")) or "",
+            name=_none_if_nan(row.get("name")),
+            date=_none_if_nan(row.get("date")) or "",
+            close=_none_if_nan(row.get("close")),
+            open=0.0,
+            high=0.0,
+            low=0.0,
+            ma5=_none_if_nan(row.get("ma5")),
+            ma25=_none_if_nan(row.get("ma25")),
+            volume=int(_none_if_nan(row.get("volume")) or 0),
+            volume_ma20=_none_if_nan(row.get("volume_ma20")),
+            volume_ratio=_none_if_nan(row.get("volume_ratio")),
+            turnover=_none_if_nan(row.get("turnover")) or 0,
+            high_20d=_none_if_nan(row.get("high_20d")),
+            high_20d_distance=_none_if_nan(row.get("distance_from_high_20d")),
+            daily_return=_none_if_nan(row.get("daily_return")),
+            return_5d=_none_if_nan(row.get("return_5d")),
+            history_days=int(_none_if_nan(row.get("history_days")) or 0),
+        )
 
-        Args:
-            date: 基準日（YYYY-MM-DD）。Noneなら最新
-
-        Returns:
-            list[Candidate]: 候補リスト（スコア降順）
-        """
-        # 指標データ取得
+    def screen_candidates(self, date: Optional[str] = None) -> list[Candidate]:
+        """候補をスクリーニングする"""
         indicators_df = self.get_latest_indicators(date)
 
         if indicators_df.empty:
             logger.warning("指標データがありません")
             return []
 
-        logger.info(f"指標データ: {len(indicators_df)}銘柄")
+        logger.info("指標データ: %s銘柄", len(indicators_df))
 
-        # シグナル検出器とスコアラー
         signal_detector = SignalDetector(self.config)
         scorer = Scorer(self.config)
 
         candidates = []
 
         for _, row in indicators_df.iterrows():
-            # StockIndicatorsに変換
-            indicators = StockIndicators(
-                code=row.get("code", ""),
-                name=row.get("name"),
-                date=row.get("date", ""),
-                close=row.get("close"),
-                open=0.0,  # 日足のopenはここでは不要
-                high=0.0,
-                low=0.0,
-                ma5=row.get("ma5"),
-                ma25=row.get("ma25"),
-                volume=0,
-                volume_ma20=row.get("volume_ma20"),
-                volume_ratio=row.get("volume_ratio"),
-                turnover=row.get("turnover", 0),
-                high_20d=row.get("high_20d"),
-                high_20d_distance=row.get("distance_from_high_20d"),
-                daily_return=row.get("daily_return"),
-                return_5d=row.get("return_5d"),
-            )
-
-            # シグナル判定
+            indicators = self._row_to_indicators(row)
             signal = signal_detector.detect_signal(indicators)
-
-            # スコアリング
             score_breakdown = scorer.score(indicators, signal)
 
-            # リスク警告を文字列に変換
             risk_warnings_str = "; ".join(signal.risk_warnings) if signal.risk_warnings else ""
 
-            # Candidateに変換
-            candidate = Candidate(
+            candidates.append(Candidate(
                 code=indicators.code,
                 name=indicators.name,
                 date=indicators.date,
@@ -203,63 +180,40 @@ class Screener:
                 signal_type=signal.signal_type,
                 reason=signal.reason,
                 risk_warnings=risk_warnings_str,
-                updated_at=row.get("updated_at", ""),
-            )
+                updated_at=_none_if_nan(row.get("updated_at")) or "",
+            ))
 
-            candidates.append(candidate)
-
-        # スコア降順にソート
         candidates.sort(key=lambda x: x.score, reverse=True)
 
         logger.info(
-            f"スクリーニング完了: {len(candidates)}銘柄 "
-            f"(候補: {sum(1 for c in candidates if c.signal_type == 'BUY_CANDIDATE')}, "
-            f"監視: {sum(1 for c in candidates if c.signal_type == 'WATCH')}, "
-            f"除外: {sum(1 for c in candidates if c.signal_type == 'EXCLUDE')})"
+            "スクリーニング完了: %s銘柄 (候補: %s, 監視: %s, 除外: %s)",
+            len(candidates),
+            sum(1 for c in candidates if c.signal_type == "BUY_CANDIDATE"),
+            sum(1 for c in candidates if c.signal_type == "WATCH"),
+            sum(1 for c in candidates if c.signal_type == "EXCLUDE"),
         )
 
         return candidates
 
-    def save_signals_to_db(
-        self,
-        candidates: list[Candidate],
-    ) -> int:
-        """
-        シグナルをSQLiteに保存する
+    def save_signals_to_db(self, candidates: list[Candidate]) -> int:
+        """シグナルをSQLiteに保存する"""
+        if not candidates:
+            return 0
 
-        Args:
-            candidates: 候補リスト
-
-        Returns:
-            int: 保存件数
+        now = datetime.now().isoformat()
+        sql = """
+            INSERT OR REPLACE INTO signals
+            (code, date, signal_type, score, reason, risk_warnings,
+             price_at_signal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        count = 0
+        params = [
+            (c.code, c.date, c.signal_type, c.score, c.reason,
+             c.risk_warnings, c.close, now)
+            for c in candidates
+        ]
 
         with sqlite3.connect(self.db_path) as conn:
-            for candidate in candidates:
-                try:
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO signals
-                        (code, date, signal_type, score, reason, risk_warnings,
-                         price_at_signal, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            candidate.code,
-                            candidate.date,
-                            candidate.signal_type,
-                            candidate.score,
-                            candidate.reason,
-                            candidate.risk_warnings,
-                            candidate.close,
-                            datetime.now().isoformat(),
-                        ),
-                    )
-                    count += 1
-                except sqlite3.Error as e:
-                    logger.error(
-                        f"シグナル保存エラー: {candidate.code} - {e}"
-                    )
+            conn.executemany(sql, params)
 
-        return count
+        return len(candidates)

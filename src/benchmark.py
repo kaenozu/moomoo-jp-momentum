@@ -88,9 +88,6 @@ class BenchmarkManager:
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
 
-                # 前日比を計算
-                daily_return = None
-
                 try:
                     conn.execute(
                         """

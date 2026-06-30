@@ -12,10 +12,7 @@ import socket
 from dataclasses import dataclass
 from typing import Optional
 
-from futu import (
-    OpenQuoteContext,
-    RET_OK,
-)
+from futu import OpenQuoteContext, RET_OK
 
 from .config import Config
 
@@ -44,31 +41,25 @@ class OpenDConnection:
     """OpenDへの接続を管理するクラス"""
 
     def __init__(self, config: Config):
-        """
-        Args:
-            config: 設定オブジェクト
-        """
         self.host = config.opend_host
         self.port = config.opend_port
         self.timeout = config.opend_timeout
         self._quote_context: Optional[OpenQuoteContext] = None
+        self._status: Optional[ConnectionStatus] = None
 
     def connect(self) -> ConnectionStatus:
-        """
-        OpenDへの接続を試行する
-
-        Returns:
-            ConnectionStatus: 接続結果（エラーメッセージと対処法を含む）
-        """
-        logger.info(
-            f"OpenDへの接続を試行します: {self.host}:{self.port}"
-        )
-
-        # ステップ1: ポートが開いているか確認
-        if not _check_port_open(self.host, self.port, timeout=3.0):
-            msg = (
-                f"OpenDのポート {self.port} に接続できません"
+        """OpenDへの接続を試行する"""
+        if self._quote_context is not None:
+            return ConnectionStatus(
+                connected=True,
+                message="接続済み",
+                quote_context=self._quote_context,
             )
+
+        logger.info("OpenDへの接続を試行します: %s:%s", self.host, self.port)
+
+        if not _check_port_open(self.host, self.port, timeout=self.timeout):
+            msg = f"OpenDのポート {self.port} に接続できません"
             hint = (
                 "対処法:\n"
                 "  1. moomoo OpenDが起動しているか確認してください\n"
@@ -76,46 +67,29 @@ class OpenDConnection:
                 "  3. ファイアウォールでポートがブロックされていないか確認してください"
             )
             logger.error(msg)
-            return ConnectionStatus(
-                connected=False,
-                message=msg,
-                hint=hint,
-            )
+            self._status = ConnectionStatus(False, msg, hint)
+            return self._status
 
-        # ステップ2: OpenQuoteContextの作成
         try:
-            self._quote_context = OpenQuoteContext(
-                host=self.host,
-                port=self.port,
-            )
+            self._quote_context = OpenQuoteContext(host=self.host, port=self.port)
         except Exception as e:
             msg = f"OpenQuoteContextの作成に失敗しました: {e}"
-            hint = (
-                "対処法:\n"
-                "  1. OpenDを再起動してください\n"
-                "  2. OpenDのバージョンを確認してください"
-            )
+            hint = "対処法:\n  1. OpenDを再起動してください\n  2. OpenDのバージョンを確認してください"
             logger.error(msg)
-            return ConnectionStatus(
-                connected=False,
-                message=msg,
-                hint=hint,
-            )
+            self._status = ConnectionStatus(False, msg, hint)
+            return self._status
 
-        # ステップ3: 接続テスト（スナップショット取得）
-        ret, data = self._quote_context.get_market_snapshot(
-            ["JP.7203"]  # トヨタ自動車でテスト
-        )
+        ret, data = self._quote_context.get_market_snapshot(["JP.7203"])
 
         if ret == RET_OK:
             logger.info("OpenDへの接続に成功しました")
-            return ConnectionStatus(
+            self._status = ConnectionStatus(
                 connected=True,
                 message="接続成功",
                 quote_context=self._quote_context,
             )
+            return self._status
 
-        # 接続失敗時のエラーメッセージ分析
         error_str = str(data).lower()
         msg = f"接続テスト失敗: {data}"
 
@@ -130,7 +104,7 @@ class OpenDConnection:
                 "対処法:\n"
                 "  1. 行情カード（LV2）を購入しているか確認してください\n"
                 "  2. moomoo証券で日本株の相場権限が有効になっているか確認してください\n"
-                "  3. [相場ストア](https://qtcard.moomoo.com/index/cards-mall)で確認してください"
+                "  3. 相場ストアで確認してください"
             )
         elif "subscribe" in error_str:
             hint = (
@@ -147,11 +121,9 @@ class OpenDConnection:
             )
 
         logger.error(msg)
-        return ConnectionStatus(
-            connected=False,
-            message=msg,
-            hint=hint,
-        )
+        self.disconnect()
+        self._status = ConnectionStatus(False, msg, hint)
+        return self._status
 
     def disconnect(self) -> None:
         """接続を閉じる"""
@@ -161,17 +133,11 @@ class OpenDConnection:
             logger.info("接続を閉じました")
 
     def get_quote_context(self) -> Optional[OpenQuoteContext]:
-        """
-        行情用のコンテキストを取得する
-
-        Returns:
-            OpenQuoteContext: 行情コンテキスト。未接続の場合はNone
-        """
+        """行情用のコンテキストを取得する"""
         return self._quote_context
 
     def __enter__(self):
-        """コンテキストマネージャー対応"""
-        self.connect()
+        """コンテキストマネージャー対応。接続は呼び出し側で明示的に行う。"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -181,14 +147,10 @@ class OpenDConnection:
 
 
 def test_connection(config: Config) -> ConnectionStatus:
-    """
-    接続テストを実行する便利関数
-
-    Args:
-        config: 設定オブジェクト
-
-    Returns:
-        ConnectionStatus: 接続結果
-    """
-    with OpenDConnection(config) as conn:
-        return conn.connect()
+    """接続テストを実行する便利関数（コンテキストは返さない）"""
+    conn = OpenDConnection(config)
+    status = conn.connect()
+    conn.disconnect()
+    # 閉じられたコンテキストは返さない
+    status.quote_context = None
+    return status

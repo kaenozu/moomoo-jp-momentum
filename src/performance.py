@@ -3,21 +3,8 @@
 
 ファイルパス: src/performance.py
 何をするか: 手動売買とベンチマークの比較を計算する
-なぜ存在するか: 戦術の有術の有効性を検証するため
+なぜ存在するか: 戦術の有効性を検証するため
 関連ファイル: trade_log.py, benchmark.py, config.py
-
-計算する指標:
-- 実現損益
-- 未実現損益
-- 銘柄別損益
-- 保有中一覧
-- 勝率
-- 平均利益
-- 平均損失
-- 最大損失
-- 累計リターン
-- ベンチマーク同日購入比較
-- 超過リターン
 """
 
 import logging
@@ -26,8 +13,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-import pandas as pd
 
 from .config import Config
 
@@ -82,14 +67,9 @@ class PerformanceEvaluator:
     """パフォーマンス評価クラス"""
 
     def __init__(self, config: Config):
-        """
-        Args:
-            config: 設定オブジェクト
-        """
         self.config = config
         self.db_path = Path(config.database_path)
 
-        # ベンチマークコード
         benchmark_config = config.get("benchmark", {})
         primary = benchmark_config.get("primary", {})
         self.primary_benchmark = primary.get("code", "JP.2559")
@@ -100,76 +80,123 @@ class PerformanceEvaluator:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def get_positions(self) -> list[Position]:
-        """
-        現在の保有ポジションを計算する
+    def _get_symbol_names(self) -> dict[str, str]:
+        """銘柄名をまとめて取得する"""
+        if not self.db_path.exists():
+            return {}
 
-        Returns:
-            list[Position]: 保有ポジションのリスト
-        """
         with self._get_connection() as conn:
-            # 売買記録を取得
-            cursor = conn.execute(
-                "SELECT * FROM trades_manual ORDER BY executed_at"
-            )
-            trades = cursor.fetchall()
+            rows = conn.execute("SELECT code, name FROM symbols").fetchall()
 
-        # ポジションを計算
-        positions_dict: dict[str, dict] = {}
+        return {row["code"]: row["name"] for row in rows}
+
+    def _get_trades(self) -> list[sqlite3.Row]:
+        """手動売買記録を取得する"""
+        if not self.db_path.exists():
+            return []
+
+        with self._get_connection() as conn:
+            return conn.execute("SELECT * FROM trades_manual ORDER BY executed_at, id").fetchall()
+
+    @staticmethod
+    def _holding_days(entry_at: str, exit_at: str) -> Optional[int]:
+        try:
+            buy_date = datetime.strptime(entry_at[:10], "%Y-%m-%d")
+            sell_date = datetime.strptime(exit_at[:10], "%Y-%m-%d")
+            return (sell_date - buy_date).days
+        except ValueError:
+            return None
+
+    def _build_fifo_state(self) -> tuple[dict[str, list[dict]], list[TradePerformance]]:
+        """
+        FIFOで保有ロットと実現損益履歴を構築する。
+
+        SELL数量がBUY残数量を超える場合、超過分は警告して無視する。
+        """
+        trades = self._get_trades()
+        symbol_names = self._get_symbol_names()
+
+        lots_by_code: dict[str, list[dict]] = {}
+        performances: list[TradePerformance] = []
 
         for trade in trades:
             code = trade["code"]
-            side = trade["side"]
-            quantity = trade["quantity"]
-            price = trade["price"]
+            side = str(trade["side"]).upper()
+            quantity = int(trade["quantity"])
+            price = float(trade["price"])
+            executed_at = trade["executed_at"]
 
-            if code not in positions_dict:
-                # 銘柄名を取得
-                cursor = conn.execute(
-                    "SELECT name FROM symbols WHERE code = ?",
-                    (code,),
-                )
-                row = cursor.fetchone()
-                name = row["name"] if row else None
-
-                positions_dict[code] = {
-                    "code": code,
-                    "name": name,
-                    "quantity": 0,
-                    "total_cost": 0,
-                }
-
-            pos = positions_dict[code]
+            lots = lots_by_code.setdefault(code, [])
 
             if side == "BUY":
-                pos["quantity"] += quantity
-                pos["total_cost"] += price * quantity
-            elif side == "SELL":
-                pos["quantity"] -= quantity
-                pos["total_cost"] -= price * quantity
-
-        # 現在価格を取得
-        positions = []
-        for code, pos in positions_dict.items():
-            if pos["quantity"] <= 0:
+                lots.append({
+                    "quantity": quantity,
+                    "price": price,
+                    "executed_at": executed_at,
+                })
                 continue
 
-            avg_price = pos["total_cost"] / pos["quantity"]
+            if side != "SELL":
+                logger.warning("未知の売買方向を無視します: %s", side)
+                continue
 
-            # 現在価格を取得（最新の終値）
+            remaining_sell = quantity
+            while remaining_sell > 0 and lots:
+                lot = lots[0]
+                matched_qty = min(remaining_sell, int(lot["quantity"]))
+
+                entry_price = float(lot["price"])
+                pnl = (price - entry_price) * matched_qty
+                return_pct = (price - entry_price) / entry_price * 100 if entry_price > 0 else None
+
+                performances.append(TradePerformance(
+                    code=code,
+                    name=symbol_names.get(code),
+                    side="SELL",
+                    quantity=matched_qty,
+                    entry_price=entry_price,
+                    exit_price=price,
+                    pnl=pnl,
+                    return_pct=return_pct,
+                    holding_days=self._holding_days(str(lot["executed_at"]), str(executed_at)),
+                ))
+
+                lot["quantity"] = int(lot["quantity"]) - matched_qty
+                remaining_sell -= matched_qty
+
+                if lot["quantity"] <= 0:
+                    lots.pop(0)
+
+            if remaining_sell > 0:
+                logger.warning("SELL数量がBUY残数量を超えています: %s 超過%s株", code, remaining_sell)
+
+        return lots_by_code, performances
+
+    def get_positions(self) -> list[Position]:
+        """現在の保有ポジションを計算する"""
+        lots_by_code, _ = self._build_fifo_state()
+        symbol_names = self._get_symbol_names()
+
+        positions = []
+        for code, lots in lots_by_code.items():
+            quantity = sum(int(lot["quantity"]) for lot in lots)
+            if quantity <= 0:
+                continue
+
+            total_cost = sum(int(lot["quantity"]) * float(lot["price"]) for lot in lots)
+            avg_price = total_cost / quantity
+
             current_price = self._get_latest_price(code)
-
-            # 評価損益
             unrealized_pnl = None
             unrealized_return = None
-            if current_price:
-                unrealized_pnl = (current_price - avg_price) * pos["quantity"]
+            if current_price is not None and avg_price > 0:
+                unrealized_pnl = (current_price - avg_price) * quantity
                 unrealized_return = (current_price - avg_price) / avg_price * 100
 
             positions.append(Position(
                 code=code,
-                name=pos["name"],
-                quantity=pos["quantity"],
+                name=symbol_names.get(code),
+                quantity=quantity,
                 avg_price=avg_price,
                 current_price=current_price,
                 unrealized_pnl=unrealized_pnl,
@@ -180,87 +207,24 @@ class PerformanceEvaluator:
 
     def _get_latest_price(self, code: str) -> Optional[float]:
         """最新の終値を取得する"""
+        if not self.db_path.exists():
+            return None
+
         with self._get_connection() as conn:
-            cursor = conn.execute(
+            row = conn.execute(
                 """
                 SELECT close FROM daily_bars
                 WHERE code = ?
                 ORDER BY date DESC LIMIT 1
                 """,
                 (code,),
-            )
-            row = cursor.fetchone()
-            return row["close"] if row else None
+            ).fetchone()
+
+        return row["close"] if row else None
 
     def get_trade_history(self) -> list[TradePerformance]:
-        """
-        売買履歴のパフォーマンスを計算する
-
-        Returns:
-            list[TradePerformance]: 売買パフォーマンスのリスト
-        """
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM trades_manual ORDER BY executed_at"
-            )
-            trades = cursor.fetchall()
-
-        # 銘柄ごとにグループ化
-        trades_by_code: dict[str, list] = {}
-        for trade in trades:
-            code = trade["code"]
-            if code not in trades_by_code:
-                trades_by_code[code] = []
-            trades_by_code[code].append(trade)
-
-        # 売買パフォーマンスを計算
-        performances = []
-
-        for code, code_trades in trades_by_code.items():
-            # 銘柄名を取得
-            cursor = conn.execute(
-                "SELECT name FROM symbols WHERE code = ?",
-                (code,),
-            )
-            row = cursor.fetchone()
-            name = row["name"] if row else None
-
-            # 買いと売りをマッチング
-            buy_queue = []
-            for trade in code_trades:
-                if trade["side"] == "BUY":
-                    buy_queue.append({
-                        "quantity": trade["quantity"],
-                        "price": trade["price"],
-                        "date": trade["executed_at"],
-                    })
-                elif trade["side"] == "SELL" and buy_queue:
-                    buy = buy_queue.pop(0)
-                    pnl = (trade["price"] - buy["price"]) * min(
-                        trade["quantity"], buy["quantity"]
-                    )
-                    return_pct = (trade["price"] - buy["price"]) / buy["price"] * 100
-
-                    # 保有日数
-                    try:
-                        buy_date = datetime.strptime(buy["date"][:10], "%Y-%m-%d")
-                        sell_date = datetime.strptime(trade["executed_at"][:10], "%Y-%m-%d")
-                        holding_days = (sell_date - buy_date).days
-                    except ValueError:
-                        holding_days = None
-
-                    performances.append(TradePerformance(
-                        code=code,
-                        name=name,
-                        side="SELL",
-                        quantity=trade["quantity"],
-                        entry_price=buy["price"],
-                        exit_price=trade["price"],
-                        pnl=pnl,
-                        return_pct=return_pct,
-                        holding_days=holding_days,
-                    ))
-
+        """売買履歴のパフォーマンスを計算する"""
+        _, performances = self._build_fifo_state()
         return performances
 
     def get_summary(
@@ -269,60 +233,31 @@ class PerformanceEvaluator:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> PortfolioSummary:
-        """
-        ポートフォリオサマリーを計算する
-
-        Args:
-            benchmark_code: 比較ベンチマークコード
-            start_date: 開始日
-            end_date: 終了日
-
-        Returns:
-            PortfolioSummary: サマリー
-        """
+        """ポートフォリオサマリーを計算する"""
         if benchmark_code is None:
             benchmark_code = self.primary_benchmark
 
-        # 保有ポジション
         positions = self.get_positions()
-
-        # 売買履歴
         history = self.get_trade_history()
 
-        # 投資総額
-        total_invested = sum(
-            p.avg_price * p.quantity for p in positions
+        total_invested = sum(p.avg_price * p.quantity for p in positions)
+        current_value = sum(
+            (p.current_price if p.current_price is not None else p.avg_price) * p.quantity
+            for p in positions
         )
 
-        # 評価損益
-        unrealized_pnl = sum(
-            p.unrealized_pnl for p in positions if p.unrealized_pnl
-        )
+        unrealized_pnl = sum(p.unrealized_pnl for p in positions if p.unrealized_pnl is not None)
+        realized_pnl = sum(h.pnl for h in history if h.pnl is not None)
 
-        # 実現損益
-        realized_pnl = sum(h.pnl for h in history if h.pnl)
+        wins = [h for h in history if h.pnl is not None and h.pnl > 0]
+        losses = [h for h in history if h.pnl is not None and h.pnl < 0]
 
-        # 勝敗
-        wins = [h for h in history if h.pnl and h.pnl > 0]
-        losses = [h for h in history if h.pnl and h.pnl < 0]
+        total_trades = len(wins) + len(losses)
+        win_rate = len(wins) / total_trades * 100 if total_trades > 0 else None
+        avg_win = sum(h.pnl for h in wins) / len(wins) if wins else None
+        avg_loss = sum(h.pnl for h in losses) / len(losses) if losses else None
+        max_loss = min((h.pnl for h in losses), default=None)
 
-        win_rate = None
-        avg_win = None
-        avg_loss = None
-        max_loss = None
-
-        if wins or losses:
-            total_trades = len(wins) + len(losses)
-            win_rate = len(wins) / total_trades * 100 if total_trades > 0 else 0
-
-        if wins:
-            avg_win = sum(h.pnl for h in wins) / len(wins)
-
-        if losses:
-            avg_loss = sum(h.pnl for h in losses) / len(losses)
-            max_loss = min(h.pnl for h in losses)
-
-        # ベンチマーク比較
         benchmark_return = None
         excess_return = None
 
@@ -333,14 +268,13 @@ class PerformanceEvaluator:
                 benchmark_code, start_date, end_date
             )
 
-            if benchmark_return is not None and avg_win:
-                # 簡易的な超過リターン
-                portfolio_return = (realized_pnl + unrealized_pnl) / total_invested * 100 if total_invested > 0 else 0
+            if benchmark_return is not None and total_invested > 0:
+                portfolio_return = (realized_pnl + unrealized_pnl) / total_invested * 100
                 excess_return = portfolio_return - benchmark_return
 
         return PortfolioSummary(
             total_invested=total_invested,
-            current_value=total_invested + unrealized_pnl,
+            current_value=current_value,
             realized_pnl=realized_pnl,
             unrealized_pnl=unrealized_pnl,
             total_pnl=realized_pnl + unrealized_pnl,
@@ -363,26 +297,12 @@ class PerformanceEvaluator:
         horizon_days: int,
         benchmark_code: Optional[str] = None,
     ) -> Optional[dict]:
-        """
-        シグナルの事後検証を行う
-
-        Args:
-            signal_id: シグナルID
-            code: 銘柄コード
-            signal_date: シグナル発生日
-            signal_price: シグナル価格
-            horizon_days: 検証期間（営業日）
-            benchmark_code: ベンチマークコード
-
-        Returns:
-            dict: 検証結果
-        """
+        """シグナルの事後検証を行う"""
         if benchmark_code is None:
             benchmark_code = self.primary_benchmark
 
         with self._get_connection() as conn:
-            # シグナル後の価格を取得
-            cursor = conn.execute(
+            future_bars = conn.execute(
                 """
                 SELECT date, close FROM daily_bars
                 WHERE code = ? AND date > ?
@@ -390,32 +310,27 @@ class PerformanceEvaluator:
                 LIMIT ?
                 """,
                 (code, signal_date, horizon_days),
-            )
-            future_bars = cursor.fetchall()
+            ).fetchall()
 
         if not future_bars:
             return None
 
-        # 将来の価格
         future_price = future_bars[-1]["close"]
         future_date = future_bars[-1]["date"]
 
-        # ストックリターン
+        if not signal_price:
+            return None
+
         stock_return = (future_price - signal_price) / signal_price * 100
 
-        # ベンチマークリターン
         from .benchmark import BenchmarkManager
         benchmark_mgr = BenchmarkManager(self.config)
         benchmark_return = benchmark_mgr.get_benchmark_return(
             benchmark_code, signal_date, future_date
         )
 
-        # 超過リターン
-        excess_return = None
-        if benchmark_return is not None:
-            excess_return = stock_return - benchmark_return
+        excess_return = stock_return - benchmark_return if benchmark_return is not None else None
 
-        # 最大下落率・最大上昇率
         prices = [bar["close"] for bar in future_bars]
         max_drawdown = None
         max_runup = None
@@ -443,25 +358,16 @@ class PerformanceEvaluator:
 
     def backtest_all_signals(
         self,
-        horizons: list[int] = None,
+        horizons: list[int] | None = None,
     ) -> list[dict]:
-        """
-        全シグナルの事後検証を行う
-
-        Args:
-            horizons: 検証期間のリスト（デフォルト: [5, 20, 60]）
-
-        Returns:
-            list[dict]: 検証結果のリスト
-        """
+        """全シグナルの事後検証を行う"""
         if horizons is None:
             horizons = [5, 20, 60]
 
         with self._get_connection() as conn:
-            cursor = conn.execute(
+            signals = conn.execute(
                 "SELECT id, code, date, price_at_signal FROM signals"
-            )
-            signals = cursor.fetchall()
+            ).fetchall()
 
         results = []
 
@@ -477,8 +383,6 @@ class PerformanceEvaluator:
 
                 if result:
                     results.append(result)
-
-                    # signal_backtestsテーブルに保存
                     self._save_backtest_result(result)
 
         return results
@@ -514,4 +418,4 @@ class PerformanceEvaluator:
                     ),
                 )
             except sqlite3.Error as e:
-                logger.error(f"検証結果保存エラー: {e}")
+                logger.error("検証結果保存エラー: %s", e)

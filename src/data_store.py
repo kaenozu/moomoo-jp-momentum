@@ -7,6 +7,7 @@ SQLiteデータ保存モジュール
 関連ファイル: models.py, config.py
 """
 
+import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -29,10 +30,6 @@ class DataStore:
     """SQLiteデータベース操作クラス"""
 
     def __init__(self, config: Config):
-        """
-        Args:
-            config: 設定オブジェクト
-        """
         self.db_path = Path(config.database_path)
         self._ensure_directory()
         self._init_db()
@@ -45,7 +42,7 @@ class DataStore:
         """データベースを初期化する（テーブル作成）"""
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(CREATE_TABLES_SQL)
-            logger.info(f"データベースを初期化しました: {self.db_path}")
+            logger.info("データベースを初期化しました: %s", self.db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""
@@ -57,56 +54,60 @@ class DataStore:
 
     def load_symbols_from_json(self, json_path: str) -> int:
         """
-        JSONファイルから銘柄リストを読み込んで保存する
+        JSONファイルから銘柄リストを読み込んで保存する。
 
-        Args:
-            json_path: 銘柄リストJSONファイルのパス
-
-        Returns:
-            int: 保存した銘柄数
+        symbols.json の type / role / tradable / benchmark_group / notes もDBに保存する。
+        role=benchmark はデフォルトでは通常スクリーニング対象から外すため enabled=0 にする。
         """
-        import json
-
         with open(json_path, encoding="utf-8") as f:
             symbols_data = json.load(f)
 
         count = 0
         with self._get_connection() as conn:
             for item in symbols_data:
+                code = item["code"]
+                role = item.get("role", "trade_candidate")
+                enabled_default = role != "benchmark"
+                enabled = item.get("enabled", enabled_default)
+
                 try:
                     conn.execute(
                         """
                         INSERT OR REPLACE INTO symbols
-                        (code, name, market, sector, enabled)
-                        VALUES (?, ?, ?, ?, ?)
+                        (code, name, market, type, role, tradable, sector,
+                         benchmark_group, notes, enabled, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                         """,
                         (
-                            item["code"],
+                            code,
                             item["name"],
                             item.get("market", "JP"),
+                            item.get("type", "stock"),
+                            role,
+                            1 if item.get("tradable", True) else 0,
                             item.get("sector"),
-                            1 if item.get("enabled", True) else 0,
+                            item.get("benchmark_group"),
+                            item.get("notes"),
+                            1 if enabled else 0,
                         ),
                     )
                     count += 1
                 except sqlite3.Error as e:
-                    logger.error(
-                        f"銘柄保存エラー: {item.get('code')} - {e}"
-                    )
+                    logger.error("銘柄保存エラー: %s - %s", code, e)
 
-        logger.info(f"銘柄リストを読み込みました: {count}件")
+        logger.info("銘柄リストを読み込みました: %s件", count)
         return count
 
     def get_enabled_symbols(self) -> list[Symbol]:
-        """
-        有効な銘柄リストを取得する
-
-        Returns:
-            list[Symbol]: 有効な銘柄のリスト
-        """
+        """有効な銘柄リストを取得する"""
         with self._get_connection() as conn:
             cursor = conn.execute(
-                "SELECT * FROM symbols WHERE enabled = 1 ORDER BY code"
+                """
+                SELECT * FROM symbols
+                WHERE enabled = 1
+                  AND COALESCE(role, 'trade_candidate') != 'benchmark'
+                ORDER BY code
+                """
             )
             rows = cursor.fetchall()
 
@@ -124,24 +125,13 @@ class DataStore:
         ]
 
     def get_symbol_codes(self) -> list[str]:
-        """
-        有効な銘柄コードのリストを取得する
-
-        Returns:
-            list[str]: 銘柄コードのリスト
-        """
-        symbols = self.get_enabled_symbols()
-        return [s.code for s in symbols]
+        """有効な銘柄コードのリストを取得する"""
+        return [s.code for s in self.get_enabled_symbols()]
 
     # === リアルタイム株価関連 ===
 
     def save_quote(self, quote: Quote) -> None:
-        """
-        リアルタイム株価を保存する
-
-        Args:
-            quote: 株価データ
-        """
+        """リアルタイム株価を保存する"""
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -162,53 +152,32 @@ class DataStore:
             )
 
     def save_quotes_batch(self, quotes: list[Quote]) -> int:
-        """
-        複数の株価データを一括保存する
+        """複数の株価データを一括保存する"""
+        if not quotes:
+            return 0
 
-        Args:
-            quotes: 株価データのリスト
-
-        Returns:
-            int: 保存した件数
+        sql = """
+            INSERT INTO quotes
+            (code, timestamp, price, open, high, low, volume, turnover)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        count = 0
+        params = [
+            (
+                q.code, q.timestamp, q.price, q.open,
+                q.high, q.low, q.volume, q.turnover,
+            )
+            for q in quotes
+        ]
+
         with self._get_connection() as conn:
-            for quote in quotes:
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO quotes
-                        (code, timestamp, price, open, high, low, volume, turnover)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            quote.code,
-                            quote.timestamp,
-                            quote.price,
-                            quote.open,
-                            quote.high,
-                            quote.low,
-                            quote.volume,
-                            quote.turnover,
-                        ),
-                    )
-                    count += 1
-                except sqlite3.Error as e:
-                    logger.error(
-                        f"株価保存エラー: {quote.code} - {e}"
-                    )
+            conn.executemany(sql, params)
 
-        return count
+        return len(quotes)
 
     # === 日足関連 ===
 
     def save_daily_bar(self, bar: DailyBar) -> None:
-        """
-        日足データを保存する（重複は上書き）
-
-        Args:
-            bar: 日足データ
-        """
+        """日足データを保存する（重複は上書き）"""
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -229,43 +198,24 @@ class DataStore:
             )
 
     def save_daily_bars_batch(self, bars: list[DailyBar]) -> int:
-        """
-        複数の日足データを一括保存する
+        """複数の日足データを一括保存する"""
+        if not bars:
+            return 0
 
-        Args:
-            bars: 日足データのリスト
-
-        Returns:
-            int: 保存した件数
+        sql = """
+            INSERT OR REPLACE INTO daily_bars
+            (code, date, open, high, low, close, volume, turnover)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        count = 0
+        params = [
+            (b.code, b.date, b.open, b.high, b.low, b.close, b.volume, b.turnover)
+            for b in bars
+        ]
+
         with self._get_connection() as conn:
-            for bar in bars:
-                try:
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO daily_bars
-                        (code, date, open, high, low, close, volume, turnover)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            bar.code,
-                            bar.date,
-                            bar.open,
-                            bar.high,
-                            bar.low,
-                            bar.close,
-                            bar.volume,
-                            bar.turnover,
-                        ),
-                    )
-                    count += 1
-                except sqlite3.Error as e:
-                    logger.error(
-                        f"日足保存エラー: {bar.code} {bar.date} - {e}"
-                    )
+            conn.executemany(sql, params)
 
-        return count
+        return len(bars)
 
     def get_daily_bars(
         self,
@@ -274,18 +224,7 @@ class DataStore:
         end_date: Optional[str] = None,
         limit: int = 100,
     ) -> pd.DataFrame:
-        """
-        日足データを取得する
-
-        Args:
-            code: 銘柄コード
-            start_date: 開始日（YYYY-MM-DD）
-            end_date: 終了日（YYYY-MM-DD）
-            limit: 取得上限
-
-        Returns:
-            pd.DataFrame: 日足データ
-        """
+        """日足データを取得する"""
         query = "SELECT * FROM daily_bars WHERE code = ?"
         params: list = [code]
 
@@ -310,22 +249,12 @@ class DataStore:
         df: pd.DataFrame,
         code: str,
     ) -> int:
-        """
-        DataFrameから日足データを保存する
-
-        Args:
-            df: futu-apiから取得したDataFrame
-            code: 銘柄コード
-
-        Returns:
-            int: 保存した件数
-        """
+        """DataFrameから日足データを保存する"""
         if df.empty:
             return 0
 
-        bars = []
-        for _, row in df.iterrows():
-            bar = DailyBar(
+        bars = [
+            DailyBar(
                 code=code,
                 date=str(row.get("time_key", ""))[:10],
                 open=row.get("open"),
@@ -335,7 +264,8 @@ class DataStore:
                 volume=row.get("volume"),
                 turnover=row.get("turnover"),
             )
-            bars.append(bar)
+            for _, row in df.iterrows()
+        ]
 
         return self.save_daily_bars_batch(bars)
 
@@ -347,20 +277,13 @@ class DataStore:
         date: str,
         price: float,
     ) -> None:
-        """
-        ベンチマーク価格を保存する
-
-        Args:
-            benchmark_code: ベンチマークコード
-            date: 日付
-            price: 価格
-        """
+        """ベンチマーク価格を保存する"""
         with self._get_connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO benchmark_prices
-                (benchmark_code, date, price)
-                VALUES (?, ?, ?)
+                (benchmark_code, date, close, updated_at)
+                VALUES (?, ?, ?, datetime('now', 'localtime'))
                 """,
                 (benchmark_code, date, price),
             )
@@ -371,17 +294,7 @@ class DataStore:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> pd.DataFrame:
-        """
-        ベンチマーク価格を取得する
-
-        Args:
-            benchmark_code: ベンチマークコード
-            start_date: 開始日
-            end_date: 終了日
-
-        Returns:
-            pd.DataFrame: ベンチマーク価格データ
-        """
+        """ベンチマーク価格を取得する"""
         query = "SELECT * FROM benchmark_prices WHERE benchmark_code = ?"
         params: list = [benchmark_code]
 

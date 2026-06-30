@@ -6,11 +6,6 @@
 なぜ存在するか: 日次更新・候補抽出・レポート生成を自動化するため
 関連ファイル: src/config.py
 
-使い方:
-    python scheduler.py              # 起動
-    python scheduler.py --dry-run    # テスト実行
-    python scheduler.py --list       # ジョブ一覧表示
-
 注意:
     - scheduler.enabled が false の場合は起動しない
     - 自動売買は行わない
@@ -19,12 +14,12 @@
 
 import argparse
 import logging
+import os
 import signal
+import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
-# プロジェクトルートをパスに追加
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import load_config
@@ -36,24 +31,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 二重起動防止
 _lock_file = Path("data/scheduler.lock")
 
 
 def acquire_lock() -> bool:
     """ロックを取得する"""
+    _lock_file.parent.mkdir(parents=True, exist_ok=True)
+
     if _lock_file.exists():
         try:
-            with open(_lock_file, "r") as f:
+            with open(_lock_file, "r", encoding="utf-8") as f:
                 pid = int(f.read().strip())
-            # プロセスが生きているか確認
-            import os
             os.kill(pid, 0)
-            return False  # 既に起動中
-        except (ValueError, ProcessLookupError, PermissionError):
+            return False
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
             pass
 
-    with open(_lock_file, "w") as f:
+    with open(_lock_file, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
     return True
 
@@ -64,11 +58,28 @@ def release_lock() -> None:
         _lock_file.unlink()
 
 
+def _run_script(args: list[str], timeout: int, name: str) -> None:
+    """サブプロセスでスクリプトを実行する"""
+    try:
+        result = subprocess.run(
+            [sys.executable, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode == 0:
+            logger.info("%s完了", name)
+        else:
+            logger.error("%s失敗: stdout=%s stderr=%s", name, result.stdout[-500:], result.stderr[-500:])
+    except Exception as e:
+        logger.error("%sエラー: %s", name, e)
+
+
 def job_connection_check() -> None:
     """接続確認ジョブ"""
     logger.info("接続確認ジョブを実行します")
     try:
-        from src.config import load_config
         from src.connection import OpenDConnection
 
         config = load_config("config.yaml")
@@ -77,116 +88,43 @@ def job_connection_check() -> None:
             if status.connected:
                 logger.info("接続確認成功")
             else:
-                logger.error(f"接続失敗: {status.message}")
+                logger.error("接続失敗: %s", status.message)
     except Exception as e:
-        logger.error(f"接続確認エラー: {e}")
+        logger.error("接続確認エラー: %s", e)
 
 
 def job_daily_update() -> None:
     """日次更新ジョブ"""
     logger.info("日次更新ジョブを実行します")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "daily_update.py", "--force"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode == 0:
-            logger.info("日次更新完了")
-        else:
-            logger.error(f"日次更新失敗: {result.stderr}")
-    except Exception as e:
-        logger.error(f"日次更新エラー: {e}")
+    _run_script(["daily_update.py", "--force"], timeout=600, name="日次更新")
 
 
 def job_screen_candidates() -> None:
     """候補抽出ジョブ"""
     logger.info("候補抽出ジョブを実行します")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "screen_candidates.py", "--csv", "--html", "--save"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode == 0:
-            logger.info("候補抽出完了")
-        else:
-            logger.error(f"候補抽出失敗: {result.stderr}")
-    except Exception as e:
-        logger.error(f"候補抽出エラー: {e}")
+    _run_script(["screen_candidates.py", "--csv", "--html", "--save"], timeout=300, name="候補抽出")
 
 
 def job_performance_report() -> None:
     """パフォーマンスレポートジョブ"""
     logger.info("パフォーマンスレポートジョブを実行します")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "performance_report.py", "--csv", "--html"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode == 0:
-            logger.info("パフォーマンスレポート完了")
-        else:
-            logger.error(f"パフォーマンスレポート失敗: {result.stderr}")
-    except Exception as e:
-        logger.error(f"パフォーマンスレポートエラー: {e}")
+    _run_script(["performance_report.py", "--csv", "--html"], timeout=300, name="パフォーマンスレポート")
 
 
 def job_send_alerts() -> None:
     """アラート送信ジョブ"""
     logger.info("アラート送信ジョブを実行します")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "send_alerts.py"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode == 0:
-            logger.info("アラート送信完了")
-        else:
-            logger.error(f"アラート送信失敗: {result.stderr}")
-    except Exception as e:
-        logger.error(f"アラート送信エラー: {e}")
+    _run_script(["send_alerts.py"], timeout=120, name="アラート送信")
 
 
 def job_weekly_report() -> None:
     """週次レポートジョブ"""
     logger.info("週次レポートジョブを実行します")
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "generate_reports.py", "--weekly"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode == 0:
-            logger.info("週次レポート完了")
-        else:
-            logger.error(f"週次レポート失敗: {result.stderr}")
-    except Exception as e:
-        logger.error(f"週次レポートエラー: {e}")
+    _run_script(["generate_reports.py", "--weekly"], timeout=600, name="週次レポート")
 
 
 def parse_cron(cron_str: str) -> dict:
-    """
-    cron式をパースする
-
-    Args:
-        cron_str: cron式（例: "45 8 * * 1-5"）
-
-    Returns:
-        dict: APSchedulerのパラメータ
-    """
+    """cron式をAPSchedulerのパラメータに変換する"""
     parts = cron_str.split()
     if len(parts) != 5:
         raise ValueError(f"無効なcron式: {cron_str}")
@@ -202,31 +140,16 @@ def parse_cron(cron_str: str) -> dict:
 
 def main() -> int:
     """メイン関数"""
-    parser = argparse.ArgumentParser(
-        description="Moomoo 定期実行スケジューラ"
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="テスト実行（ジョブを登録するが起動しない）",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="ジョブ一覧を表示",
-    )
-    parser.add_argument(
-        "--config",
-        default="config.yaml",
-        help="設定ファイルパス",
-    )
+    parser = argparse.ArgumentParser(description="Moomoo 定期実行スケジューラ")
+    parser.add_argument("--dry-run", action="store_true", help="テスト実行（ジョブを登録するが起動しない）")
+    parser.add_argument("--list", action="store_true", help="ジョブ一覧を表示")
+    parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
     args = parser.parse_args()
 
     print("=" * 60)
     print("Moomoo 定期実行スケジューラ")
     print("=" * 60)
 
-    # 設定読み込み
     try:
         config = load_config(args.config)
         print("[OK] 設定ファイル読み込み成功")
@@ -234,17 +157,16 @@ def main() -> int:
         print(f"[ERROR] {e}")
         return 1
 
-    # スケジューラ設定確認
     scheduler_config = config.get("scheduler", {})
     if not scheduler_config.get("enabled", False):
         print("[INFO] scheduler.enabled が false です")
         print("  設定ファイルで scheduler.enabled を true にしてください")
         return 0
 
-    # ジョブ一覧表示
+    jobs_config = scheduler_config.get("jobs", {})
+
     if args.list:
         print("\nジョブ一覧:")
-        jobs_config = scheduler_config.get("jobs", {})
         for job_name, job_config in jobs_config.items():
             enabled = job_config.get("enabled", True)
             cron = job_config.get("cron", "")
@@ -252,7 +174,6 @@ def main() -> int:
             print(f"  {job_name}: {status} ({cron})")
         return 0
 
-    # ジョブ登録
     try:
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.triggers.cron import CronTrigger
@@ -261,11 +182,9 @@ def main() -> int:
         print("  pip install apscheduler")
         return 1
 
-    scheduler = BlockingScheduler()
-    jobs_config = scheduler_config.get("jobs", {})
     timezone = scheduler_config.get("timezone", "Asia/Tokyo")
+    scheduler = BlockingScheduler(timezone=timezone)
 
-    # ジョブ定義
     job_funcs = {
         "connection_check": job_connection_check,
         "daily_update": job_daily_update,
@@ -284,23 +203,16 @@ def main() -> int:
             continue
 
         if job_name not in job_funcs:
-            logger.warning(f"不明なジョブ: {job_name}")
+            logger.warning("不明なジョブ: %s", job_name)
             continue
 
         try:
-            cron_params = parse_cron(cron_str)
-            trigger = CronTrigger(**cron_params, timezone=timezone)
-            scheduler.add_job(
-                job_funcs[job_name],
-                trigger,
-                id=job_name,
-                name=job_name,
-            )
-            logger.info(f"ジョブ登録: {job_name} ({cron_str})")
+            trigger = CronTrigger(**parse_cron(cron_str), timezone=timezone)
+            scheduler.add_job(job_funcs[job_name], trigger, id=job_name, name=job_name)
+            logger.info("ジョブ登録: %s (%s)", job_name, cron_str)
         except Exception as e:
-            logger.error(f"ジョブ登録エラー: {job_name} - {e}")
+            logger.error("ジョブ登録エラー: %s - %s", job_name, e)
 
-    # テスト実行
     if args.dry_run:
         print("\n[DRY-RUN] ジョブ一覧:")
         for job in scheduler.get_jobs():
@@ -308,13 +220,10 @@ def main() -> int:
         print("\n[DRY-RUN] 実行はしません")
         return 0
 
-    # ロック取得
-    import os
     if not acquire_lock():
         print("[ERROR] 既にスケジューラが起動しています")
         return 1
 
-    # 終了ハンドラ
     def shutdown(signum, frame):
         logger.info("スケジューラを停止します")
         scheduler.shutdown()
@@ -323,7 +232,6 @@ def main() -> int:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    # 起動
     print("\n[OK] スケジューラを起動します")
     print("  停止するには Ctrl+C を押してください")
 

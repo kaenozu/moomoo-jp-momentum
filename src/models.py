@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS intraday_bars (
     close REAL,
     volume INTEGER,
     turnover REAL,
-    FOREIGN KEY (code) REFERENCES symbols(code)
+    FOREIGN KEY (code) REFERENCES symbols(code),
+    UNIQUE(code, timestamp, ktype)
 );
 
 -- 指標計算結果

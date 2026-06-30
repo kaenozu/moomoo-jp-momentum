@@ -16,6 +16,7 @@
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -262,7 +263,3 @@ class RelativeStrengthCalculator:
                     logger.error(f"相対強度保存エラー: {code} - {e}")
 
         return count
-
-
-# datetimeインポートを追加
-from datetime import datetime
