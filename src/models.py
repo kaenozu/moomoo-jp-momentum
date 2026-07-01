@@ -286,6 +286,93 @@ CREATE INDEX IF NOT EXISTS idx_benchmark_prices_date ON benchmark_prices(date);
 CREATE INDEX IF NOT EXISTS idx_signal_backtests_code ON signal_backtests(code);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_virtual_fills_order ON virtual_fills(order_id);
+
+-- バックテスト管理
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_name TEXT,
+    strategy_name TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    initial_cash REAL NOT NULL DEFAULT 100000,
+    final_equity REAL,
+    total_return_pct REAL,
+    max_drawdown_pct REAL,
+    win_rate REAL,
+    profit_factor REAL,
+    trade_count INTEGER,
+    benchmark_2559_return REAL,
+    excess_vs_2559 REAL,
+    benchmark_1306_return REAL,
+    excess_vs_1306 REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS backtest_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    strategy_name TEXT NOT NULL,
+    code TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    order_type TEXT NOT NULL,
+    limit_price REAL,
+    status TEXT NOT NULL,
+    signal_date TEXT,
+    submitted_at TEXT,
+    filled_at TEXT,
+    fill_price REAL,
+    exit_reason TEXT,
+    FOREIGN KEY (run_id) REFERENCES backtest_runs(id)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_fills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL,
+    strategy_name TEXT NOT NULL,
+    code TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL,
+    filled_at TEXT NOT NULL,
+    fill_mode TEXT,
+    FOREIGN KEY (run_id) REFERENCES backtest_runs(id)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    strategy_name TEXT NOT NULL,
+    code TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    avg_cost REAL NOT NULL,
+    market_price REAL,
+    market_value REAL,
+    unrealized_pl REAL,
+    realized_pl REAL DEFAULT 0,
+    FOREIGN KEY (run_id) REFERENCES backtest_runs(id),
+    UNIQUE(run_id, strategy_name, code)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_equity_curve (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    strategy_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    cash REAL,
+    position_value REAL,
+    total_equity REAL,
+    benchmark_2559_value REAL,
+    benchmark_1306_value REAL,
+    drawdown_pct REAL,
+    UNIQUE(run_id, strategy_name, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_orders_run ON backtest_orders(run_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_fills_run ON backtest_fills(run_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_positions_run ON backtest_positions(run_id);
+CREATE INDEX IF NOT EXISTS idx_backtest_equity_run ON backtest_equity_curve(run_id);
 """
 
 
