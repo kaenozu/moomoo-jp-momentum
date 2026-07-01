@@ -134,7 +134,7 @@ class QuoteService:
         return all_data
 
     def get_cur_daily_klines(self, code: str, num: int = 30) -> pd.DataFrame:
-        """get_cur_klineで直近の日足を取得する"""
+        """get_cur_klineで直近の日足を取得する（取引時間中の当日不完全足は除外）"""
         logger.info("直近日足取得(get_cur_kline): %s (num=%s)", code, num)
 
         ret, data = self.ctx.subscribe(
@@ -154,6 +154,20 @@ class QuoteService:
         if ret != RET_OK:
             logger.error("直近日足取得失敗: %s - %s", code, data)
             return pd.DataFrame()
+
+        # 取引時間中（市場が開いている時間帯）の場合は、当日の不完全足を除外
+        if not data.empty:
+            from datetime import datetime, timezone
+            now_jst = datetime.now(timezone.utc).astimezone()
+            hour = now_jst.hour
+            # 日本時間 9:00〜15:29 は取引時間中
+            is_trading_hours = (9 <= hour < 15) or (hour == 15 and now_jst.minute < 30)
+            if is_trading_hours:
+                today = now_jst.strftime("%Y-%m-%d")
+                before = len(data)
+                data = data[data["time_key"].dt.strftime("%Y-%m-%d") != today]
+                if len(data) < before:
+                    logger.info("取引時間中のため当日足を除外: %s (%d→%d件)", code, before, len(data))
 
         logger.info("直近日足取得完了: %s - %s件", code, len(data))
         return data
