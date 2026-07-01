@@ -285,7 +285,7 @@ class BacktestRunner:
     def _benchmark_value(self, code: str, date: str) -> Optional[float]:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT close FROM daily_bars WHERE code=? AND date=?",
+                "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
                 (code, date),
             ).fetchone()
             return row[0] if row else None
