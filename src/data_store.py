@@ -62,6 +62,13 @@ class DataStore:
             "return_60d_vs_benchmark": "REAL",
             "relative_strength_rank": "INTEGER",
         })
+        add_missing("virtual_orders", {
+            "exit_reason": "TEXT",
+            "order_reason": "TEXT",
+        })
+        add_missing("signals", {
+            "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
+        })
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
