@@ -100,9 +100,9 @@ th{{background:#007bff;color:#fff}}
 <tr><td>最終資産</td><td>{report.final_total_equity:,.0f}円</td></tr>
 <tr><td>総リターン</td><td class="{'positive' if report.total_return_pct>=0 else 'negative'}">{report.total_return_pct:.2f}%</td></tr>
 <tr><td>実現損益</td><td class="{'positive' if report.realized_pl>=0 else 'negative'}">{report.realized_pl:,.0f}円</td></tr>
-<tr><td>勝率</td><td>{report.win_rate:.1f}%</td></tr>
-<tr><td>PF</td><td>{report.profit_factor:.2f}</td></tr>
-<tr><td>MDD</td><td class="negative">{report.max_drawdown_pct:.2f}%</td></tr>
+<tr><td>勝率</td><td>{f"{report.win_rate:.1f}%" if report.win_rate is not None else "N/A"}</td></tr>
+<tr><td>PF</td><td>{f"{report.profit_factor:.2f}" if report.profit_factor is not None else "N/A"}</td></tr>
+<tr><td>MDD</td><td class="negative">{f"{report.max_drawdown_pct:.2f}%" if report.max_drawdown_pct is not None else "N/A"}</td></tr>
 """]
     if report.excess_vs_2559 is not None:
         lines.append(f'<tr><td>2559超過リターン</td><td class="{"positive" if report.excess_vs_2559>=0 else "negative"}">{report.excess_vs_2559:+.2f}%</td></tr>')
