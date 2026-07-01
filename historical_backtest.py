@@ -71,6 +71,167 @@ def display_run_summary(conn, run_id: int):
             print(f"    exit_reason={r['exit_reason']}: {r['count']}件")
 
 
+def export_trade_diagnostics(config, run_id: int, label: str = ""):
+    """クローズドトレードのentry指標付き詳細CSVと集計"""
+    import sqlite3
+    from datetime import datetime as dt
+
+    output_dir = Path("reports")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(config.database_path))
+    date_str = dt.now().strftime("%Y%m%d")
+    suffix = f"_{label}" if label else ""
+
+    # BUY fillsとそれに対応するSELL fillsをペアリング
+    buys = conn.execute("""
+        SELECT f.id, f.order_id, f.code, f.side, f.quantity, f.price, f.filled_at, o.signal_date, o.exit_reason
+        FROM backtest_fills f JOIN backtest_orders o ON f.order_id = o.id
+        WHERE f.run_id = ? AND f.side = 'BUY' ORDER BY f.filled_at
+    """, (run_id,)).fetchall()
+
+    sells = conn.execute("""
+        SELECT f.id, f.order_id, f.code, f.side, f.quantity, f.price, f.filled_at, o.exit_reason
+        FROM backtest_fills f JOIN backtest_orders o ON f.order_id = o.id
+        WHERE f.run_id = ? AND f.side = 'SELL' ORDER BY f.filled_at
+    """, (run_id,)).fetchall()
+
+    trades = []
+    sell_idx = 0
+    for buy in buys:
+        if sell_idx >= len(sells):
+            break
+        sell = sells[sell_idx]
+        if buy[2] != sell[2]:
+            continue
+        sell_idx += 1
+
+        code = buy[2]
+        entry_date = buy[6][:10]
+        exit_date = sell[6][:10]
+        entry_price = buy[5]
+        exit_price = sell[5]
+        exit_reason = sell[7] or "unknown"  # SELL orderのexit_reason
+
+        try:
+            holding_days = (dt.strptime(exit_date, "%Y-%m-%d") - dt.strptime(entry_date, "%Y-%m-%d")).days
+        except ValueError:
+            holding_days = 0
+
+        return_pct = (exit_price - entry_price) / entry_price * 100
+
+        # entry時点の指標をdaily_barsから計算
+        entry_bars = conn.execute(
+            "SELECT close, volume FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 25",
+            (code, entry_date),
+        ).fetchall()
+
+        entry_close = entry_bars[0][0] if entry_bars else None
+        entry_volume = entry_bars[0][1] if entry_bars else None
+        close_20d = [r[0] for r in entry_bars[:20]] if len(entry_bars) >= 20 else []
+        vol_20d = [r[1] for r in entry_bars[:20]] if len(entry_bars) >= 20 else []
+        ma25 = sum(r[0] for r in entry_bars[:25]) / 25 if len(entry_bars) >= 25 else None
+
+        high_20d = max(close_20d) if close_20d else None
+        avg_vol_20d = sum(vol_20d) / len(vol_20d) if vol_20d else None
+        vol_ratio = entry_volume / avg_vol_20d if entry_volume and avg_vol_20d else None
+        high_20d_dist = (entry_close - high_20d) / high_20d * 100 if entry_close and high_20d else None
+        close_vs_ma25 = entry_close - ma25 if entry_close and ma25 else None
+
+        # 5日前/20日前のclose
+        close_5d_ago = entry_bars[4][0] if len(entry_bars) >= 5 else None
+        close_20d_ago = entry_bars[19][0] if len(entry_bars) >= 20 else None
+        ret_5d = (entry_close - close_5d_ago) / close_5d_ago * 100 if entry_close and close_5d_ago else None
+        ret_20d = (entry_close - close_20d_ago) / close_20d_ago * 100 if entry_close and close_20d_ago else None
+
+        # benchmark比較
+        bm_5d_ago = conn.execute(
+            "SELECT close FROM daily_bars WHERE code='JP.1306' AND date <= ? ORDER BY date DESC LIMIT 5",
+            (entry_date,),
+        ).fetchall()
+        bm_close_5d = bm_5d_ago[-1][0] if len(bm_5d_ago) >= 5 else None
+        bm_close_now = bm_5d_ago[0][0] if bm_5d_ago else None
+        ret_5d_bm = (bm_close_now - bm_close_5d) / bm_close_5d * 100 if bm_close_5d and bm_close_now else None
+        ret_vs_bm = (ret_5d or 0) - (ret_5d_bm or 0) if ret_5d is not None and ret_5d_bm is not None else None
+
+        # stop_lossまでの日数
+        days_to_sl = 0
+        if exit_reason == "stop_loss":
+            stop_price = entry_price * 0.95
+            for j, bar in enumerate(entry_bars):
+                if j == 0:
+                    continue
+                if bar[0] <= stop_price:
+                    days_to_sl = j
+                    break
+
+        trades.append({
+            "code": code,
+            "entry_date": entry_date,
+            "exit_date": exit_date,
+            "holding_days": holding_days,
+            "entry_price": round(entry_price, 1),
+            "exit_price": round(exit_price, 1),
+            "return_pct": round(return_pct, 2),
+            "exit_reason": exit_reason,
+            "entry_return_5d": round(ret_5d, 2) if ret_5d else None,
+            "entry_return_20d": round(ret_20d, 2) if ret_20d else None,
+            "entry_return_5d_vs_benchmark": round(ret_vs_bm, 2) if ret_vs_bm else None,
+            "entry_volume_ratio": round(vol_ratio, 2) if vol_ratio else None,
+            "entry_high_20d_distance": round(high_20d_dist, 2) if high_20d_dist else None,
+            "entry_close_vs_ma25": round(close_vs_ma25, 2) if close_vs_ma25 else None,
+            "days_to_stop_loss": days_to_sl,
+        })
+
+    if not trades:
+        conn.close()
+        return
+
+    # 診断CSV
+    import pandas as pd
+    df = pd.DataFrame(trades)
+    diag_file = output_dir / f"backtest_trade_diagnostics_{date_str}{suffix}.csv"
+    df.to_csv(diag_file, index=False, encoding="utf-8-sig")
+    print(f"[OK] {diag_file}")
+
+    # exit_reason別集計
+    print("\n  --- stop_loss分析 ---")
+    sl_trades = [t for t in trades if t["exit_reason"] == "stop_loss"]
+    mc_trades = [t for t in trades if t["exit_reason"] == "ma25_cross"]
+    if sl_trades:
+        avg_ret_vs_bm = sum(t["entry_return_5d_vs_benchmark"] or 0 for t in sl_trades) / len(sl_trades)
+        avg_vol = sum(t["entry_volume_ratio"] or 0 for t in sl_trades) / len(sl_trades) if sl_trades else 0
+        avg_days = sum(t["holding_days"] for t in sl_trades) / len(sl_trades)
+        early_sl = sum(1 for t in sl_trades if t["holding_days"] <= 3)
+        late_sl = sum(1 for t in sl_trades if t["holding_days"] >= 10)
+        print(f"    stop_loss: {len(sl_trades)}件")
+        print(f"      avg entry return_5d_vs_benchmark: {avg_ret_vs_bm:.2f}%")
+        print(f"      avg entry volume_ratio: {avg_vol:.2f}")
+        print(f"      avg holding_days: {avg_days:.1f}日")
+        print(f"      1-3日以内: {early_sl}件")
+        print(f"      10日以上保有後: {late_sl}件")
+
+    if mc_trades:
+        avg_days_mc = sum(t["holding_days"] for t in mc_trades) / len(mc_trades)
+        print(f"    ma25_cross: {len(mc_trades)}件")
+        print(f"      avg holding_days: {avg_days_mc:.1f}日")
+
+    # exit_reason別集計CSV
+    summary = []
+    for reason in set(t["exit_reason"] for t in trades):
+        subset = [t for t in trades if t["exit_reason"] == reason]
+        summary.append({
+            "exit_reason": reason,
+            "count": len(subset),
+            "avg_holding_days": round(sum(t["holding_days"] for t in subset) / len(subset), 1),
+            "avg_return_pct": round(sum(t["return_pct"] for t in subset) / len(subset), 2),
+            "total_return_pct": round(sum(t["return_pct"] for t in subset), 2),
+        })
+    summary_file = output_dir / f"backtest_trade_summary_{date_str}{suffix}.csv"
+    pd.DataFrame(summary).to_csv(summary_file, index=False, encoding="utf-8-sig")
+    print(f"[OK] {summary_file}")
+    conn.close()
+
+
 def export_results(config, run_id: int, label: str = ""):
     import sqlite3
     from datetime import datetime as dt
@@ -206,10 +367,13 @@ def main():
 
         if args.csv and args.strategy != "all":
             export_results(config, run_id, label=s)
+            export_trade_diagnostics(config, run_id, label=s)
 
     if args.csv and args.strategy == "all":
         conn = sqlite3.connect(str(config.database_path))
         export_combined(conn, run_ids)
+        for rid, s in zip(run_ids, strategies):
+            export_trade_diagnostics(config, rid, label=s)
         conn.close()
 
     return 0
