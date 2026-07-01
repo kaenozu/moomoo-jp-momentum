@@ -207,6 +207,7 @@ class Screener:
                 code=indicators.code,
                 name=indicators.name,
                 date=indicators.date,
+                strategy_name=signal.strategy_name,
                 close=indicators.close,
                 daily_return=indicators.daily_return,
                 ma5=indicators.ma5,

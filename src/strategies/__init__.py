@@ -96,9 +96,12 @@ class StrategyRegistry:
     _strategies: dict[str, type[BaseStrategy]] = {}
 
     @classmethod
-    def register(cls, name: str, strategy_class: type[BaseStrategy]):
-        """戦術を登録する"""
-        cls._strategies[name] = strategy_class
+    def register(cls, name: str):
+        """戦術を登録する（デコレータとして使用）"""
+        def decorator(strategy_class: type[BaseStrategy]):
+            cls._strategies[name] = strategy_class
+            return strategy_class
+        return decorator
 
     @classmethod
     def get(cls, name: str, config: Config) -> BaseStrategy:

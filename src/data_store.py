@@ -25,6 +25,7 @@ class DataStore:
     """SQLiteデータベース操作クラス"""
 
     def __init__(self, config: Config):
+        self.config = config
         self.db_path = Path(config.database_path)
         self._ensure_directory()
         self._init_db()

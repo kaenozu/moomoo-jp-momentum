@@ -29,6 +29,7 @@ class SignalResult:
     name: Optional[str]
     date: str
     signal_type: str
+    strategy_name: str = "momentum"
     score: float = 0.0
     reason: str = ""
     risk_warnings: list[str] = field(default_factory=list)

@@ -80,6 +80,9 @@ def show_performance(manager: VirtualTradeManager, strategy: str):
 
 
 def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str):
+    from src.data_store import DataStore
+    DataStore(config).sync_symbols_from_json(config.watchlist_file)
+
     screener = Screener(config)
     candidates = screener.screen_candidates(date=None if date == "latest" else date)
     vt_config = config.get("virtual_trade", {})
@@ -89,6 +92,8 @@ def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str)
 
     for c in candidates:
         if c.signal_type != "BUY_CANDIDATE":
+            continue
+        if c.strategy_name != strategy:
             continue
         if c.role != "trade_candidate" or not c.tradable:
             continue
@@ -108,7 +113,7 @@ def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str)
             created += 1
             cash -= c.close or 0
 
-    print(f"シグナルから {created} 件の仮想注文を作成しました")
+    print(f"戦略 {strategy}: {created} 件の仮想注文を作成しました")
 
 
 def main():

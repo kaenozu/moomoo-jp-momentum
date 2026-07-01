@@ -12,7 +12,7 @@ from typing import Optional
 
 from ..indicators import StockIndicators
 from ..config import Config
-from .base import BaseStrategy, StrategyResult, StrategyRegistry
+from . import BaseStrategy, StrategyResult, StrategyRegistry
 
 
 @StrategyRegistry.register("quality_low_risk")
