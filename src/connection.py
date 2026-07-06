@@ -79,7 +79,7 @@ class OpenDConnection:
             self._status = ConnectionStatus(False, msg, hint)
             return self._status
 
-        ret, data = self._quote_context.get_market_snapshot(["JP.7203"])
+        ret, data = self._quote_context.get_market_snapshot(["US.SPY"])
 
         if ret == RET_OK:
             logger.info("OpenDへの接続に成功しました")
@@ -102,9 +102,8 @@ class OpenDConnection:
         elif "permission" in error_str or "auth" in error_str:
             hint = (
                 "対処法:\n"
-                "  1. 行情カード（LV2）を購入しているか確認してください\n"
-                "  2. moomoo証券で日本株の相場権限が有効になっているか確認してください\n"
-                "  3. 相場ストアで確認してください"
+                "  1. US株の相場権限（LV3）が有効になっているか確認してください\n"
+                "  2. moomooアプリの相場ストアで確認してください"
             )
         elif "subscribe" in error_str:
             hint = (
