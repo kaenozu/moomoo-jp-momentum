@@ -7,7 +7,6 @@
 関連ファイル: base.py, signals.py, scoring.py
 """
 
-from dataclasses import field
 from typing import Optional
 
 from ..indicators import StockIndicators
@@ -31,6 +30,15 @@ class MomentumStrategy(BaseStrategy):
         self.min_history_days = screening.get("min_history_days", 25)
         self.downgrade_extreme_volume_ratio = screening.get("downgrade_extreme_volume_ratio", True)
         self.risk_volume_ratio_threshold = screening.get("risk_volume_ratio_threshold", 5.0)
+        self.max_return_5d = screening.get("max_return_5d", 10.0)
+        self.max_return_20d = screening.get("max_return_20d", 30.0)
+
+        # volume条件（config.yaml signals.volume と同期）
+        volume_cfg = config.get("signals.volume", {})
+        self.volume_hard_gate = volume_cfg.get("hard_gate", False)
+        self.volume_use_percentile = volume_cfg.get("use_percentile", True)
+        self.volume_percentile_threshold = volume_cfg.get("percentile_threshold", 60)
+        self.volume_market_low_threshold = volume_cfg.get("market_low_volume_threshold", 0.8)
 
     def evaluate(
         self,
@@ -113,19 +121,31 @@ class MomentumStrategy(BaseStrategy):
         else:
             is_buy_candidate = False
 
-        # 条件5: 5日リターンプラス（ベンチマーク比較があればそちらを優先）
+        # 条件5: 5日リターン（プラスだが過熱していないこと）
         ret_5d = result.return_5d_vs_benchmark if result.return_5d_vs_benchmark is not None else indicators.return_5d
-        if ret_5d is not None and ret_5d > 0:
+        if ret_5d is not None and 0 < ret_5d < self.max_return_5d:
             buy_reasons.append(f"5日リターン{ret_5d:.1f}%")
         else:
             is_buy_candidate = False
 
-        # 条件6: 出来高比率
-        if (
-            indicators.volume_ratio is not None
-            and indicators.volume_ratio >= self.min_volume_ratio
-        ):
-            buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍")
+        # 条件6: 出来高比率（percentile / ハードゲート / 緩和条件をconfigに従い判定）
+        vol_ok = False
+        if indicators.volume_ratio is not None:
+            market_is_low = (
+                indicators.market_median_volume_ratio is not None
+                and indicators.market_median_volume_ratio < self.volume_market_low_threshold
+            )
+            if self.volume_hard_gate and not market_is_low:
+                vol_ok = indicators.volume_ratio >= self.min_volume_ratio
+            elif self.volume_use_percentile and indicators.volume_ratio_percentile is not None:
+                vol_ok = indicators.volume_ratio_percentile >= self.volume_percentile_threshold
+            else:
+                vol_ok = indicators.volume_ratio >= self.min_volume_ratio * 0.5
+        if vol_ok:
+            if indicators.volume_ratio_percentile is not None:
+                buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍(P{indicators.volume_ratio_percentile:.0f})")
+            else:
+                buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍")
         else:
             is_buy_candidate = False
 
@@ -171,19 +191,24 @@ class MomentumStrategy(BaseStrategy):
         ):
             watch_reasons.append("MA25之上だがMA5之下（トレンド弱さ）")
 
+        vol_low = False
+        if indicators.volume_ratio is not None:
+            if self.volume_use_percentile and indicators.volume_ratio_percentile is not None:
+                vol_low = indicators.volume_ratio_percentile < self.volume_percentile_threshold
+            else:
+                vol_low = indicators.volume_ratio < self.min_volume_ratio
+
         if (
             indicators.return_5d is not None
             and indicators.return_5d > 0
-            and indicators.volume_ratio is not None
-            and indicators.volume_ratio < self.min_volume_ratio
+            and vol_low
         ):
             watch_reasons.append("リターンは良いが出来高不足")
 
         if (
             indicators.high_20d_distance is not None
             and indicators.high_20d_distance >= -self.max_distance_from_high_20d
-            and indicators.volume_ratio is not None
-            and indicators.volume_ratio < self.min_volume_ratio
+            and vol_low
         ):
             watch_reasons.append("20日高値圏だが出来高不足")
 

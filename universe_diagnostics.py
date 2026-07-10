@@ -23,7 +23,6 @@ import pandas as pd
 import sqlite3
 
 from src.config import load_config
-from src.data_store import DataStore
 
 
 def load_config_cached(config_path="config.yaml"):
@@ -32,7 +31,7 @@ def load_config_cached(config_path="config.yaml"):
 
 def get_latest_indicators(conn, date: str = None) -> pd.DataFrame:
     if date:
-        df = pd.read_sql_query("SELECT * FROM indicators WHERE date=?", conn, params=[date])
+        df = pd.read_sql_query("SELECT i.*, s.name, s.type, s.role, s.tradable, s.sector FROM indicators i JOIN symbols s ON i.code=s.code WHERE i.date=?", conn, params=[date])
     else:
         df = pd.read_sql_query("SELECT i.*, s.name, s.type, s.role, s.tradable, s.sector FROM indicators i JOIN symbols s ON i.code=s.code WHERE i.date=(SELECT MAX(date) FROM indicators)", conn)
     return df
@@ -120,6 +119,90 @@ def analyze(conn, date: str = None) -> dict:
     return results
 
 
+def funnel_analysis(conn, df: pd.DataFrame, config=None, date: str = None) -> dict:
+    """シグナル判定条件のファネル分析。
+    indicatorsを直接見て各条件で何件落ちているかを算出する。
+    signalsテーブルに依存しない。"""
+    if df.empty:
+        return {"error": "データがありません"}
+
+    screening = config.get("screening", {}) if config else {}
+    universe_cfg = config.get("universe", {}) if config else {}
+    min_tp = universe_cfg.get("min_trade_price", 500)
+    max_tp = universe_cfg.get("max_trade_price", 20000)
+    min_turnover = screening.get("min_turnover", 1000000000)
+    min_vr = screening.get("min_volume_ratio", 1.5)
+    max_h20d = screening.get("max_distance_from_high_20d", 5.0)
+    min_history = screening.get("min_history_days", 25)
+
+    # クロスセクション統計
+    ratios_df = df[df["role"] == "trade_candidate"]["volume_ratio"].dropna()
+    if not ratios_df.empty:
+        import statistics
+        market_median_vr = statistics.median(ratios_df.tolist())
+        df["volume_ratio_percentile"] = df["volume_ratio"].rank(pct=True) * 100
+        df["relative_volume_ratio"] = df["volume_ratio"] / market_median_vr if market_median_vr > 0 else 1.0
+        df["market_median_volume_ratio"] = market_median_vr
+    else:
+        df["volume_ratio_percentile"] = None
+        df["relative_volume_ratio"] = None
+        df["market_median_volume_ratio"] = None
+        market_median_vr = 0
+
+    steps_base = [
+        ("total_indicators", None),
+        ("role_trade_candidate", lambda r: r.get("role") == "trade_candidate"),
+        ("tradable_true", lambda r: bool(r.get("tradable", True))),
+        ("price_ok", lambda r: (r.get("close") or 0) >= min_tp and (r.get("close") or 0) <= max_tp),
+        ("history_days_ok", lambda r: (r.get("history_days") or 0) >= min_history),
+        ("close_gt_ma25", lambda r: r.get("close") and r.get("ma25") and r["close"] > r["ma25"]),
+        ("ma5_gt_ma25", lambda r: r.get("ma5") and r.get("ma25") and r["ma5"] > r["ma25"]),
+        ("return_5d_vs_benchmark_gt_0", lambda r: (r.get("return_5d_vs_benchmark") or -999) > 0),
+        ("return_20d_vs_benchmark_gt_0", lambda r: (r.get("return_20d_vs_benchmark") or -999) > 0),
+    ]
+
+    rows = df.to_dict("records")
+
+    # ベース（sequential chain）を計算
+    base_passed = list(rows)
+    result = {}
+    base_step_names = [s[0] for s in steps_base]
+    for step_name, condition in steps_base:
+        if condition is None:
+            result[step_name] = len(base_passed)
+        else:
+            base_passed = [r for r in base_passed if condition(r)]
+            result[step_name] = len(base_passed)
+
+    # ベース通過後の銘柄リスト（return_20d_vs_benchmark_gt_0 の33銘柄）
+    base_set = base_passed
+
+    # 各ブランチはベース通過銘柄から独立計算
+    result["branch:volume_ge_1.2"] = sum(1 for r in base_set if (r.get("volume_ratio") or 0) >= 1.2)
+    result["branch:volume_ge_1.5"] = sum(1 for r in base_set if (r.get("volume_ratio") or 0) >= 1.5)
+    result["branch:volume_pct_ge_80"] = sum(1 for r in base_set if (r.get("volume_ratio_percentile") or 0) >= 80)
+    result["branch:volume_pct_ge_60"] = sum(1 for r in base_set if (r.get("volume_ratio_percentile") or 0) >= 60)
+    result["branch:no_volume_gate"] = sum(1 for r in base_set if (r.get("turnover") or 0) >= min_turnover)
+
+    # ベースステップの減少数
+    result["drops"] = {}
+    for i in range(1, len(base_step_names)):
+        prev = base_step_names[i - 1]
+        curr = base_step_names[i]
+        drop = result[prev] - result[curr]
+        if drop > 0:
+            result["drops"][f"{prev}_to_{curr}"] = drop
+
+    # signalsテーブルのBUY_CANDIDATE実績
+    if date:
+        buy_df = pd.read_sql_query("SELECT COUNT(*) as cnt FROM signals WHERE date=? AND signal_type='BUY_CANDIDATE'", conn, params=[date])
+    else:
+        buy_df = pd.read_sql_query("SELECT COUNT(*) as cnt FROM signals WHERE date=(SELECT MAX(date) FROM signals) AND signal_type='BUY_CANDIDATE'", conn)
+    result["actual_buy_candidate"] = int(buy_df["cnt"].iloc[0]) if not buy_df.empty else 0
+
+    return result
+
+
 def display(results: dict, df: pd.DataFrame):
     print("=" * 60)
     print("ユニバース診断")
@@ -128,8 +211,36 @@ def display(results: dict, df: pd.DataFrame):
     print(f"role別: {results.get('role_counts', {})}")
     print(f"tradable別: {results.get('tradable_counts', {})}")
     print(f"signal_type別: {results.get('signal_counts', {})}")
+
+    # ファネル分析
+    funnel = results.get("funnel")
+    if funnel and "error" not in funnel:
+        print("\n--- シグナルファネル ---")
+        steps = [
+            ("total_indicators", "全indicators"),
+            ("role_trade_candidate", "role=trade_candidate"),
+            ("tradable_true", "tradable=true"),
+            ("price_ok", "価格範囲内"),
+            ("history_days_ok", "履歴日数OK"),
+            ("close_gt_ma25", "close>ma25"),
+            ("ma5_gt_ma25", "ma5>ma25"),
+            ("return_5d_vs_benchmark_gt_0", "5日相対強度>0"),
+            ("return_20d_vs_benchmark_gt_0", "20日相対強度>0"),
+            ("---", "--- volume条件比較 ---"),
+            ("branch:volume_ge_1.2", "旧:出来高比>=1.2"),
+            ("branch:volume_ge_1.5", "旧:出来高比>=1.5"),
+            ("branch:volume_pct_ge_80", "新:出来高Pct>=80"),
+            ("branch:volume_pct_ge_60", "新:出来高Pct>=60"),
+            ("branch:no_volume_gate", "新:volume条件なし"),
+        ]
+        for key, label in steps:
+            val = funnel.get(key, 0)
+            drop = funnel.get("drops", {}).get(f"{steps[steps.index((key, label)) - 1][0]}_to_{key}") if steps.index((key, label)) > 0 else None
+            drop_str = f" (-{drop})" if drop else ""
+            print(f"  {label}: {val}件{drop_str}")
+        print(f"  → actual BUY_CANDIDATE: {funnel.get('actual_buy_candidate', 0)}件")
+
     print()
-    print("sector別件数:")
     for sector, cnt in sorted(results.get("sector_counts", {}).items(), key=lambda x: -x[1])[:10]:
         ret = results.get("sector_return_5d_vs_benchmark", {}).get(sector, 0)
         print(f"  {sector}: {cnt}件 (vs_benchmark_5d={ret:.1f}%)" if ret else f"  {sector}: {cnt}件")
@@ -164,9 +275,25 @@ def export_results(results: dict, df: pd.DataFrame, output_dir="reports", date_s
         print(f"[OK] universe_diagnostics_{date_str}.csv")
 
     # サマリーCSV
-    summary_rows = [{"metric": k, "value": str(v)} for k, v in results.items() if k not in ("high_score_watch",)]
+    summary_rows = [{"metric": k, "value": str(v)} for k, v in results.items() if k not in ("high_score_watch", "funnel")]
     pd.DataFrame(summary_rows).to_csv(f"{output_dir}/universe_summary_{date_str}.csv", index=False, encoding="utf-8-sig")
     print(f"[OK] universe_summary_{date_str}.csv")
+
+    # ファネルCSV
+    funnel = results.get("funnel")
+    if funnel and "error" not in funnel:
+        funnel_rows = [
+            {"step": k, "passed": v}
+            for k, v in funnel.items()
+            if k not in ("drops", "actual_buy_candidate")
+        ]
+        if "actual_buy_candidate" in funnel:
+            funnel_rows.append({"step": "actual_buy_candidate", "passed": funnel["actual_buy_candidate"]})
+        funnel_rows.append({"step": "", "passed": ""})
+        for drop_key, drop_val in funnel.get("drops", {}).items():
+            funnel_rows.append({"step": f"drop_{drop_key}", "passed": f"-{drop_val}"})
+        pd.DataFrame(funnel_rows).to_csv(f"{output_dir}/universe_funnel_{date_str}.csv", index=False, encoding="utf-8-sig")
+        print(f"[OK] universe_funnel_{date_str}.csv")
 
 
 def main():
@@ -190,6 +317,7 @@ def main():
         return 0
 
     results = analyze(conn, args.date)
+    results["funnel"] = funnel_analysis(conn, df, config=config, date=args.date)
     display(results, df)
 
     date_str = args.date or datetime.now().strftime("%Y%m%d")

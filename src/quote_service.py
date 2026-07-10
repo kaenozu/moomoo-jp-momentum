@@ -10,6 +10,7 @@ MVPでは行情カード不要で確認できたAPIを中心に使用する。
 """
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -29,6 +30,7 @@ from .models import DailyBar, Quote
 logger = logging.getLogger(__name__)
 
 MAX_KLINE_PER_REQUEST = 1000
+BATCH_SLEEP_SECONDS = 1.0
 
 
 class QuoteService:
@@ -165,7 +167,9 @@ class QuoteService:
             if is_trading_hours:
                 today = now_jst.strftime("%Y-%m-%d")
                 before = len(data)
-                data = data[data["time_key"].dt.strftime("%Y-%m-%d") != today]
+                if "time_key" in data.columns and not data["time_key"].empty:
+                    tk = pd.to_datetime(data["time_key"])
+                    data = data[tk.dt.strftime("%Y-%m-%d") != today]
                 if len(data) < before:
                     logger.info("取引時間中のため当日足を除外: %s (%d→%d件)", code, before, len(data))
 
@@ -197,6 +201,190 @@ class QuoteService:
 
         logger.info("日足取得完了(フォールバック): %s - %s件", code, len(combined))
         return combined
+
+    def unsubscribe_symbols(
+        self, codes: list[str], subtypes: Optional[list] = None
+    ) -> None:
+        """購読を解除して購読枠を解放する。"""
+        if subtypes is None:
+            subtypes = [SubType.K_DAY]
+        for code in codes:
+            try:
+                ret, data = self.ctx.unsubscribe(code, subtypes)
+                if ret != RET_OK:
+                    logger.debug("unsubscribe失敗: %s - %s", code, data)
+            except Exception as e:
+                logger.debug("unsubscribe例外: %s - %s", code, e)
+
+    def get_daily_klines_history_only(
+        self,
+        code: str,
+        num: int = 120,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """request_history_klineのみで日足を取得する（購読枠を消費しない）。
+
+        get_cur_klineを使わないためmoomoo OpenDの購読枠制限に影響しない。
+        バックテスト用の大量バックフィルに最適。
+        """
+        logger.info("日足取得(history): %s (num=%s, start=%s, end=%s)", code, num, start, end)
+
+        if num <= MAX_KLINE_PER_REQUEST:
+            ret, data, _ = self.ctx.request_history_kline(
+                code,
+                ktype=KLType.K_DAY,
+                max_count=num,
+                start=start,
+                end=end,
+            )
+            if ret != RET_OK:
+                logger.error("日足取得失敗(history): %s - %s", code, data)
+                return pd.DataFrame()
+            return data
+
+        all_data = pd.DataFrame()
+        remaining = num
+        current_end = end
+
+        while remaining > 0:
+            batch_size = min(remaining, MAX_KLINE_PER_REQUEST)
+            ret, data, page_req_key = self.ctx.request_history_kline(
+                code,
+                ktype=KLType.K_DAY,
+                max_count=batch_size,
+                start=start,
+                end=current_end,
+            )
+            if ret != RET_OK:
+                logger.error("日足取得失敗(history): %s - %s", code, data)
+                break
+            if data.empty:
+                break
+            all_data = pd.concat([all_data, data], ignore_index=True)
+            remaining -= len(data)
+            if page_req_key is None or len(data) < batch_size:
+                break
+            oldest_date = data["time_key"].min()[:10]
+            current_end = oldest_date
+
+        logger.info("日足取得完了(history): %s - %s件", code, len(all_data))
+        return all_data
+
+    def get_daily_klines_latest_only(self, code: str, num: int = 30) -> pd.DataFrame:
+        """get_cur_klineで直近日足を取得する（subscribe→取得→unsubscribe）。
+
+        取得後に必ずunsubscribeすることで購読枠を消費しっぱなしにしない。
+        日次更新・当日データ取得向け。大量銘柄には不向き。
+        """
+        logger.info("日足取得(latest): %s (num=%s)", code, num)
+
+        ret, data = self.ctx.subscribe(code, [SubType.K_DAY], subscribe_push=False)
+        if ret != RET_OK:
+            logger.warning("サブスクライブ失敗: %s - %s", code, data)
+
+        try:
+            ret, data = self.ctx.get_cur_kline(code, num=num, ktype=KLType.K_DAY)
+            if ret != RET_OK:
+                logger.error("直近日足取得失敗(latest): %s - %s", code, data)
+                return pd.DataFrame()
+        finally:
+            self.unsubscribe_symbols([code], [SubType.K_DAY])
+
+        if not data.empty:
+            now_jst = datetime.now().astimezone()
+            hour = now_jst.hour
+            is_trading_hours = (9 <= hour < 15) or (hour == 15 and now_jst.minute < 30)
+            if is_trading_hours:
+                today = now_jst.strftime("%Y-%m-%d")
+                before = len(data)
+                if "time_key" in data.columns and not data["time_key"].empty:
+                    tk = pd.to_datetime(data["time_key"])
+                    data = data[tk.dt.strftime("%Y-%m-%d") != today]
+                if len(data) < before:
+                    logger.info("取引時間中のため当日足を除外: %s (%d→%d件)", code, before, len(data))
+
+        logger.info("日足取得完了(latest): %s - %s件", code, len(data))
+        return data
+
+    def batch_fetch_daily_klines(
+        self,
+        codes: list[str],
+        mode: str = "history",
+        num: int = 120,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        batch_size: int = 80,
+        retry_count: int = 2,
+    ) -> dict[str, pd.DataFrame]:
+        """複数銘柄の日足をバッチ処理で安定取得する。
+
+        Args:
+            codes: 取得対象銘柄コード一覧
+            mode: "history"(request_history_kline) / "latest"(get_cur_kline) / "auto"
+            num: 取得日数
+            start: 取得開始日
+            end: 取得終了日（None=今日まで）
+            batch_size: 1バッチあたりの銘柄数
+            retry_count: 失敗時のリトライ回数
+
+        Returns:
+            成功した銘柄の {code: DataFrame} 辞書
+        """
+        if not codes:
+            return {}
+
+        if mode == "auto":
+            mode = "history" if len(codes) > 100 else "latest"
+
+        total = len(codes)
+        n_batches = (total + batch_size - 1) // batch_size
+        logger.info("バッチ日足取得: %s銘柄, mode=%s, batch_size=%s, %sバッチ", total, mode, batch_size, n_batches)
+
+        result: dict[str, pd.DataFrame] = {}
+        failed: list[str] = []
+
+        for batch_idx in range(0, total, batch_size):
+            batch = codes[batch_idx : batch_idx + batch_size]
+            batch_num = batch_idx // batch_size + 1
+            logger.info("  バッチ %d/%d: %s銘柄 処理開始", batch_num, n_batches, len(batch))
+
+            for idx_in_batch, code in enumerate(batch):
+                # Rate limit: 60 req/30sec → 0.5s最小間隔、リトライ時も同じ
+                if idx_in_batch > 0 or batch_num > 1:
+                    time.sleep(BATCH_SLEEP_SECONDS)
+
+                success = False
+                for attempt in range(1, retry_count + 2):
+                    if attempt > 1:
+                        time.sleep(BATCH_SLEEP_SECONDS * 2)
+                    try:
+                        if mode == "latest":
+                            df = self.get_daily_klines_latest_only(code, num=min(num, 30))
+                        else:
+                            df = self.get_daily_klines_history_only(code, num=num, start=start, end=end)
+
+                        if not df.empty:
+                            result[code] = df
+                            success = True
+                            break
+                        else:
+                            logger.warning("    [%s] データ空(attempt %d/%d)", code, attempt, retry_count + 1)
+                    except Exception as e:
+                        logger.error("    [%s] 例外: %s (attempt %d/%d)", code, e, attempt, retry_count + 1)
+
+                if not success:
+                    failed.append(code)
+
+            if batch_idx + batch_size < total:
+                logger.info("  バッチ間待機: %s秒", BATCH_SLEEP_SECONDS)
+                time.sleep(BATCH_SLEEP_SECONDS)
+
+        logger.info("バッチ日足取得完了: 成功=%d, 失敗=%d", len(result), len(failed))
+        if failed:
+            logger.warning("  失敗銘柄一覧: %s", failed)
+
+        return result
 
     def get_intraday_klines(
         self,
@@ -282,11 +470,13 @@ class QuoteService:
         """ローソク足データをDailyBarモデルに変換する"""
         return DailyBar(
             code=code,
-            date=row.get("time_key", "")[:10],
+            date=str(row.get("time_key", ""))[:10],
             open=row.get("open"),
             high=row.get("high"),
             low=row.get("low"),
             close=row.get("close"),
             volume=row.get("volume"),
             turnover=row.get("turnover"),
+            source=str(row.get("source") or "moomoo"),
+            turnover_source=str(row.get("turnover_source") or "actual"),
         )

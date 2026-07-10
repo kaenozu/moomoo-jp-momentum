@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS daily_bars (
     close REAL,
     volume INTEGER,
     turnover REAL,
+    source TEXT NOT NULL DEFAULT 'moomoo',
+    turnover_source TEXT NOT NULL DEFAULT 'actual',
     FOREIGN KEY (code) REFERENCES symbols(code),
     UNIQUE(code, date)
 );
@@ -83,11 +85,17 @@ CREATE TABLE IF NOT EXISTS indicators (
     volume_ma20 REAL,
     volume_ratio REAL,
     return_5d REAL,
+    return_20d REAL,
+    return_60d REAL,
     history_days INTEGER,
     return_5d_vs_benchmark REAL,
     return_20d_vs_benchmark REAL,
     return_60d_vs_benchmark REAL,
     relative_strength_rank INTEGER,
+    volume_ratio_percentile REAL,
+    volume_ratio_rank INTEGER,
+    relative_volume_ratio REAL,
+    market_median_volume_ratio REAL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (code, date)
 );
@@ -415,6 +423,8 @@ class DailyBar:
     close: Optional[float] = None
     volume: Optional[int] = None
     turnover: Optional[float] = None
+    source: str = "moomoo"
+    turnover_source: str = "actual"
 
 
 @dataclass

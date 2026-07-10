@@ -60,6 +60,12 @@ class StockIndicators:
     signal_type: Optional[str] = None
     reason: Optional[str] = None
 
+    # クロスセクション統計（バッチ計算後に入る）
+    volume_ratio_percentile: Optional[float] = None
+    volume_ratio_rank: Optional[int] = None
+    relative_volume_ratio: Optional[float] = None
+    market_median_volume_ratio: Optional[float] = None
+
 
 def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
     """futu-api取得DFとDB取得DFの両方を計算しやすい形に正規化する。"""
@@ -158,6 +164,34 @@ def calculate_indicators(df: pd.DataFrame, code: str, name: Optional[str] = None
     )
 
 
+def add_cross_sectional_stats(indicators: list[StockIndicators]) -> list[StockIndicators]:
+    """クロスセクション統計を計算する（volume_ratio_percentile, relative_volume_ratio等）。
+    全銘柄の指標が揃った後に呼び出すこと。"""
+    if not indicators:
+        return indicators
+
+    ratios = [ind.volume_ratio for ind in indicators if ind.volume_ratio is not None]
+    if not ratios:
+        return indicators
+
+    import statistics
+    market_median = statistics.median(ratios)
+    sorted_ratios = sorted(ratios)
+
+    for ind in indicators:
+        vr = ind.volume_ratio
+        if vr is not None:
+            ind.market_median_volume_ratio = market_median
+            ind.relative_volume_ratio = vr / market_median if market_median > 0 else 1.0
+            # パーセンタイル計算: 値以下の要素の割合
+            count_le = sum(1 for r in sorted_ratios if r <= vr)
+            ind.volume_ratio_percentile = count_le / len(sorted_ratios) * 100
+            # 順位
+            ind.volume_ratio_rank = sum(1 for r in sorted_ratios if r > vr) + 1
+
+    return indicators
+
+
 def calculate_indicators_batch(
     data_dict: dict[str, pd.DataFrame],
     symbols_info: Optional[dict[str, str]] = None,
@@ -168,6 +202,7 @@ def calculate_indicators_batch(
         indicators = calculate_indicators(df, code, name)
         if indicators:
             results.append(indicators)
+    results = add_cross_sectional_stats(results)
     logger.info("指標計算完了: %s/%s銘柄", len(results), len(data_dict))
     return results
 
@@ -211,5 +246,36 @@ def indicators_to_dataframe(indicators: list[StockIndicators]) -> pd.DataFrame:
             "score": ind.score,
             "signal_type": ind.signal_type,
             "reason": ind.reason,
+            "volume_ratio_percentile": ind.volume_ratio_percentile,
+            "volume_ratio_rank": ind.volume_ratio_rank,
+            "relative_volume_ratio": ind.relative_volume_ratio,
+            "market_median_volume_ratio": ind.market_median_volume_ratio,
         })
     return pd.DataFrame(records)
+
+
+def add_relative_strength(indicators_df: pd.DataFrame, benchmark_code: str = "JP.1306") -> pd.DataFrame:
+    """同一日付のベンチマークリターンとの差分を日付でjoinして計算する。"""
+    if indicators_df.empty or benchmark_code not in set(indicators_df["code"]):
+        return indicators_df
+
+    df = indicators_df.copy()
+    bench = df[df["code"] == benchmark_code][["date", "return_5d", "return_20d", "return_60d"]]
+    if bench.empty:
+        return df
+
+    bench = bench.rename(columns={
+        "return_5d": "bench_return_5d",
+        "return_20d": "bench_return_20d",
+        "return_60d": "bench_return_60d",
+    })
+
+    df = df.merge(bench, on="date", how="left")
+    df["return_5d_vs_benchmark"] = df["return_5d"] - df["bench_return_5d"]
+    if "return_20d" in df.columns:
+        df["return_20d_vs_benchmark"] = df["return_20d"] - df["bench_return_20d"]
+    if "return_60d" in df.columns:
+        df["return_60d_vs_benchmark"] = df["return_60d"] - df["bench_return_60d"]
+    df["relative_strength_rank"] = df["return_5d_vs_benchmark"].rank(ascending=False, method="min")
+    df = df.drop(columns=["bench_return_5d", "bench_return_20d", "bench_return_60d"], errors="ignore")
+    return df

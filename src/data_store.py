@@ -55,13 +55,23 @@ class DataStore:
             "benchmark_group": "TEXT",
             "notes": "TEXT",
         })
+        add_missing("daily_bars", {
+            "source": "TEXT NOT NULL DEFAULT 'moomoo'",
+            "turnover_source": "TEXT NOT NULL DEFAULT 'actual'",
+        })
         add_missing("indicators", {
             "volume": "INTEGER",
+            "return_20d": "REAL",
+            "return_60d": "REAL",
             "history_days": "INTEGER",
             "return_5d_vs_benchmark": "REAL",
             "return_20d_vs_benchmark": "REAL",
             "return_60d_vs_benchmark": "REAL",
             "relative_strength_rank": "INTEGER",
+            "volume_ratio_percentile": "REAL",
+            "volume_ratio_rank": "INTEGER",
+            "relative_volume_ratio": "REAL",
+            "market_median_volume_ratio": "REAL",
         })
         add_missing("virtual_orders", {
             "exit_reason": "TEXT",
@@ -193,10 +203,13 @@ class DataStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO daily_bars
-                (code, date, open, high, low, close, volume, turnover)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (code, date, open, high, low, close, volume, turnover, source, turnover_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (bar.code, bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume, bar.turnover),
+                (
+                    bar.code, bar.date, bar.open, bar.high, bar.low, bar.close,
+                    bar.volume, bar.turnover, bar.source, bar.turnover_source,
+                ),
             )
 
     def save_daily_bars_batch(self, bars: list[DailyBar]) -> int:
@@ -204,10 +217,16 @@ class DataStore:
             return 0
         sql = """
             INSERT OR REPLACE INTO daily_bars
-            (code, date, open, high, low, close, volume, turnover)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (code, date, open, high, low, close, volume, turnover, source, turnover_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = [(b.code, b.date, b.open, b.high, b.low, b.close, b.volume, b.turnover) for b in bars]
+        params = [
+            (
+                b.code, b.date, b.open, b.high, b.low, b.close,
+                b.volume, b.turnover, b.source, b.turnover_source,
+            )
+            for b in bars
+        ]
         with self._get_connection() as conn:
             conn.executemany(sql, params)
         return len(bars)
@@ -232,7 +251,13 @@ class DataStore:
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
 
-    def save_dataframe_to_daily_bars(self, df: pd.DataFrame, code: str) -> int:
+    def save_dataframe_to_daily_bars(
+        self,
+        df: pd.DataFrame,
+        code: str,
+        source: str = "moomoo",
+        turnover_source: str = "actual",
+    ) -> int:
         if df.empty:
             return 0
         bars = [
@@ -245,6 +270,8 @@ class DataStore:
                 close=row.get("close"),
                 volume=row.get("volume"),
                 turnover=row.get("turnover"),
+                source=str(row.get("source") or source),
+                turnover_source=str(row.get("turnover_source") or turnover_source),
             )
             for _, row in df.iterrows()
         ]
