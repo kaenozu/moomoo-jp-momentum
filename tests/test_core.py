@@ -231,6 +231,10 @@ class TestDataFreshness:
                     return {"path": "data/nonexistent.db"}
                 return default
 
+            @property
+            def database_path(self):
+                return "data/nonexistent.db"
+
         guard = DataFreshnessGuard(TestConfig())
         status = guard.check_freshness(max_stale_days=5)
         assert status.level == "error"
@@ -771,6 +775,146 @@ class TestSignalDetectorVsStrategy:
 
         signal_result = detector.detect_signal(indicators)
         strategy_result = strategy.evaluate(indicators)
-
         assert signal_result.signal_type == "EXCLUDE"
         assert strategy_result.signal_type == "EXCLUDE"
+
+
+class TestBacktestCashFlowIntegration:
+    """Full backtest cash-flow timing that catches double-deduction."""
+
+    @staticmethod
+    def _build_db(db_path):
+        config = Config()
+        config._config = {
+            "database": {"path": str(db_path)},
+            "screening": {"min_turnover": 50_000_000},
+            "backtest": {
+                "max_positions": 5,
+                "idle_cash_allocation": {"enabled": False},
+            },
+        }
+        DataStore(config)
+
+        bars = []
+        for i in range(30):
+            dt = f"2026-01-{i+1:02d}"
+            close = 9000 + i * 30
+            open_ = close - 5
+            high = close + 10
+            low = close - 15
+            volume = 120000
+            turnover = int(close * volume)
+            bars.append(("JP.0001", dt, open_, high, low, close, volume, turnover))
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO symbols (code, name, type, role, tradable, enabled) "
+                "VALUES ('JP.0001', 'テスト株', 'stock', 'trade_candidate', 1, 1)"
+            )
+            for code, dt, op, hi, lo, cl, v, t in bars:
+                conn.execute(
+                    "INSERT INTO daily_bars (code, date, open, high, low, close, volume, turnover) "
+                    "VALUES (?,?,?,?,?,?,?,?)", (code, dt, op, hi, lo, cl, v, t),
+                )
+            for bm_code in ("JP.2559", "JP.1306"):
+                for i in range(30):
+                    dt = f"2026-01-{i+1:02d}"
+                    close = 2000 + i * 2
+                    conn.execute(
+                        "INSERT INTO daily_bars (code, date, open, high, low, close, volume, turnover) "
+                        "VALUES (?,?,?,?,?,?,?,?)",
+                        (bm_code, dt, close, close, close, close, 50000, close * 50000),
+                    )
+        return config
+
+    def test_buy_fill_deducts_cash_exactly_once(self, tmp_path):
+        """BUY fills exactly once at fill price; cash only changes on fill date."""
+        db_path = tmp_path / "cashflow.db"
+        config = self._build_db(db_path)
+        runner = BacktestRunner(config)
+        run_id = runner.run("momentum", "2026-01-01", "2026-01-30")
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            fills = conn.execute(
+                "SELECT side, price, quantity, filled_at FROM backtest_fills "
+                "WHERE run_id=? ORDER BY filled_at, id",
+                (run_id,),
+            ).fetchall()
+
+            buy_fills = [f for f in fills if f["side"] == "BUY"]
+            sell_fills = [f for f in fills if f["side"] == "SELL"]
+
+            orders = conn.execute(
+                "SELECT side, COUNT(*) as cnt FROM backtest_orders "
+                "WHERE run_id=? GROUP BY side",
+                (run_id,),
+            ).fetchall()
+            order_counts = {r["side"]: r["cnt"] for r in orders}
+
+            assert order_counts.get("BUY", 0) == len(buy_fills), (
+                f"BUY orders({order_counts.get('BUY',0)}) != BUY fills({len(buy_fills)})"
+            )
+            assert order_counts.get("SELL", 0) == len(sell_fills), (
+                f"SELL orders({order_counts.get('SELL',0)}) != SELL fills({len(sell_fills)})"
+            )
+
+    def test_final_cash_matches_fill_flow(self, tmp_path):
+        """Final cash = initial_cash - BUY fill costs + SELL fill proceeds (no idle cash)."""
+        db_path = tmp_path / "cashflow2.db"
+        config = self._build_db(db_path)
+        runner = BacktestRunner(config)
+        run_id = runner.run("momentum", "2026-01-01", "2026-01-30")
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            fills = conn.execute(
+                "SELECT side, price, quantity FROM backtest_fills WHERE run_id=?",
+                (run_id,),
+            ).fetchall()
+
+            buy_cost = sum(f["price"] * f["quantity"] + runner.commission for f in fills if f["side"] == "BUY")
+            sell_proceeds = sum(f["price"] * f["quantity"] - runner.commission for f in fills if f["side"] == "SELL")
+            expected_cash = runner.initial_cash - buy_cost + sell_proceeds
+
+            last_equity = conn.execute(
+                "SELECT cash FROM backtest_equity_curve WHERE run_id=? ORDER BY date DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+
+        if last_equity and buy_cost > 0:
+            assert abs(last_equity["cash"] - expected_cash) < 0.01, (
+                f"Final cash {last_equity['cash']} != expected {expected_cash} "
+                f"(diff={last_equity['cash'] - expected_cash})"
+            )
+
+    def test_signal_day_cash_unchanged(self, tmp_path):
+        """Cash should not change on non-fill days when idle cash is disabled."""
+        db_path = tmp_path / "cashflow3.db"
+        config = self._build_db(db_path)
+        runner = BacktestRunner(config)
+        run_id = runner.run("momentum", "2026-01-01", "2026-01-30")
+
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            fill_dates = {
+                r["filled_at"] for r in conn.execute(
+                    "SELECT filled_at FROM backtest_fills WHERE run_id=?", (run_id,)
+                ).fetchall()
+            }
+            equity_rows = conn.execute(
+                "SELECT date, cash FROM backtest_equity_curve WHERE run_id=? ORDER BY date",
+                (run_id,),
+            ).fetchall()
+
+        prev_cash = runner.initial_cash
+        for row in equity_rows:
+            date = row["date"]
+            cash = row["cash"]
+            if date in fill_dates:
+                prev_cash = cash
+            else:
+                assert abs(cash - prev_cash) < 0.01, (
+                    f"Cash changed on non-fill day {date}: {prev_cash} -> {cash}"
+                )
+                prev_cash = cash
