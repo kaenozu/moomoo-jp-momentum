@@ -3,12 +3,18 @@
 
 全銘柄の日足データを取得し、指標・相対強度を計算し、SQLiteとCSVに出力する。
 benchmark銘柄もデータ取得対象に含め、通常スクリーニングでは別レイヤーで除外する。
+
+取得モード:
+  history - request_history_kline中心（購読枠不要）、大量バックフィル向け
+  latest  - get_cur_kline + subscribe/unsubscribe、日次少量更新向け
+  auto    - 銘柄数に応じて自動選択（100超→history）
 """
 
 import argparse
 import logging
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -19,11 +25,14 @@ import pandas as pd
 from src.config import load_config
 from src.connection import OpenDConnection
 from src.data_store import DataStore
-from src.indicators import calculate_indicators_batch, indicators_to_dataframe
-from src.quote_service import QuoteService
+from src.indicators import calculate_indicators_batch, indicators_to_dataframe, add_relative_strength
+from src.quote_service import QuoteService, BATCH_SLEEP_SECONDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
+
+DEFAULT_NUM_DAYS = 120
+DEFAULT_START = "2025-01-01"
 
 
 def get_latest_bar_date(data_store: DataStore, code: str) -> str | None:
@@ -50,55 +59,80 @@ def fetch_and_save_daily_klines(
     quote_service: QuoteService,
     data_store: DataStore,
     codes: list[str],
-    num_days: int = 120,
+    num_days: int = DEFAULT_NUM_DAYS,
     force: bool = False,
+    mode: str = "auto",
+    start: str | None = DEFAULT_START,
+    batch_size: int = 80,
 ) -> dict[str, pd.DataFrame]:
+    """日足を取得・保存する（バッチ処理＋リトライ対応）。
+
+    mode履歴:
+      history -> request_history_kline のみ（購読枠不要）
+      latest  -> get_cur_kline + subscribe/unsubscribe
+      auto    -> 100銘柄超でhistory、以下でlatest
+    """
     today = datetime.now().strftime("%Y-%m-%d")
-    data_dict = {}
-    for i, code in enumerate(codes, 1):
-        logger.info("[%s/%s] %s の日足を取得中...", i, len(codes), code)
+    effective_mode = mode
+    if effective_mode == "auto":
+        effective_mode = "history" if len(codes) > 100 else "latest"
+
+    logger.info("fetch_and_save: mode=%s, force=%s, batch_size=%s, start=%s", effective_mode, force, batch_size, start)
+
+    # スキップ判定＋既存DB読み込み
+    skip_codes: list[str] = []
+    fetch_codes: list[str] = []
+    for code in codes:
         if not force and should_skip_fetch(data_store, code, today):
-            logger.info("  スキップ: 最新データは取得済み")
-            df = data_store.get_daily_bars(code, limit=num_days)
-            if not df.empty:
+            skip_codes.append(code)
+        else:
+            fetch_codes.append(code)
+
+    logger.info("  取得対象: %s銘柄, スキップ: %s銘柄", len(fetch_codes), len(skip_codes))
+
+    data_dict: dict[str, pd.DataFrame] = {}
+
+    # スキップ分はDBから読み込む
+    for code in skip_codes:
+        df = data_store.get_daily_bars(code, limit=num_days)
+        if not df.empty:
+            data_dict[code] = df
+
+    # 取得対象をバッチ処理
+    if fetch_codes:
+        total = len(fetch_codes)
+        n_batches = (total + batch_size - 1) // batch_size
+
+        for batch_idx in range(0, total, batch_size):
+            batch = fetch_codes[batch_idx : batch_idx + batch_size]
+            batch_num = batch_idx // batch_size + 1
+            logger.info("  バッチ %d/%d: %s銘柄", batch_num, n_batches, len(batch))
+
+            batch_dict = quote_service.batch_fetch_daily_klines(
+                codes=batch,
+                mode=effective_mode,
+                num=num_days,
+                start=start if effective_mode == "history" else None,
+                batch_size=len(batch),
+                retry_count=2,
+            )
+
+            # 保存
+            for code, df in batch_dict.items():
+                count = data_store.save_dataframe_to_daily_bars(df, code)
+                logger.info("    [%s] 保存完了: %s件", code, count)
                 data_dict[code] = df
-            continue
-        df = quote_service.get_daily_klines_with_fallback(code, num=num_days, start="2025-01-01")
-        if df.empty:
-            logger.warning("  データ取得失敗: %s", code)
-            continue
-        count = data_store.save_dataframe_to_daily_bars(df, code)
-        logger.info("  保存完了: %s件", count)
-        data_dict[code] = df
+
+            if batch_idx + batch_size < total:
+                time.sleep(BATCH_SLEEP_SECONDS)
+
+    logger.info(
+        "取得完了: 成功=%d, スキップ=%d, 取得対象=%d",
+        len(data_dict),
+        len(skip_codes),
+        len(fetch_codes),
+    )
     return data_dict
-
-
-def add_relative_strength(indicators_df: pd.DataFrame, benchmark_code: str = "JP.1306") -> pd.DataFrame:
-    """同一日付のベンチマークリターンとの差分を日付でjoinして計算する。"""
-    if indicators_df.empty or benchmark_code not in set(indicators_df["code"]):
-        return indicators_df
-
-    df = indicators_df.copy()
-    bench = df[df["code"] == benchmark_code][["date", "return_5d", "return_20d", "return_60d"]]
-    if bench.empty:
-        return df
-
-    bench = bench.rename(columns={
-        "return_5d": "bench_return_5d",
-        "return_20d": "bench_return_20d",
-        "return_60d": "bench_return_60d",
-    })
-
-    df = df.merge(bench, on="date", how="left")
-    df["return_5d_vs_benchmark"] = df["return_5d"] - df["bench_return_5d"]
-    if "return_20d" in df.columns:
-        df["return_20d_vs_benchmark"] = df["return_20d"] - df["bench_return_20d"]
-    if "return_60d" in df.columns:
-        df["return_60d_vs_benchmark"] = df["return_60d"] - df["bench_return_60d"]
-    df["relative_strength_rank"] = df["return_5d_vs_benchmark"].rank(ascending=False, method="min")
-    df = df.drop(columns=["bench_return_5d", "bench_return_20d", "bench_return_60d"], errors="ignore")
-
-    return df
 
 
 def save_benchmark_prices_from_indicators(data_store: DataStore, indicators_df: pd.DataFrame, benchmark_codes: set[str]) -> int:
@@ -125,13 +159,14 @@ def save_indicators_to_db(data_store: DataStore, indicators_df: pd.DataFrame) ->
         return 0
     now = datetime.now().isoformat()
     sql = """
-        INSERT OR REPLACE INTO indicators
+         INSERT OR REPLACE INTO indicators
         (code, date, close, volume, turnover, daily_return,
          ma5, ma25, high_20d, distance_from_high_20d,
-         volume_ma20, volume_ratio, return_5d, history_days,
+         volume_ma20, volume_ratio, return_5d, return_20d, return_60d, history_days,
          return_5d_vs_benchmark, return_20d_vs_benchmark, return_60d_vs_benchmark,
-         relative_strength_rank, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         relative_strength_rank, volume_ratio_percentile, volume_ratio_rank,
+         relative_volume_ratio, market_median_volume_ratio, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     params = []
     for _, row in indicators_df.iterrows():
@@ -139,9 +174,12 @@ def save_indicators_to_db(data_store: DataStore, indicators_df: pd.DataFrame) ->
             row.get("code"), row.get("date"), row.get("close"), row.get("volume"),
             row.get("turnover"), row.get("daily_return"), row.get("ma5"), row.get("ma25"),
             row.get("high_20d"), row.get("high_20d_distance"), row.get("volume_ma20"),
-            row.get("volume_ratio"), row.get("return_5d"), row.get("history_days"),
+            row.get("volume_ratio"), row.get("return_5d"), row.get("return_20d"),
+            row.get("return_60d"), row.get("history_days"),
             row.get("return_5d_vs_benchmark"), row.get("return_20d_vs_benchmark"),
-            row.get("return_60d_vs_benchmark"), row.get("relative_strength_rank"), now,
+            row.get("return_60d_vs_benchmark"), row.get("relative_strength_rank"),
+            row.get("volume_ratio_percentile"), row.get("volume_ratio_rank"),
+            row.get("relative_volume_ratio"), row.get("market_median_volume_ratio"), now,
         ))
     with sqlite3.connect(data_store.db_path) as conn:
         conn.executemany(sql, params)
@@ -167,11 +205,20 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="強制再取得（スキップしない）")
     parser.add_argument("--dry-run", action="store_true", help="テスト実行（API呼び出しなし）")
     parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
+    parser.add_argument("--mode", choices=["history", "latest", "auto"], default="auto",
+                        help="取得モード: history(request_history_kline), latest(get_cur_kline), auto(自動判別)")
+    parser.add_argument("--start", default=None, help="取得開始日 (YYYY-MM-DD、デフォルト: 2025-01-01)")
+    parser.add_argument("--batch-size", type=int, default=80, help="1バッチあたりの銘柄数 (デフォルト: 80)")
     args = parser.parse_args()
+
+    effective_start = args.start or "2025-01-01"
 
     print("=" * 60)
     print("Moomoo 日次更新")
     print("=" * 60)
+    print(f"  mode: {args.mode}")
+    print(f"  start: {effective_start}")
+    print(f"  batch-size: {args.batch_size}")
 
     try:
         config = load_config(args.config)
@@ -197,6 +244,9 @@ def main() -> int:
     if args.dry_run:
         print("\n[DRY-RUN] テスト実行（API呼び出しなし）")
         print(f"  対象銘柄: {codes[:5]}...")
+        print(f"  mode: {args.mode}")
+        print(f"  start: {effective_start}")
+        print(f"  batch-size: {args.batch_size}")
         return 0
 
     print(f"\nOpenD接続先: {config.opend_host}:{config.opend_port}")
@@ -218,7 +268,14 @@ def main() -> int:
         print("\n" + "-" * 60)
         print("日足データ取得・保存")
         print("-" * 60)
-        data_dict = fetch_and_save_daily_klines(quote_service, data_store, codes, num_days=120, force=args.force)
+        data_dict = fetch_and_save_daily_klines(
+            quote_service, data_store, codes,
+            num_days=DEFAULT_NUM_DAYS,
+            force=args.force,
+            mode=args.mode,
+            start=effective_start,
+            batch_size=args.batch_size,
+        )
         if not data_dict:
             print("[ERROR] データが取得できませんでした")
             return 1
@@ -251,6 +308,16 @@ def main() -> int:
         ]
         available_cols = [c for c in display_cols if c in indicators_df.columns]
         print("\n" + indicators_df[available_cols].head().to_string(index=False))
+
+        with sqlite3.connect(data_store.db_path) as conn:
+            bar_count = conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
+            indicator_count = conn.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
+
+        print(f"\n  取得成功: {len(data_dict)}/{len(codes)}銘柄")
+        print(f"  取得モード: {args.mode}")
+        print(f"  バッチサイズ: {args.batch_size}")
+        print(f"  最終daily_bars件数: {bar_count}")
+        print(f"  最終indicators件数: {indicator_count}")
 
         print("\n" + "=" * 60)
         print("日次更新完了")

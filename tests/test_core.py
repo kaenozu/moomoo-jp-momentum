@@ -8,14 +8,16 @@
 
 import sys
 import os
+import sqlite3
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from typing import Optional
-from dataclasses import dataclass
+import pandas as pd
 
-import pytest
+from src.config import Config
+from src.data_store import DataStore
 from src.indicators import StockIndicators
 from src.scoring import Scorer
+from src.backtest_runner import BacktestRunner
 
 
 class DummyConfig:
@@ -35,6 +37,8 @@ class DummyConfig:
             }
         if key_path == "universe":
             return {"min_trade_price": 500, "max_trade_price": 20000}
+        if key_path == "signals.volume":
+            return {"hard_gate": False, "use_percentile": True, "percentile_threshold": 60, "market_low_volume_threshold": 0.8}
         return default
 
 
@@ -52,6 +56,7 @@ def make_indicators(
     history_days=30,
     high_20d=1010,
     volume_ma20=800000,
+    volume_ratio_percentile=None,
 ):
     return StockIndicators(
         code="JP.7203",
@@ -74,6 +79,7 @@ def make_indicators(
         return_5d=return_5d,
         return_5d_vs_benchmark=return_5d_vs_benchmark,
         history_days=history_days,
+        volume_ratio_percentile=volume_ratio_percentile,
     )
 
 
@@ -148,15 +154,15 @@ class TestScoring:
         assert score == 20.0
 
     def test_volume_score(self):
-        """出来高スコア: 1.2倍で8点"""
-        ind = make_indicators(volume_ratio=1.3)
+        """出来高スコア: 1.2倍で絶対値4点＋Pct70で6点＝10点"""
+        ind = make_indicators(volume_ratio=1.3, volume_ratio_percentile=75)
         scorer = Scorer(DummyConfig())
         score = scorer.score_volume(ind)
-        assert score == 8.0
+        assert score == 10.0
 
     def test_volume_score_high(self):
-        """出来高スコア: 2.0倍で満点"""
-        ind = make_indicators(volume_ratio=2.5)
+        """出来高スコア: 2.0倍で絶対値10点＋Pct90で10点＝20点"""
+        ind = make_indicators(volume_ratio=2.5, volume_ratio_percentile=95)
         scorer = Scorer(DummyConfig())
         score = scorer.score_volume(ind)
         assert score == 20.0
@@ -224,3 +230,86 @@ class TestDataFreshness:
         guard = DataFreshnessGuard(TestConfig())
         status = guard.check_freshness(max_stale_days=5)
         assert status.level == "error"
+
+
+class TestDailyBarSource:
+    """daily_barsのデータ由来保存テスト"""
+
+    def test_save_dataframe_preserves_source_columns(self, tmp_path):
+        db_path = tmp_path / "source.db"
+        config = Config()
+        config._config = {"database": {"path": str(db_path)}}
+        store = DataStore(config)
+
+        df = pd.DataFrame([{
+            "time_key": "2026-07-01",
+            "open": 100,
+            "high": 110,
+            "low": 90,
+            "close": 105,
+            "volume": 1000,
+            "turnover": 105000,
+            "source": "yfinance",
+            "turnover_source": "estimated",
+        }])
+
+        assert store.save_dataframe_to_daily_bars(df, "JP.0001") == 1
+
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT source, turnover_source FROM daily_bars WHERE code='JP.0001'"
+            ).fetchone()
+
+        assert row == ("yfinance", "estimated")
+
+
+class TestBacktestRunStats:
+    """バックテスト集計テスト"""
+
+    def test_run_stats_use_peak_drawdown_and_closed_trade_pnl(self, tmp_path):
+        db_path = tmp_path / "backtest.db"
+        config = Config()
+        config._config = {"database": {"path": str(db_path)}}
+        DataStore(config)
+
+        runner = BacktestRunner(config)
+        runner.run_id = 1
+        runner.strategy_name = "momentum"
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO backtest_runs (id, strategy_name, start_date, end_date, initial_cash) VALUES (1, 'momentum', '2026-01-01', '2026-01-03', 100000)"
+            )
+            conn.executemany(
+                "INSERT INTO backtest_equity_curve (run_id, strategy_name, date, total_equity, drawdown_pct) VALUES (1, 'momentum', ?, ?, ?)",
+                [
+                    ("2026-01-01", 100000, 0),
+                    ("2026-01-02", 110000, 0),
+                    ("2026-01-03", 99000, 10),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO backtest_orders (id, run_id, strategy_name, code, side, quantity, order_type, status) VALUES (?, 1, 'momentum', ?, ?, 1, 'MARKET_SIM', 'FILLED')",
+                [
+                    (1, "JP.0001", "BUY"),
+                    (2, "JP.0001", "SELL"),
+                    (3, "JP.0002", "BUY"),
+                    (4, "JP.0002", "SELL"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO backtest_fills (run_id, order_id, strategy_name, code, side, quantity, price, filled_at, fill_mode) VALUES (1, ?, 'momentum', ?, ?, 1, ?, ?, 'test')",
+                [
+                    (1, "JP.0001", "BUY", 100, "2026-01-01"),
+                    (2, "JP.0001", "SELL", 110, "2026-01-02"),
+                    (3, "JP.0002", "BUY", 100, "2026-01-01"),
+                    (4, "JP.0002", "SELL", 95, "2026-01-03"),
+                ],
+            )
+
+        stats = runner._calculate_run_stats()
+
+        assert stats["max_drawdown_pct"] == 10
+        assert stats["trade_count"] == 2
+        assert stats["win_rate"] == 50
+        assert stats["profit_factor"] == 2

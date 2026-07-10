@@ -61,6 +61,15 @@ class SignalDetector:
         self.downgrade_extreme_volume_ratio = self.screening_config.get(
             "downgrade_extreme_volume_ratio", True
         )
+        self.max_return_5d = self.screening_config.get("max_return_5d", 10.0)
+        self.max_return_20d = self.screening_config.get("max_return_20d", 30.0)
+
+        # volume条件設定（config.yaml signals.volume から読み込み）
+        volume_cfg = config.get("signals.volume", {})
+        self.volume_hard_gate = volume_cfg.get("hard_gate", False)
+        self.volume_use_percentile = volume_cfg.get("use_percentile", True)
+        self.volume_percentile_threshold = volume_cfg.get("percentile_threshold", 60)
+        self.volume_market_low_threshold = volume_cfg.get("market_low_volume_threshold", 0.8)
 
     def _is_etf(self, code: str) -> bool:
         """ETFかどうかを簡易判定する"""
@@ -154,13 +163,29 @@ class SignalDetector:
         else:
             is_buy_candidate = False
 
-        if indicators.return_5d is not None and indicators.return_5d > 0:
+        if indicators.return_5d is not None and 0 < indicators.return_5d < self.max_return_5d:
             buy_reasons.append(f"5日リターン{indicators.return_5d:.1f}%")
         else:
             is_buy_candidate = False
 
-        if indicators.volume_ratio is not None and indicators.volume_ratio >= self.min_volume_ratio:
-            buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍")
+        # volume_ratio: ハードゲートかスコア加点か
+        vol_ok = False
+        market_is_low = (
+            indicators.market_median_volume_ratio is not None
+            and indicators.market_median_volume_ratio < self.volume_market_low_threshold
+        )
+        if indicators.volume_ratio is not None:
+            if self.volume_hard_gate and not market_is_low:
+                vol_ok = indicators.volume_ratio >= self.min_volume_ratio
+            elif self.volume_use_percentile and indicators.volume_ratio_percentile is not None:
+                vol_ok = indicators.volume_ratio_percentile >= self.volume_percentile_threshold
+            else:
+                vol_ok = indicators.volume_ratio >= self.min_volume_ratio * 0.5
+        if vol_ok:
+            if indicators.volume_ratio_percentile is not None:
+                buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍(P{indicators.volume_ratio_percentile:.0f})")
+            else:
+                buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍")
         else:
             is_buy_candidate = False
 

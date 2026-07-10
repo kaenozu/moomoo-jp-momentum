@@ -1,0 +1,5042 @@
+[
+  {
+    "code": "US.SPY",
+    "name": "SPDR S&P 500 ETF",
+    "type": "etf",
+    "role": "benchmark",
+    "tradable": false,
+    "sector": "ETF",
+    "benchmark_group": "SP500",
+    "notes": "S&P 500 comparison"
+  },
+  {
+    "code": "US.QQQ",
+    "name": "Invesco QQQ Trust",
+    "type": "etf",
+    "role": "benchmark",
+    "tradable": false,
+    "sector": "ETF",
+    "benchmark_group": "NASDAQ100",
+    "notes": "NASDAQ 100 comparison"
+  },
+  {
+    "code": "US.DIA",
+    "name": "SPDR Dow Jones Industrial Average ETF",
+    "type": "etf",
+    "role": "benchmark",
+    "tradable": false,
+    "sector": "ETF",
+    "benchmark_group": "DJIA",
+    "notes": "Dow Jones comparison"
+  },
+  {
+    "code": "US.IWM",
+    "name": "iShares Russell 2000 ETF",
+    "type": "etf",
+    "role": "benchmark",
+    "tradable": false,
+    "sector": "ETF",
+    "benchmark_group": "RUSSELL2000",
+    "notes": "Russell 2000 comparison"
+  },
+  {
+    "code": "US.MU",
+    "name": "Micron Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SNDK",
+    "name": "SanDisk",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TSLA",
+    "name": "Tesla",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NVDA",
+    "name": "NVIDIA",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AAPL",
+    "name": "Apple",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MSFT",
+    "name": "Microsoft",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INTC",
+    "name": "Intel",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMD",
+    "name": "Advanced Micro Devices",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.META",
+    "name": "Meta Platforms",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMZN",
+    "name": "Amazon",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SPCX",
+    "name": "SpaceX",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AVGO",
+    "name": "Broadcom",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MRVL",
+    "name": "Marvell Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GOOGL",
+    "name": "Alphabet-A",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMAT",
+    "name": "Applied Materials",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TSM",
+    "name": "Taiwan Semiconductor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PLTR",
+    "name": "Palantir",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LRCX",
+    "name": "Lam Research",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ORCL",
+    "name": "Oracle",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KLAC",
+    "name": "KLA Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GOOG",
+    "name": "Alphabet-C",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NBIS",
+    "name": "NEBIUS",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.STX",
+    "name": "Seagate Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WDC",
+    "name": "Western Digital",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ASML",
+    "name": "ASML Holding",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HOOD",
+    "name": "Robinhood",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BE",
+    "name": "Bloom Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GLW",
+    "name": "Corning",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NFLX",
+    "name": "Netflix",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LLY",
+    "name": "Eli Lilly and Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LITE",
+    "name": "Lumentum",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.V",
+    "name": "Visa",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MSTR",
+    "name": "Strategy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CAT",
+    "name": "Caterpillar",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.QCOM",
+    "name": "Qualcomm",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WMT",
+    "name": "Walmart",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APP",
+    "name": "Applovin",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALAB",
+    "name": "Astera Labs",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TXN",
+    "name": "Texas Instruments",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.JPM",
+    "name": "JPMorgan",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CSCO",
+    "name": "Cisco",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRWV",
+    "name": "CoreWeave",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PANW",
+    "name": "Palo Alto Networks",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DELL",
+    "name": "Dell Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COST",
+    "name": "Costco",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.T",
+    "name": "AT&T",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GEV",
+    "name": "GE Vernova",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BKNG",
+    "name": "Booking Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VZ",
+    "name": "Verizon",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ARM",
+    "name": "Arm Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.IREN",
+    "name": "IREN Ltd",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COHR",
+    "name": "Coherent",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AAL",
+    "name": "American Airlines",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ADI",
+    "name": "Analog Devices",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RKLB",
+    "name": "Rocket Lab",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TER",
+    "name": "Teradyne",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRDO",
+    "name": "Credo Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BRK.B",
+    "name": "Berkshire Hathaway-B",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NOW",
+    "name": "ServiceNow",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SNOW",
+    "name": "Snowflake",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.JNJ",
+    "name": "Johnson & Johnson",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MA",
+    "name": "MasterCard",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRWD",
+    "name": "CrowdStrike",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AAOI",
+    "name": "Applied Optoelectronics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MCD",
+    "name": "McDonald's",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ACN",
+    "name": "Accenture",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.XOM",
+    "name": "Exxon Mobil",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PEP",
+    "name": "PepsiCo",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ABBV",
+    "name": "AbbVie",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VRT",
+    "name": "Vertiv Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRM",
+    "name": "Salesforce",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ADBE",
+    "name": "Adobe",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BAC",
+    "name": "Bank of America",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.IBM",
+    "name": "IBM Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UNH",
+    "name": "UnitedHealth",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SPGI",
+    "name": "S&P Global",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COIN",
+    "name": "Coinbase",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CVX",
+    "name": "Chevron",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GS",
+    "name": "Goldman Sachs",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ANET",
+    "name": "Arista Networks",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MPWR",
+    "name": "Monolithic Power Systems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NXPI",
+    "name": "NXP Semiconductors",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FPS",
+    "name": "Forgent Power Solutions",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KO",
+    "name": "Coca-Cola",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NKE",
+    "name": "Nike",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SOFI",
+    "name": "SoFi Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ON",
+    "name": "ON Semiconductor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RIVN",
+    "name": "Rivian Automotive",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALSN",
+    "name": "Allison Transmission",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PG",
+    "name": "Procter & Gamble",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INTU",
+    "name": "Intuit",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APH",
+    "name": "Amphenol",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BA",
+    "name": "Boeing",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ASTS",
+    "name": "AST SpaceMobile",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HONA",
+    "name": "Honeywell Aerospace",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.C",
+    "name": "Citigroup",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ISRG",
+    "name": "Intuitive Surgical",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CBRS",
+    "name": "Cerebras Systems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PFE",
+    "name": "Pfizer",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HON",
+    "name": "Honeywell",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TMUS",
+    "name": "T-Mobile US",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MCHP",
+    "name": "Microchip Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NEE",
+    "name": "NextEra Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LIN",
+    "name": "Linde",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GE",
+    "name": "GE Aerospace",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TMO",
+    "name": "Thermo Fisher Scientific",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AEP",
+    "name": "American Electric Power",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SMCI",
+    "name": "Super Micro Computer",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BSX",
+    "name": "Boston Scientific",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ORLY",
+    "name": "O'Reilly Automotive",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRCL",
+    "name": "Circle",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.STM",
+    "name": "STMicroelectronics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FIX",
+    "name": "Comfort Systems USA",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BABA",
+    "name": "Alibaba",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DIS",
+    "name": "Disney",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HD",
+    "name": "Home Depot",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MRNA",
+    "name": "Moderna",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CME",
+    "name": "CME Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GILD",
+    "name": "Gilead Sciences",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ETN",
+    "name": "Eaton",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UBER",
+    "name": "Uber Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CMCSA",
+    "name": "Comcast",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RTX",
+    "name": "RTX Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CEG",
+    "name": "Constellation Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MRK",
+    "name": "Merck & Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ABT",
+    "name": "Abbott Laboratories",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WELL",
+    "name": "Welltower",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VRTX",
+    "name": "Vertex Pharmaceuticals",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NOK",
+    "name": "Nokia Oyj",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ROKU",
+    "name": "Roku Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NOC",
+    "name": "Northrop Grumman",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMGN",
+    "name": "Amgen",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CIEN",
+    "name": "Ciena",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WFC",
+    "name": "Wells Fargo & Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FLEX",
+    "name": "Flex Ltd",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PM",
+    "name": "Philip Morris International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DASH",
+    "name": "DoorDash",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ENTG",
+    "name": "Entegris",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MTSI",
+    "name": "MACOM Technology Solutions",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SCHW",
+    "name": "Charles Schwab",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.IONQ",
+    "name": "IonQ Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RDDT",
+    "name": "Reddit",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AXP",
+    "name": "American Express",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PWR",
+    "name": "Quanta Services",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.JCI",
+    "name": "Johnson Controls",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SYK",
+    "name": "Stryker Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NEM",
+    "name": "Newmont",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SPOT",
+    "name": "Spotify Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SBUX",
+    "name": "Starbucks",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FCX",
+    "name": "Freeport-McMoRan",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APLD",
+    "name": "Applied Digital",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SHOP",
+    "name": "Shopify",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MDT",
+    "name": "Medtronic",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DE",
+    "name": "Deere",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MKSI",
+    "name": "MKS Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MS",
+    "name": "Morgan Stanley",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AVAV",
+    "name": "AeroVironment",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DHR",
+    "name": "Danaher",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DDOG",
+    "name": "Datadog",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AEM",
+    "name": "Agnico Eagle",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HPE",
+    "name": "Hewlett Packard Enterprise",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BP",
+    "name": "BP PLC",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ASX",
+    "name": "ASE Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CDNS",
+    "name": "Cadence Design Systems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SE",
+    "name": "Sea",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NU",
+    "name": "Nu Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LMT",
+    "name": "Lockheed Martin",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TJX",
+    "name": "TJX Companies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MCK",
+    "name": "McKesson",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APO",
+    "name": "Apollo Global Management",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WULF",
+    "name": "TeraWulf",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SHW",
+    "name": "Sherwin-Williams",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COP",
+    "name": "ConocoPhillips",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CLS",
+    "name": "Celestica",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MELI",
+    "name": "MercadoLibre",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PGR",
+    "name": "Progressive",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.STRL",
+    "name": "Sterling Infrastructure",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FTNT",
+    "name": "Fortinet",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PDD",
+    "name": "PDD Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.REGN",
+    "name": "Regeneron Pharmaceuticals",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AJG",
+    "name": "Arthur J. Gallagher",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NET",
+    "name": "Cloudflare",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ELV",
+    "name": "Elevance Health",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PATH",
+    "name": "UiPath",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ONDS",
+    "name": "Ondas",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CSX",
+    "name": "CSX Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PYPL",
+    "name": "PayPal",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HCA",
+    "name": "HCA Healthcare",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GPC",
+    "name": "Genuine Parts",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TD",
+    "name": "The Toronto-Dominion Bank",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.F",
+    "name": "Ford Motor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DUK",
+    "name": "Duke Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MARA",
+    "name": "MARA Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BKR",
+    "name": "Baker Hughes",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VST",
+    "name": "Vistra Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DOCN",
+    "name": "DigitalOcean",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UNP",
+    "name": "Union Pacific",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CIFR",
+    "name": "Cipher Digital",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KEYS",
+    "name": "Keysight Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RCL",
+    "name": "Royal Caribbean",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AXON",
+    "name": "Axon Enterprise",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BLK",
+    "name": "Blackrock",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SNPS",
+    "name": "Synopsys",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DVN",
+    "name": "Devon Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HWM",
+    "name": "Howmet Aerospace",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ONTO",
+    "name": "Onto Innovation",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TSEM",
+    "name": "Tower Semiconductor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NVO",
+    "name": "Novo-Nordisk A/S",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ADSK",
+    "name": "Autodesk",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ICE",
+    "name": "Intercontinental Exchange",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HIMS",
+    "name": "Hims & Hers Health",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.IBKR",
+    "name": "Interactive Brokers",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CDE",
+    "name": "Coeur Mining",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BB",
+    "name": "BlackBerry",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EXC",
+    "name": "Exelon",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ADP",
+    "name": "Automatic Data Processing",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CI",
+    "name": "Cigna Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BMNR",
+    "name": "Bitmine Immersion Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UAL",
+    "name": "United Airlines",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AXTI",
+    "name": "AXT Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RVMD",
+    "name": "Revolution Medicines",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CMI",
+    "name": "Cummins",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FSLR",
+    "name": "First Solar",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GH",
+    "name": "Guardant Health",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WDAY",
+    "name": "Workday",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HLT",
+    "name": "Hilton Worldwide",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BMY",
+    "name": "Bristol-Myers Squibb",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MAR",
+    "name": "Marriott International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CVS",
+    "name": "CVS Health",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APD",
+    "name": "Air Products & Chemicals",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RY",
+    "name": "Royal Bank of Canada",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ABVX",
+    "name": "Abivax S.A.",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MDB",
+    "name": "MongoDB",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CVNA",
+    "name": "Carvana",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VLO",
+    "name": "Valero Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DAL",
+    "name": "Delta Air Lines",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SMTC",
+    "name": "Semtech",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PTCT",
+    "name": "PTC Therapeutics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HUM",
+    "name": "Humana",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MNST",
+    "name": "Monster Beverage",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TECH",
+    "name": "Bio-Techne",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CLRO",
+    "name": "ClearOne",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HUT",
+    "name": "Hut 8",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ILMN",
+    "name": "Illumina",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MBGL",
+    "name": "Mobility Global",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KDP",
+    "name": "Keurig Dr Pepper",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FIG",
+    "name": "Figma Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MDLZ",
+    "name": "Mondelez International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CCL",
+    "name": "Carnival",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CB",
+    "name": "Chubb Ltd",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KMB",
+    "name": "Kimberly-Clark",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CMG",
+    "name": "Chipotle Mexican Grill",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LOW",
+    "name": "Lowe's Companies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SITM",
+    "name": "SiTime",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COF",
+    "name": "Capital One Financial",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SLB",
+    "name": "SLB Ltd",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.QXO",
+    "name": "QXO Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UMC",
+    "name": "United Microelectronics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ABNB",
+    "name": "Airbnb",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TTWO",
+    "name": "Take-Two Interactive Software",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OKLO",
+    "name": "Oklo Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SO",
+    "name": "Southern",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FTI",
+    "name": "TechnipFMC",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FOXA",
+    "name": "Fox Corp-A",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMKR",
+    "name": "Amkor Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TT",
+    "name": "Trane Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.QBTS",
+    "name": "D-Wave Quantum",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TRV",
+    "name": "The Travelers Companies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TTMI",
+    "name": "TTM Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VEEV",
+    "name": "Veeva Systems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HUBB",
+    "name": "Hubbell",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MXL",
+    "name": "MaxLinear",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TDG",
+    "name": "TransDigm",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CAH",
+    "name": "Cardinal Health",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AA",
+    "name": "Alcoa",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FISV",
+    "name": "Fiserv",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.JOBY",
+    "name": "Joby Aviation",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VSH",
+    "name": "Vishay Intertechnology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GD",
+    "name": "General Dynamics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WM",
+    "name": "Waste Management",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RBLX",
+    "name": "Roblox",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GIS",
+    "name": "General Mills",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WMB",
+    "name": "Williams",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OUST",
+    "name": "Ouster",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EA",
+    "name": "Electronic Arts Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RGTI",
+    "name": "Rigetti Computing",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HL",
+    "name": "Hecla Mining",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TRGP",
+    "name": "Targa Resources",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MO",
+    "name": "Altria",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FANG",
+    "name": "Diamondback Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AZN",
+    "name": "AstraZeneca",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MPC",
+    "name": "Marathon Petroleum",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AKAM",
+    "name": "Akamai",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GM",
+    "name": "General Motors",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MCO",
+    "name": "Moody's",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NVT",
+    "name": "nVent Electric",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.IDXX",
+    "name": "IDEXX Laboratories Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AWK",
+    "name": "American Water Works",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EME",
+    "name": "EMCOR Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NVTS",
+    "name": "Navitas Semiconductor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BX",
+    "name": "Blackstone",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OPEN",
+    "name": "Opendoor Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CTAS",
+    "name": "Cintas",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OKTA",
+    "name": "Okta",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CPRT",
+    "name": "Copart",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.XYZ",
+    "name": "Block",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.COR",
+    "name": "Cencora",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CARR",
+    "name": "Carrier Global",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.THC",
+    "name": "Tenet Healthcare",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LYV",
+    "name": "Live Nation Entertainment",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LHX",
+    "name": "L3Harris Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HSY",
+    "name": "Hershey",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VIK",
+    "name": "Viking Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TGT",
+    "name": "Target",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LNG",
+    "name": "Cheniere Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MLM",
+    "name": "Martin Marietta Materials",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RIOT",
+    "name": "Riot Platforms",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SHEL",
+    "name": "Shell",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CHTR",
+    "name": "Charter Communications",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ROST",
+    "name": "Ross Stores",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AON",
+    "name": "Aon PLC",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MOD",
+    "name": "Modine Manufacturing",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OXY",
+    "name": "Occidental Petroleum",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MDLN",
+    "name": "Medline",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRH",
+    "name": "CRH PLC",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NRG",
+    "name": "NRG Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CASY",
+    "name": "Caseys General Stores",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RKT",
+    "name": "Rocket",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ECHO",
+    "name": "EchoStar",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.JBL",
+    "name": "Jabil",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CORZ",
+    "name": "Core Scientific",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.Q",
+    "name": "Qnity Electronics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VMC",
+    "name": "Vulcan Materials",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TXNM",
+    "name": "TXNM Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DLTR",
+    "name": "Dollar Tree",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NVMI",
+    "name": "Nova",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RMBS",
+    "name": "Rambus",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CTSH",
+    "name": "Cognizant",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALL",
+    "name": "Allstate",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.APGE",
+    "name": "Apogee Therapeutics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CRS",
+    "name": "Carpenter Technology",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CL",
+    "name": "Colgate-Palmolive",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WBD",
+    "name": "Warner Bros Discovery",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GOOGN",
+    "name": "ALPHABET INC DEP SHS REPSTG 1/20TH INT B",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PH",
+    "name": "Parker Hannifin",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ROK",
+    "name": "Rockwell Automation",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SWKS",
+    "name": "Skyworks Solutions",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TPR",
+    "name": "Tapestry",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FDX",
+    "name": "FedEx",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PAYX",
+    "name": "Paychex",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NDAQ",
+    "name": "Nasdaq",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PPL",
+    "name": "PPL Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SAP",
+    "name": "SAP SE",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BNY",
+    "name": "Bank of New York Mellon",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ZS",
+    "name": "Zscaler",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ORKA",
+    "name": "Oruka Therapeutics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DG",
+    "name": "Dollar General",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.B",
+    "name": "Barrick Mining",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.USB",
+    "name": "U.S. Bancorp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KTOS",
+    "name": "Kratos Defense & Security Solutions",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EOG",
+    "name": "EOG Resources",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.URI",
+    "name": "United Rentals",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TEL",
+    "name": "TE Connectivity",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PEG",
+    "name": "Public Service Enterprise Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EFX",
+    "name": "Equifax",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UPS",
+    "name": "United Parcel Service",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CNP",
+    "name": "CenterPoint Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VRSK",
+    "name": "Verisk Analytics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EMR",
+    "name": "Emerson Electric",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CCJ",
+    "name": "Cameco",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.YUM",
+    "name": "Yum! Brands",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CNQ",
+    "name": "Canadian Natural Resources",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KKR",
+    "name": "KKR & Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MRSH",
+    "name": "Marsh",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KHC",
+    "name": "The Kraft Heinz",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CFG",
+    "name": "Citizens Financial",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ROP",
+    "name": "Roper Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TEM",
+    "name": "Tempus AI",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ARGX",
+    "name": "argenx SE",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GT",
+    "name": "Goodyear Tire & Rubber",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BIDU",
+    "name": "Baidu",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SN",
+    "name": "SharkNinja",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.STLD",
+    "name": "Steel Dynamics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NTRA",
+    "name": "Natera",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ECL",
+    "name": "Ecolab",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WWD",
+    "name": "Woodward",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TFC",
+    "name": "Truist Financial",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VICR",
+    "name": "Vicor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALB",
+    "name": "Albemarle",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.RRX",
+    "name": "Regal Rexnord",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PCAR",
+    "name": "PACCAR Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KR",
+    "name": "The Kroger Co.",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GNRC",
+    "name": "Generac",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.XEL",
+    "name": "Xcel Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PSX",
+    "name": "Phillips 66",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TWLO",
+    "name": "Twilio",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PNC",
+    "name": "PNC Financial Services",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FN",
+    "name": "Fabrinet",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ITW",
+    "name": "Illinois Tool Works",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALNY",
+    "name": "Alnylam Pharmaceuticals",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GWW",
+    "name": "W.W. Grainger",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FICO",
+    "name": "Fair Isaac",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GPN",
+    "name": "Global Payments",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AMP",
+    "name": "Ameriprise Financial",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PB",
+    "name": "Prosperity Bancshares",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FCEL",
+    "name": "FuelCell Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TLN",
+    "name": "Talen Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EXPE",
+    "name": "Expedia",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FAST",
+    "name": "Fastenal",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LSCC",
+    "name": "Lattice Semiconductor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.QSR",
+    "name": "Restaurant Brands International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.STZ",
+    "name": "Constellation Brands",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AEIS",
+    "name": "Advanced Energy Industries",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MTZ",
+    "name": "MasTec",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DOW",
+    "name": "Dow Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ZTS",
+    "name": "Zoetis",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TE",
+    "name": "T1 Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BDX",
+    "name": "Becton Dickinson & Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DHI",
+    "name": "D.R. Horton",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PL",
+    "name": "Planet Labs PBC",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FDS",
+    "name": "FactSet Research Systems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AFRM",
+    "name": "Affirm Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NUE",
+    "name": "Nucor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BNS",
+    "name": "Bank of Nova Scotia",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MSCI",
+    "name": "MSCI Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ETR",
+    "name": "Entergy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FITB",
+    "name": "Fifth Third Bancorp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LULU",
+    "name": "Lululemon Athletica",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.LII",
+    "name": "Lennox International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HAL",
+    "name": "Halliburton",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CELH",
+    "name": "Celsius Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ZM",
+    "name": "Zoom Communications",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SYY",
+    "name": "Sysco Corp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INCY",
+    "name": "Incyte",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DRI",
+    "name": "Darden Restaurants",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INSM",
+    "name": "Insmed",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NCLH",
+    "name": "Norwegian Cruise",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.KMI",
+    "name": "Kinder Morgan",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ACMR",
+    "name": "ACM Research",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FTAI",
+    "name": "FTAI Aviation",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ENPH",
+    "name": "Enphase Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EW",
+    "name": "Edwards Lifesciences",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.VIAV",
+    "name": "Viavi Solutions",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HPQ",
+    "name": "HP Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WCC",
+    "name": "WESCO International",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NTAP",
+    "name": "NetApp",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GTLS",
+    "name": "Chart Industries",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NXT",
+    "name": "Nextpower",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TSCO",
+    "name": "Tractor Supply",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.D",
+    "name": "Dominion Resources",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TOST",
+    "name": "Toast",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UTHR",
+    "name": "United Therapeutics",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INIO",
+    "name": "INNIO N.V",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CPNG",
+    "name": "Coupang",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GEHC",
+    "name": "GE HealthCare Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ELF",
+    "name": "e.l.f. Beauty",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MMM",
+    "name": "3M",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FROG",
+    "name": "JFrog",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TKO",
+    "name": "TKO Group Holdings",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.DECK",
+    "name": "Deckers Outdoor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EXE",
+    "name": "Expand Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.A",
+    "name": "Agilent Technologies",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.PTC",
+    "name": "PTC Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SMR",
+    "name": "NuScale Power",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WAT",
+    "name": "Waters",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.HBAN",
+    "name": "Huntington Bancshares",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CCEP",
+    "name": "Coca-Cola Europacific",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SU",
+    "name": "Suncor Energy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FRSH",
+    "name": "Freshworks",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.MET",
+    "name": "MetLife",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CLF",
+    "name": "Cleveland-Cliffs",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NSC",
+    "name": "Norfolk Southern",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.USAR",
+    "name": "USA Rare Earth",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AIG",
+    "name": "American International Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.EL",
+    "name": "Estee Lauder",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AU",
+    "name": "AngloGold Ashanti",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BBY",
+    "name": "Best Buy",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.INFQ",
+    "name": "Infleqtion",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.XPO",
+    "name": "XPO",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CTVA",
+    "name": "Corteva",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.GFS",
+    "name": "GlobalFoundries",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.FORM",
+    "name": "FormFactor",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.NI",
+    "name": "NiSource",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.UCTT",
+    "name": "Ultra Clean",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OKE",
+    "name": "ONEOK Inc",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WEN",
+    "name": "The Wendy's Co",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BSP",
+    "name": "BENDING SPOONS S.P.A",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.AHR",
+    "name": "American Healthcare REIT",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.SEI",
+    "name": "Solaris Energy Infrastructure",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CLSK",
+    "name": "CleanSpark",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.WBS",
+    "name": "Webster Financial",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ODFL",
+    "name": "Old Dominion Freight Line",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ALGM",
+    "name": "Allegro Microsystems",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.CNC",
+    "name": "Centene",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OWL",
+    "name": "Blue Owl Capital",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.TEAM",
+    "name": "Atlassian",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.ULTA",
+    "name": "Ulta Beauty",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.OMC",
+    "name": "Omnicom Group",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.BUD",
+    "name": "Anheuser-Busch Inbev",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  },
+  {
+    "code": "US.USFD",
+    "name": "US Foods Holding",
+    "type": "stock",
+    "role": "trade_candidate",
+    "tradable": true,
+    "sector": "General",
+    "benchmark_group": null,
+    "notes": ""
+  }
+]

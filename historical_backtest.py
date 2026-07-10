@@ -56,11 +56,10 @@ def display_run_summary(conn, run_id: int):
     print(f"  最終資産: {run['final_equity']:,.0f}円")
     print(f"  総リターン: {run['total_return_pct']:.2f}%")
     if run['benchmark_2559_return']:
-        print(f"  2559リターン: {run['benchmark_2559_return']:.2f}%")
-        print(f"  2559超過: {run['excess_vs_2559']:.2f}%")
+        print(f"  ベンチマークリターン: {run['benchmark_2559_return']:.2f}%")
+        print(f"  ベンチマーク超過: {run['excess_vs_2559']:.2f}%")
     if run['benchmark_1306_return']:
-        print(f"  1306リターン: {run['benchmark_1306_return']:.2f}%")
-        print(f"  1306超過: {run['excess_vs_1306']:.2f}%")
+        print(f"  副ベンチマーク: {run['benchmark_1306_return']:.2f}%")
 
     cnt = conn.execute("SELECT COUNT(*) FROM backtest_fills WHERE run_id=? AND side='SELL'", (run_id,)).fetchone()[0]
     print(f"  クローズドトレード: {cnt}件")
@@ -143,10 +142,11 @@ def export_trade_diagnostics(config, run_id: int, label: str = ""):
         ret_5d = (entry_close - close_5d_ago) / close_5d_ago * 100 if entry_close and close_5d_ago else None
         ret_20d = (entry_close - close_20d_ago) / close_20d_ago * 100 if entry_close and close_20d_ago else None
 
-        # benchmark比較
+        # benchmark比較（引数のconfigを使用）
+        _bm_code = config.get('signals.relative_strength.benchmark_code', 'US.SPY')
         bm_5d_ago = conn.execute(
-            "SELECT close FROM daily_bars WHERE code='JP.1306' AND date <= ? ORDER BY date DESC LIMIT 5",
-            (entry_date,),
+            "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 5",
+            (_bm_code, entry_date),
         ).fetchall()
         bm_close_5d = bm_5d_ago[-1][0] if len(bm_5d_ago) >= 5 else None
         bm_close_now = bm_5d_ago[0][0] if bm_5d_ago else None

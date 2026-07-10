@@ -134,11 +134,17 @@ class Screener:
             high_20d_distance=_none_if_nan(row.get("distance_from_high_20d")),
             daily_return=_none_if_nan(row.get("daily_return")),
             return_5d=_none_if_nan(row.get("return_5d")),
+            return_20d=_none_if_nan(row.get("return_20d")),
+            return_60d=_none_if_nan(row.get("return_60d")),
             return_5d_vs_benchmark=_none_if_nan(row.get("return_5d_vs_benchmark")),
             return_20d_vs_benchmark=_none_if_nan(row.get("return_20d_vs_benchmark")),
             return_60d_vs_benchmark=_none_if_nan(row.get("return_60d_vs_benchmark")),
             relative_strength_rank=_none_if_nan(row.get("relative_strength_rank")),
             history_days=int(_none_if_nan(row.get("history_days")) or 0),
+            volume_ratio_percentile=_none_if_nan(row.get("volume_ratio_percentile")),
+            volume_ratio_rank=_none_if_nan(row.get("volume_ratio_rank")),
+            relative_volume_ratio=_none_if_nan(row.get("relative_volume_ratio")),
+            market_median_volume_ratio=_none_if_nan(row.get("market_median_volume_ratio")),
         )
 
     def _apply_universe(self, candidate: Candidate) -> Candidate:
@@ -195,10 +201,19 @@ class Screener:
 
         signal_detector = SignalDetector(self.config)
         scorer = Scorer(self.config)
+
+        # クロスセクション統計（パーセンタイル等）を計算
+        from .indicators import add_cross_sectional_stats
+        pairs: list[tuple[pd.Series, StockIndicators]] = []
+        for _, row in indicators_df.iterrows():
+            ind = self._row_to_indicators(row)
+            pairs.append((row, ind))
+        all_indicators = [ind for _, ind in pairs]
+        all_indicators = add_cross_sectional_stats(all_indicators)
+
         candidates: list[Candidate] = []
 
-        for _, row in indicators_df.iterrows():
-            indicators = self._row_to_indicators(row)
+        for row, indicators in pairs:
             signal = signal_detector.detect_signal(indicators)
             score_breakdown = scorer.score(indicators, signal)
             risk_warnings_str = "; ".join(signal.risk_warnings) if signal.risk_warnings else ""

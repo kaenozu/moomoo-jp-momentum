@@ -64,21 +64,33 @@ class Scorer:
         return score
 
     def score_volume(self, indicators: StockIndicators) -> float:
-        """出来高スコア（最大20点）"""
+        """出来高スコア（最大20点）
+        クロスセクションのパーセンタイル加点と絶対値加点のハイブリッド。"""
         score = 0.0
         ratio = indicators.volume_ratio
+        pct = indicators.volume_ratio_percentile
 
         if ratio is None:
             return score
 
+        # 絶対値加点（従来）
         if ratio >= 1.2:
-            score += 8.0
+            score += 4.0
         if ratio >= 1.5:
-            score += 6.0
+            score += 3.0
         if ratio >= 2.0:
-            score += 6.0
+            score += 3.0
 
-        return min(score, 20.0)
+        # クロスセクション相対加点
+        if pct is not None:
+            if pct >= 80:
+                score += 10.0
+            elif pct >= 60:
+                score += 6.0
+            elif pct < 20:
+                score -= 5.0
+
+        return max(0.0, min(20.0, score))
 
     def score_relative_strength(self, indicators: StockIndicators) -> float:
         """相対強度スコア（最大25点）。ベンチマーク比較ベース。"""
