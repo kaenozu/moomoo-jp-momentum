@@ -136,7 +136,6 @@ class BacktestRunner:
         # Idle cash allocation tracking
         idle_code = self._idle_cash_benchmark_code()
         idle_bench_prev = None
-        idle_cash_accum = 0.0  # cumulative PnL from idle cash bench allocation
 
         # Trailing stop tracking: code -> highest close seen
         trailing_highs: dict[str, float] = {}
@@ -295,15 +294,14 @@ class BacktestRunner:
             if isinstance(secondary_codes, list) and secondary_codes:
                 bm_secondary = self._benchmark_value(secondary_codes[0]["code"], day)
 
-            # Idle cash allocation: apply benchmark return to uninvested cash
-            total_equity_with_idle = total_equity
+            # Idle cash allocation: apply benchmark return directly to self.cash
             if idle_code:
                 bm_today = self._benchmark_value(idle_code, day)
                 if bm_today is not None and idle_bench_prev is not None:
                     daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                    idle_cash_accum += self.cash * daily_bm_ret
+                    self.cash = self.cash * (1 + daily_bm_ret)
                 idle_bench_prev = bm_today
-                total_equity_with_idle = total_equity + idle_cash_accum
+            total_equity_with_idle = total_equity
 
             peak_equity = max(peak_equity, total_equity_with_idle)
             drawdown = max(0, (peak_equity - total_equity_with_idle) / peak_equity * 100) if peak_equity else 0
@@ -318,7 +316,7 @@ class BacktestRunner:
         final_equity = self.cash + sum(
             (self._bars_up_to(p["code"], days[-1]).iloc[0]["close"] if not self._bars_up_to(p["code"], days[-1]).empty else 0) * p["quantity"]
             for p in self._get_all_positions() if p["quantity"] > 0
-        ) + idle_cash_accum
+        )
         total_return = (final_equity - self.initial_cash) / self.initial_cash * 100
 
         bm_code = self._benchmark_code()

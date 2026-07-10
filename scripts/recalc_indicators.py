@@ -81,44 +81,15 @@ def main():
     df = add_relative_strength(df, benchmark_code)
     logger.info("relative strength added (benchmark=%s)", benchmark_code)
 
-    # Save to indicators table
-    # The table schema: (code, date, close, volume, turnover, daily_return,
-    #  ma5, ma25, high_20d, distance_from_high_20d, volume_ma20, volume_ratio,
-    #  return_5d, history_days, return_5d_vs_benchmark, return_20d_vs_benchmark,
-    #  return_60d_vs_benchmark, relative_strength_rank, updated_at)
-    # Plus new columns: volume_ratio_percentile, volume_ratio_rank,
-    #  relative_volume_ratio, market_median_volume_ratio
-
-    # Check if new columns exist
+    # Save to indicators table using the shared helper
+    from daily_update import save_indicators_to_db, save_benchmark_prices_from_indicators
+    saved_count = save_indicators_to_db(data_store, df)
+    benchmark_code_set = set()
     with sqlite3.connect(db_path) as conn:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(indicators)").fetchall()]
-
-    now = pd.Timestamp.now().isoformat()
-    sql_base = """
-        INSERT OR REPLACE INTO indicators
-        (code, date, close, volume, turnover, daily_return,
-         ma5, ma25, high_20d, distance_from_high_20d,
-         volume_ma20, volume_ratio, return_5d, history_days,
-         return_5d_vs_benchmark, return_20d_vs_benchmark, return_60d_vs_benchmark,
-         relative_strength_rank, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
-
-    params = []
-    for _, row in df.iterrows():
-        params.append((
-            row.get("code"), row.get("date"), row.get("close"), row.get("volume"),
-            row.get("turnover"), row.get("daily_return"), row.get("ma5"), row.get("ma25"),
-            row.get("high_20d"), row.get("high_20d_distance"), row.get("volume_ma20"),
-            row.get("volume_ratio"), row.get("return_5d"), row.get("history_days"),
-            row.get("return_5d_vs_benchmark"), row.get("return_20d_vs_benchmark"),
-            row.get("return_60d_vs_benchmark"), row.get("relative_strength_rank"), now,
-        ))
-
-    with sqlite3.connect(db_path) as conn:
-        conn.executemany(sql_base, params)
-        conn.commit()
-    logger.info("saved to indicators table: %d rows", len(params))
+        for r in conn.execute("SELECT code FROM symbols WHERE role='benchmark'").fetchall():
+            benchmark_code_set.add(r[0])
+    bench_count = save_benchmark_prices_from_indicators(data_store, df, benchmark_code_set)
+    logger.info("saved indicators=%d benchmark_prices=%d", saved_count, bench_count)
 
     # Report
     with sqlite3.connect(db_path) as conn:

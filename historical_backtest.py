@@ -142,11 +142,8 @@ def export_trade_diagnostics(config, run_id: int, label: str = ""):
         ret_5d = (entry_close - close_5d_ago) / close_5d_ago * 100 if entry_close and close_5d_ago else None
         ret_20d = (entry_close - close_20d_ago) / close_20d_ago * 100 if entry_close and close_20d_ago else None
 
-        # benchmark比較（configのprimary benchmarkを使用）
-        import yaml
-        with open('config.yaml', encoding='utf-8') as f:
-            _cfg = yaml.safe_load(f)
-        _bm_code = _cfg.get('signals', {}).get('relative_strength', {}).get('benchmark_code', 'US.SPY')
+        # benchmark比較（引数のconfigを使用）
+        _bm_code = config.get('signals.relative_strength.benchmark_code', 'US.SPY')
         bm_5d_ago = conn.execute(
             "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 5",
             (_bm_code, entry_date),

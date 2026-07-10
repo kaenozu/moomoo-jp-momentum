@@ -44,7 +44,10 @@ def run_bt(threshold, start, end):
     r = BacktestRunner(config)
     r.max_total_positions = 20; r.slippage_bps = 5; r.commission = 0
     r.min_trade_price = 500; r.max_trade_price = 20000
-    r.stop_loss_threshold = threshold
+    if threshold == 0.0:
+        r.stop_loss_pct = 100.0
+    else:
+        r.stop_loss_pct = round((1.0 - threshold) * 100, 1)
     rid = r.run("momentum", start, end)
     return rid
 
