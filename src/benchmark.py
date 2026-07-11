@@ -95,7 +95,7 @@ class BenchmarkManager:
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
-                        (code, date, close, daily_return, now, now),
+                        (code, date, close, None, now, now),
                     )
                     count += 1
                 except sqlite3.Error as e:

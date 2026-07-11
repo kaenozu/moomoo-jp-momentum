@@ -223,7 +223,7 @@ class TestDailyUpdateBatch:
         from daily_update import fetch_and_save_daily_klines
         from src.data_store import DataStore
 
-        config = Config()
+        config = Config("tests/fixtures/config.test.yaml")
         config._config = {"database": {"path": ":memory:"}}
 
         data_store = DataStore(config)
@@ -239,7 +239,7 @@ class TestDailyUpdateBatch:
         from src.data_store import DataStore
 
         db_path = tmp_path / "test.db"
-        config = Config()
+        config = Config("tests/fixtures/config.test.yaml")
         config._config = {"database": {"path": str(db_path)}}
 
         data_store = DataStore(config)

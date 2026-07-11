@@ -38,9 +38,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_cycle(target_date: str, dry_run: bool = False) -> dict:
+def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
     results: dict[str, int | bool] = {}
-    config = load_config("config.yaml")
+    config = load_config(config_path)
 
     if not dry_run:
         opend_conn = OpenDConnection(config)
@@ -164,6 +164,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Moomoo 日次運用サイクル")
     parser.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"), help="基準日")
     parser.add_argument("--dry-run", action="store_true", help="テスト実行")
+    parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -173,7 +174,7 @@ def main() -> int:
 
     start = time.time()
     try:
-        results = run_cycle(args.date, dry_run=args.dry_run)
+        results = run_cycle(args.date, dry_run=args.dry_run, config_path=args.config)
     except SystemError as e:
         logger.error("日次サイクル停止: %s", e)
         return 1

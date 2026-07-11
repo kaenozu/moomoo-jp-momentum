@@ -1,0 +1,141 @@
+# Moomoo テスト用設定ファイル
+# 認証情報、Webhook URL、絶対パスは含めない
+# DBパスは各テストの tmp_path が優先される
+
+opend:
+  host: "127.0.0.1"
+  port: 11111
+  timeout: 10
+
+market_data:
+  require_paid_quote_card: false
+  use_order_book: false
+  use_tick: false
+  use_realtime_push: false
+
+quote:
+  market: "JP"
+  data_types:
+    - "SNAPSHOT"
+    - "K_DAY"
+
+trading_hours:
+  enabled: true
+  morning:
+    open: "09:00"
+    close: "11:30"
+  afternoon:
+    open: "12:30"
+    close: "15:30"
+  skip_weekends: true
+
+watchlist:
+  symbols_file: "data/symbols.json"
+
+signals:
+  ma_periods:
+    short: 5
+    medium: 25
+  volume_ratio_threshold: 1.5
+  turnover_threshold_yen: 1.0
+  relative_strength:
+    benchmark_code: "JP.1306"
+    period_days: 20
+  volume:
+    hard_gate: false
+    min_ratio: 1.5
+    use_percentile: true
+    percentile_threshold: 60
+    market_low_volume_threshold: 0.8
+
+screening:
+  min_turnover: 100000000
+  min_volume_ratio: 1.2
+  max_distance_from_high_20d: 5.0
+  risk_daily_return_threshold: 8.0
+  risk_return_5d_threshold: 15.0
+  risk_volume_ratio_threshold: 5.0
+  min_history_days: 25
+  downgrade_extreme_volume_ratio: true
+  max_return_5d: 10.0
+
+scoring:
+  enable_risk_penalty: true
+  score_threshold_candidate: 60
+  score_threshold_watch: 50
+  weights:
+    trend: 30
+    volume: 20
+    relative_strength: 25
+    liquidity: 15
+    high_20d: 10
+    risk_warning: -30
+
+benchmark:
+  primary:
+    code: "JP.2559"
+    name: "MAXIS 全世界株式（オール・カントリー）上場投信"
+  secondary:
+    - code: "JP.1306"
+      name: "TOPIX連動型ETF"
+
+database:
+  path: "data/moomoo.db"
+
+universe:
+  min_trade_price: 500
+  max_trade_price: 20000
+
+output:
+  csv: true
+  html: true
+  sqlite: true
+
+report:
+  output_dir: "reports"
+
+app:
+  title: "Moomoo Test"
+  timezone: "Asia/Tokyo"
+  default_benchmark: "JP.2559"
+
+alerts:
+  enabled: false
+  console: true
+  file: true
+  webhook:
+    enabled: false
+    url: ""
+  score_threshold: 90
+  notify_new_candidates: true
+  notify_sell_watch: true
+  notify_stale_data: true
+
+scheduler:
+  enabled: false
+  jobs:
+    daily_update:
+      enabled: false
+      cron: "30 15 * * 1-5"
+
+backtest:
+  stop_loss_pct: 8.0
+  max_positions: 20
+  idle_cash_allocation:
+    enabled: false
+    benchmark_code: "JP.2559"
+
+virtual_trade:
+  enabled: true
+  initial_cash: 100000
+  max_total_positions: 5
+  max_position_amount: 20000
+  max_position_per_symbol: 1
+  market_fill_mode: "next_day_open"
+  slippage_bps: 10
+  commission: 0
+  reserve_buffer_pct: 2.0
+  default_benchmark: "JP.2559"
+
+paper_trade:
+  enabled: false

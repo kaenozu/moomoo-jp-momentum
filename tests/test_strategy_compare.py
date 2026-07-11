@@ -4,12 +4,11 @@
 ファイルパス: tests/test_strategy_compare.py
 """
 
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 import sqlite3
-from src.models import CREATE_TABLES_SQL
 from src.strategies import StrategyRegistry
 from src.strategies.momentum import MomentumStrategy
 from src.strategies.quality_low_risk import QualityLowRiskStrategy
@@ -105,7 +104,6 @@ class TestSignalStorage:
         from src.config import Config
         from src.data_store import DataStore
         from src.screener import Screener
-        from datetime import datetime
 
         config = Config(str(cfg_path))
         ds = DataStore(config)
@@ -123,7 +121,7 @@ class TestSignalStorage:
 
         screener = Screener(config)
         candidates = screener.screen_candidates(date="2026-07-01")
-        saved = screener.save_signals_to_db(candidates)
+        screener.save_signals_to_db(candidates)
 
         conn = sqlite3.connect(str(db_path))
         cursor = conn.execute("SELECT strategy_name FROM signals LIMIT 1")

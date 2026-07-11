@@ -4,7 +4,8 @@
 ファイルパス: tests/test_virtual_integration.py
 """
 
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -62,9 +63,12 @@ class TestVirtualTradeIntegration:
 
         class TestConfig:
             def get(self, key, default=None):
-                if key == "database": return {"path": str(db_path)}
-                if key == "virtual_trade": return {"enabled": True, "initial_cash": 100000, "max_position_amount": 50000, "max_total_positions": 5, "max_position_per_symbol": 1, "market_fill_mode": "next_day_open", "commission": 0, "slippage_bps": 10}
-                if key == "universe": return {"min_trade_price": 500, "max_trade_price": 50000}
+                if key == "database":
+                    return {"path": str(db_path)}
+                if key == "virtual_trade":
+                    return {"enabled": True, "initial_cash": 100000, "max_position_amount": 50000, "max_total_positions": 5, "max_position_per_symbol": 1, "market_fill_mode": "next_day_open", "commission": 0, "slippage_bps": 10}
+                if key == "universe":
+                    return {"min_trade_price": 500, "max_trade_price": 50000}
                 return default
             @property
             def database_path(self): return str(db_path)
