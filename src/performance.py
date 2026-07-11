@@ -236,6 +236,7 @@ class PerformanceEvaluator:
         """ポートフォリオサマリーを計算する"""
         if benchmark_code is None:
             benchmark_code = self.primary_benchmark
+        assert benchmark_code is not None
 
         positions = self.get_positions()
         history = self.get_trade_history()
@@ -254,9 +255,9 @@ class PerformanceEvaluator:
 
         total_trades = len(wins) + len(losses)
         win_rate = len(wins) / total_trades * 100 if total_trades > 0 else None
-        avg_win = sum(h.pnl for h in wins) / len(wins) if wins else None
-        avg_loss = sum(h.pnl for h in losses) / len(losses) if losses else None
-        max_loss = min((h.pnl for h in losses), default=None)
+        avg_win = sum(h.pnl for h in wins if h.pnl is not None) / len(wins) if wins else None
+        avg_loss = sum(h.pnl for h in losses if h.pnl is not None) / len(losses) if losses else None
+        max_loss = min((h.pnl for h in losses if h.pnl is not None), default=None)
 
         benchmark_return = None
         excess_return = None
@@ -300,6 +301,7 @@ class PerformanceEvaluator:
         """シグナルの事後検証を行う"""
         if benchmark_code is None:
             benchmark_code = self.primary_benchmark
+        assert benchmark_code is not None
 
         with self._get_connection() as conn:
             future_bars = conn.execute(

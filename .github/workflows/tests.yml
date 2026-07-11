@@ -9,20 +9,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check for pre-existing artifacts
+        run: |
+          echo "=== git status before ==="
+          git status --porcelain
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
+          cache: pip
+
+      - name: Install production dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
+
+      - name: Run ruff
+        run: >-
+          ruff check src/ tests/ run_daily_cycle.py daily_update.py
+          historical_backtest.py screen_candidates.py scheduler.py
+          performance_report.py --output-format=github
+
+      - name: Run pyright
         run: |
-          pip install futu-api pandas pyyaml
-          pip install pytest apscheduler matplotlib jinja2 python-dotenv requests
-      - name: Create data dir
-        run: mkdir -p data reports logs
-      - name: Create placeholder config
+          set +e
+          pyright > "$RUNNER_TEMP/pyright.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/pyright.log"
+          exit "$status"
+
+      - name: Upload pyright log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyright-log
+          path: ${{ runner.temp }}/pyright.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Test dry-run with test config
+        run: >-
+          python run_daily_cycle.py --dry-run
+          --config tests/fixtures/config.test.yaml
+
+      - name: Verify no artifacts created
+        if: always()
         run: |
-          cp config.example.yaml config.yaml
-          mkdir -p data
-      - name: Run tests
-        run: python -m pytest tests/ -v
-      - name: Test dry-run
-        run: python run_daily_cycle.py --dry-run
+          echo "=== git status after ==="
+          git status --porcelain
+          if git status --porcelain | grep -q .; then
+            echo "ERROR: New files were created by the test run" >&2
+            git status --porcelain
+            exit 1
+          fi
+          test ! -e data/moomoo.db || { echo "ERROR: data/moomoo.db was created"; exit 1; }
+          test ! -d logs || { echo "ERROR: logs/ was created"; exit 1; }
+          test ! -d reports || { echo "ERROR: reports/ was created"; exit 1; }
+          echo "OK: No artifacts created"

@@ -116,7 +116,9 @@ class ETFRotationStrategy(BaseStrategy):
         watch_reasons = []
 
         if (
-            indicators.close > indicators.ma25
+            indicators.close is not None
+            and indicators.ma25 is not None
+            and indicators.close > indicators.ma25
             and indicators.ma5 is not None
             and indicators.ma5 <= indicators.ma25
         ):

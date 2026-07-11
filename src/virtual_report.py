@@ -101,9 +101,9 @@ class VirtualReport:
     excess_vs_1306: Optional[float] = None
 
     # exit_reason別
-    exit_reason_stats: list[ExitReasonStats] = None
+    exit_reason_stats: Optional[list[ExitReasonStats]] = None
     # クローズ済みトレード
-    closed_trades: list[ClosedTrade] = None
+    closed_trades: Optional[list[ClosedTrade]] = None
 
 
 class VirtualReportGenerator:
@@ -311,7 +311,7 @@ class VirtualReportGenerator:
         report.exit_reason_stats = []
         for reason, trades in sorted(reason_groups.items()):
             w = sum(1 for t in trades if t.realized_pl > 0)
-            l = sum(1 for t in trades if t.realized_pl < 0)
+            lo = sum(1 for t in trades if t.realized_pl < 0)
             total = len(trades)
             pl = sum(t.realized_pl for t in trades)
             days = [t.holding_days for t in trades if t.holding_days > 0]
@@ -320,7 +320,7 @@ class VirtualReportGenerator:
                 exit_reason=reason,
                 count=total,
                 win_count=w,
-                loss_count=l,
+                loss_count=lo,
                 win_rate=w / total * 100 if total > 0 else 0,
                 realized_pl=pl,
                 avg_pl=pl / total if total > 0 else 0,

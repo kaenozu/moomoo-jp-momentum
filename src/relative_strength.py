@@ -20,7 +20,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
 
 from .config import Config
 
@@ -157,7 +156,7 @@ class RelativeStrengthCalculator:
         for period in self.periods:
             stock_return = self._calc_return(code, target_date, period)
             benchmark_return = self._calc_return(
-                benchmark_code, target_date, period
+                benchmark_code or self.default_benchmark, target_date, period
             )
 
             if period == 5:

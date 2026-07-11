@@ -7,7 +7,6 @@
 関連ファイル: base.py, signals.py, scoring.py
 """
 
-from dataclasses import field
 from typing import Optional
 
 from ..indicators import StockIndicators

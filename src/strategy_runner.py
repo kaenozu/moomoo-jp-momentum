@@ -32,7 +32,7 @@ class StrategyRunner:
         indicators_list: list[StockIndicators],
         target_date: str,
         strategy_names: Optional[list[str]] = None,
-    ) -> dict[str, list]:
+    ) -> dict[str, int]:
         """全戦略を実行し、シグナルを保存"""
         if strategy_names is None:
             strategy_names = StrategyRegistry.list_names()

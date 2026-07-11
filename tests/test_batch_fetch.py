@@ -47,7 +47,7 @@ def mock_ctx():
 
 @pytest.fixture
 def quote_service(mock_ctx):
-    return QuoteService(DummyConfig(), mock_ctx)
+    return QuoteService(DummyConfig(), mock_ctx)  # type: ignore[arg-type]  # test stub, not full Config
 
 
 def make_mock_kline_data(codes: list[str], num_rows: int = 50) -> dict:
@@ -223,8 +223,8 @@ class TestDailyUpdateBatch:
         from daily_update import fetch_and_save_daily_klines
         from src.data_store import DataStore
 
-        config = Config()
-        config._config = {"database": {"path": ":memory:"}}
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config["database"] = {"path": ":memory:"}
 
         data_store = DataStore(config)
         qs = MagicMock()
@@ -239,8 +239,8 @@ class TestDailyUpdateBatch:
         from src.data_store import DataStore
 
         db_path = tmp_path / "test.db"
-        config = Config()
-        config._config = {"database": {"path": str(db_path)}}
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config["database"] = {"path": str(db_path)}
 
         data_store = DataStore(config)
         # テスト用のシンボルを直接DBに登録

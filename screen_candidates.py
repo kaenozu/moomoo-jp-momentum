@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _candidate_to_dict(c) -> dict:
-    if is_dataclass(c):
+    if is_dataclass(c) and not isinstance(c, type):
         return asdict(c)
     return c.__dict__.copy()
 
