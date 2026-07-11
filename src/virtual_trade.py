@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
+from .migrations import migrate_virtual_orders_reserved_amount
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class VirtualOrder:
     cancelled_at: Optional[str] = None
     fill_price: Optional[float] = None
     fill_reason: str = ""
+    reserved_amount: Optional[float] = None
 
 
 @dataclass
@@ -80,11 +82,15 @@ class VirtualTradeManager:
         self.market_fill_mode = vt_config.get("market_fill_mode", "next_day_open")
         self.slippage_bps = float(vt_config.get("slippage_bps", 10))
         self.commission = float(vt_config.get("commission", 0))
+        self.reserve_buffer_pct = float(vt_config.get("reserve_buffer_pct", 2.0))
         self.default_benchmark = vt_config.get("default_benchmark", "JP.2559")
 
         universe_config = config.get("universe", {})
         self.min_trade_price = float(universe_config.get("min_trade_price", 500))
         self.max_trade_price = float(universe_config.get("max_trade_price", 20000))
+
+        with self._get_connection() as conn:
+            migrate_virtual_orders_reserved_amount(conn)
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -135,6 +141,94 @@ class VirtualTradeManager:
             return False, "tradable=false のため仮想注文対象外です"
         return True, ""
 
+    def _get_pending_buy_reserved(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+        exclude_order_id: int | None = None,
+    ) -> float:
+        """Return reservations for pending BUY orders.
+
+        ``exclude_order_id`` is used at fill time so the order being filled
+        does not reserve cash against itself.
+        """
+        rows = conn.execute(
+            """
+            SELECT id, code, quantity, order_type, limit_price, reserved_amount
+            FROM virtual_orders
+            WHERE strategy_name = ?
+              AND side = 'BUY'
+              AND status = 'PENDING'
+              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
+              AND (? IS NULL OR id <> ?)
+            """,
+            (
+                strategy_name,
+                as_of_date,
+                as_of_date,
+                exclude_order_id,
+                exclude_order_id,
+            ),
+        ).fetchall()
+        buffer = 1.0 + self.reserve_buffer_pct / 100.0
+        total = 0.0
+        unresolved: list[str] = []
+        for row in rows:
+            stored = row["reserved_amount"]
+            if stored is not None and float(stored) > 0:
+                total += float(stored)
+                continue
+            if row["order_type"] == "LIMIT_SIM" and row["limit_price"] is not None:
+                total += (
+                    float(row["limit_price"]) * int(row["quantity"]) * buffer
+                    + self.commission
+                )
+                continue
+            price = self._latest_close(conn, row["code"], as_of_date)
+            if price is None:
+                unresolved.append(row["code"])
+                continue
+            total += price * int(row["quantity"]) * buffer + self.commission
+        if unresolved:
+            logger.warning(
+                "仮想予約: 参照価格が取得できないため予約をスキップ: %s",
+                unresolved,
+            )
+        return total
+
+    def get_available_cash(
+        self,
+        strategy_name: str = "default",
+        as_of_date: str | None = None,
+        conn: sqlite3.Connection | None = None,
+        exclude_order_id: int | None = None,
+    ) -> float:
+        """Return cash after pending BUY reservations are deducted."""
+        if conn is None:
+            with self._get_connection() as owned_conn:
+                return self.get_available_cash(
+                    strategy_name,
+                    as_of_date,
+                    owned_conn,
+                    exclude_order_id,
+                )
+        cash = self._get_cash_with_conn(conn, strategy_name, as_of_date)
+        reserved = self._get_pending_buy_reserved(
+            conn,
+            strategy_name,
+            as_of_date,
+            exclude_order_id,
+        )
+        available = cash - reserved
+        logger.debug(
+            "available_cash: cash=%.2f, reserved=%.2f, available=%.2f",
+            cash,
+            reserved,
+            available,
+        )
+        return max(0.0, available)
+
     def _validate_buy_order(
         self,
         conn: sqlite3.Connection,
@@ -144,12 +238,18 @@ class VirtualTradeManager:
         order_type: str,
         limit_price: Optional[float],
         submitted_at: str | None = None,
+        exclude_order_id: int | None = None,
     ) -> tuple[bool, str]:
         ok, reason = self._symbol_universe_status(conn, code)
         if not ok:
             return False, reason
 
-        ref_price = limit_price if order_type == "LIMIT_SIM" else self._latest_close(conn, code, submitted_at)
+        reference_date = submitted_at[:10] if submitted_at else None
+        ref_price = (
+            limit_price
+            if order_type == "LIMIT_SIM"
+            else self._latest_close(conn, code, reference_date)
+        )
         if ref_price is None or ref_price <= 0:
             return False, "参照価格を取得できません"
         if ref_price < self.min_trade_price:
@@ -158,26 +258,52 @@ class VirtualTradeManager:
             return False, f"価格が上限{self.max_trade_price:,.0f}円を超えています"
         if ref_price * quantity > self.max_position_amount:
             return False, f"注文金額が1銘柄上限{self.max_position_amount:,.0f}円を超えています"
-        if ref_price * quantity + self.commission > self.get_cash(strategy_name, submitted_at):
-            return False, "仮想cashが不足しています"
 
-        positions = self.get_positions(strategy_name)
-        if len(positions) >= self.max_total_positions:
-            return False, f"保有銘柄数上限{self.max_total_positions}に達しています"
-        if any(p.code == code and p.quantity >= self.max_position_per_symbol for p in positions):
+        buffer = 1.0 + self.reserve_buffer_pct / 100.0
+        required_reservation = ref_price * quantity * buffer + self.commission
+        available_cash = self.get_available_cash(
+            strategy_name,
+            reference_date,
+            conn,
+            exclude_order_id,
+        )
+        if required_reservation > available_cash:
+            return False, "仮想cashが不足しています（予約バッファ・pending BUYを控除済み）"
+
+        position_rows = conn.execute(
+            """
+            SELECT code, quantity
+            FROM virtual_positions
+            WHERE strategy_name = ? AND quantity > 0
+            """,
+            (strategy_name,),
+        ).fetchall()
+        position_codes = {row["code"] for row in position_rows}
+        current_quantity = next(
+            (int(row["quantity"]) for row in position_rows if row["code"] == code),
+            0,
+        )
+        if current_quantity >= self.max_position_per_symbol:
             return False, "同一銘柄の保有上限に達しています"
 
-        pending = conn.execute(
+        pending_rows = conn.execute(
             """
-            SELECT 1 FROM virtual_orders
-            WHERE strategy_name = ? AND code = ? AND side = 'BUY' AND status = 'PENDING'
-            LIMIT 1
+            SELECT DISTINCT code
+            FROM virtual_orders
+            WHERE strategy_name = ?
+              AND side = 'BUY'
+              AND status = 'PENDING'
+              AND (? IS NULL OR id <> ?)
             """,
-            (strategy_name, code),
-        ).fetchone()
-        if pending:
+            (strategy_name, exclude_order_id, exclude_order_id),
+        ).fetchall()
+        pending_codes = {row["code"] for row in pending_rows}
+        if code in pending_codes:
             return False, "同一銘柄の未約定BUY注文が既に存在します"
 
+        prospective_codes = position_codes | pending_codes | {code}
+        if len(prospective_codes) > self.max_total_positions:
+            return False, f"保有銘柄数上限{self.max_total_positions}に達しています"
         return True, ""
 
     def _validate_sell_order(
@@ -186,62 +312,66 @@ class VirtualTradeManager:
         strategy_name: str,
         code: str,
         quantity: int,
+        exclude_order_id: int | None = None,
     ) -> tuple[bool, str]:
-        pos = conn.execute(
+        position = conn.execute(
             """
             SELECT quantity FROM virtual_positions
             WHERE strategy_name = ? AND code = ?
             """,
             (strategy_name, code),
         ).fetchone()
-        if not pos or pos["quantity"] < quantity:
+        if not position or int(position["quantity"]) < quantity:
             return False, "売却可能な仮想ポジションが不足しています"
 
         pending = conn.execute(
             """
             SELECT 1 FROM virtual_orders
-            WHERE strategy_name = ? AND code = ? AND side = 'SELL' AND status = 'PENDING'
+            WHERE strategy_name = ?
+              AND code = ?
+              AND side = 'SELL'
+              AND status = 'PENDING'
+              AND (? IS NULL OR id <> ?)
             LIMIT 1
             """,
-            (strategy_name, code),
+            (strategy_name, code, exclude_order_id, exclude_order_id),
         ).fetchone()
         if pending:
             return False, "同一銘柄の未約定SELL注文が既に存在します"
         return True, ""
 
-    def get_cash(self, strategy_name: str = "default", as_of_date: str | None = None) -> float:
+    def get_cash(
+        self,
+        strategy_name: str = "default",
+        as_of_date: str | None = None,
+    ) -> float:
         with self._get_connection() as conn:
-            if as_of_date:
-                row = conn.execute(
-                    """
-                    SELECT cash FROM virtual_equity_curve
-                    WHERE strategy_name = ? AND date <= ?
-                    ORDER BY date DESC LIMIT 1
-                    """,
-                    (strategy_name, as_of_date),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    """
-                    SELECT cash FROM virtual_equity_curve
-                    WHERE strategy_name = ?
-                    ORDER BY date DESC LIMIT 1
-                    """,
-                    (strategy_name,),
-                ).fetchone()
-            if row and row["cash"] is not None:
-                return float(row["cash"])
-        return self.initial_cash
+            return self._get_cash_with_conn(conn, strategy_name, as_of_date)
 
-    def _get_cash_with_conn(self, conn: sqlite3.Connection, strategy_name: str) -> float:
-        row = conn.execute(
-            """
-            SELECT cash FROM virtual_equity_curve
-            WHERE strategy_name = ?
-            ORDER BY date DESC LIMIT 1
-            """,
-            (strategy_name,),
-        ).fetchone()
+    def _get_cash_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+    ) -> float:
+        if as_of_date:
+            row = conn.execute(
+                """
+                SELECT cash FROM virtual_equity_curve
+                WHERE strategy_name = ? AND date <= ?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (strategy_name, as_of_date),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT cash FROM virtual_equity_curve
+                WHERE strategy_name = ?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (strategy_name,),
+            ).fetchone()
         if row and row["cash"] is not None:
             return float(row["cash"])
         return self.initial_cash
@@ -339,6 +469,7 @@ class VirtualTradeManager:
             cancelled_at=row["cancelled_at"],
             fill_price=row["fill_price"],
             fill_reason=row["fill_reason"],
+            reserved_amount=row["reserved_amount"],
         )
 
     def place_order(
@@ -353,7 +484,7 @@ class VirtualTradeManager:
         submitted_at: Optional[str] = None,
         exit_reason: Optional[str] = None,
     ) -> Optional[VirtualOrder]:
-        """仮想注文を作成する。moomooには注文を送信しない。"""
+        """Create a virtual order without sending anything to moomoo."""
         if not self.enabled:
             logger.error("仮想トレードが無効です")
             return None
@@ -370,32 +501,81 @@ class VirtualTradeManager:
             logger.error("LIMIT_SIMには指値価格が必要です")
             return None
 
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        submit_value = submitted_at or now
+        if len(submit_value) == 10:
+            submit_value = f"{submit_value} 15:30:00"
+        reference_date = submit_value[:10]
+
         with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             if side == "BUY":
-                ok, reason = self._validate_buy_order(conn, strategy_name, code, quantity, order_type, limit_price, submitted_at)
+                ok, reason = self._validate_buy_order(
+                    conn,
+                    strategy_name,
+                    code,
+                    quantity,
+                    order_type,
+                    limit_price,
+                    reference_date,
+                )
             else:
-                ok, reason = self._validate_sell_order(conn, strategy_name, code, quantity)
+                ok, reason = self._validate_sell_order(
+                    conn,
+                    strategy_name,
+                    code,
+                    quantity,
+                )
             if not ok:
                 logger.warning("仮想注文拒否: %s %s - %s", code, side, reason)
                 return None
 
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            submit_value = submitted_at or now
-            if len(submit_value) == 10:
-                submit_value = f"{submit_value} 15:30:00"
+            reserved_amount: float | None = None
+            if side == "BUY":
+                reference_price = (
+                    float(limit_price)
+                    if order_type == "LIMIT_SIM" and limit_price is not None
+                    else self._latest_close(conn, code, reference_date)
+                )
+                if reference_price is None or reference_price <= 0:
+                    logger.warning("仮想注文拒否: %s BUY - 参照価格を取得できません", code)
+                    return None
+                buffer = 1.0 + self.reserve_buffer_pct / 100.0
+                reserved_amount = reference_price * quantity * buffer + self.commission
 
             cursor = conn.execute(
                 """
                 INSERT INTO virtual_orders
                 (strategy_name, code, side, quantity, order_type, limit_price,
-                 status, signal_id, exit_reason, submitted_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
+                 status, signal_id, exit_reason, submitted_at, reserved_amount,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)
                 """,
-                (strategy_name, code, side, quantity, order_type, limit_price, signal_id, exit_reason, submit_value, now, now),
+                (
+                    strategy_name,
+                    code,
+                    side,
+                    quantity,
+                    order_type,
+                    limit_price,
+                    signal_id,
+                    exit_reason,
+                    submit_value,
+                    reserved_amount,
+                    now,
+                    now,
+                ),
             )
             order_id = cursor.lastrowid
 
-        logger.info("仮想注文作成: %s %s %s %s株", order_id, code, side, quantity)
+        logger.info(
+            "仮想注文作成: %s %s %s %s株 (予約額: %s)",
+            order_id,
+            code,
+            side,
+            quantity,
+            reserved_amount,
+        )
         return VirtualOrder(
             id=order_id,
             strategy_name=strategy_name,
@@ -407,6 +587,7 @@ class VirtualTradeManager:
             status="PENDING",
             signal_id=signal_id,
             submitted_at=submit_value,
+            reserved_amount=reserved_amount,
         )
 
     def cancel_order(self, order_id: int) -> bool:
@@ -415,7 +596,7 @@ class VirtualTradeManager:
             cursor = conn.execute(
                 """
                 UPDATE virtual_orders
-                SET status = 'CANCELLED', cancelled_at = ?, updated_at = ?
+                SET status = 'CANCELLED', cancelled_at = ?, reserved_amount = NULL, updated_at = ?
                 WHERE id = ? AND status = 'PENDING'
                 """,
                 (now, now, order_id),
@@ -445,39 +626,28 @@ class VirtualTradeManager:
         ).fetchall()
         return rows
 
-    def _try_fill_order(self, order: VirtualOrder, target_date: str) -> Optional[VirtualFill]:
+    def _try_fill_order(
+        self,
+        order: VirtualOrder,
+        target_date: str,
+    ) -> Optional[VirtualFill]:
         submitted_date = self._submitted_date(order)
         if target_date < submitted_date:
             return None
 
         with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             if order.side == "SELL":
-                ok, reason = self._validate_sell_order(conn, order.strategy_name, order.code, order.quantity)
+                ok, reason = self._validate_sell_order(
+                    conn,
+                    order.strategy_name,
+                    order.code,
+                    order.quantity,
+                    exclude_order_id=order.id,
+                )
                 if not ok:
                     logger.warning("SELL約定拒否: %s - %s", order.code, reason)
                     return None
-
-            bars = self._load_candidate_bars(conn, order, target_date)
-            if not bars:
-                return None
-
-            fill_price: Optional[float]
-            filled_at: str
-            fill_mode: str
-            if order.order_type == "MARKET_SIM":
-                fill_price, filled_at, fill_mode = self._calc_market_fill(order, bars, target_date)
-            else:
-                fill_price, filled_at, fill_mode = self._calc_limit_fill(order, bars, target_date)
-
-            if fill_price is None:
-                return None
-
-            if order.order_type == "MARKET_SIM":
-                if order.side == "BUY":
-                    fill_price = fill_price * (1 + self.slippage_bps / 10000)
-                else:
-                    fill_price = fill_price * (1 - self.slippage_bps / 10000)
-            fill_price = round(float(fill_price), 1)
 
             existing_fill = conn.execute(
                 "SELECT 1 FROM virtual_fills WHERE order_id = ? LIMIT 1",
@@ -485,6 +655,59 @@ class VirtualTradeManager:
             ).fetchone()
             if existing_fill:
                 return None
+
+            bars = self._load_candidate_bars(conn, order, target_date)
+            if not bars:
+                return None
+
+            if order.order_type == "MARKET_SIM":
+                fill_price, filled_at, fill_mode = self._calc_market_fill(
+                    order,
+                    bars,
+                    target_date,
+                )
+            else:
+                fill_price, filled_at, fill_mode = self._calc_limit_fill(
+                    order,
+                    bars,
+                    target_date,
+                )
+            if fill_price is None:
+                return None
+
+            if order.order_type == "MARKET_SIM":
+                if order.side == "BUY":
+                    fill_price *= 1 + self.slippage_bps / 10000
+                else:
+                    fill_price *= 1 - self.slippage_bps / 10000
+            fill_price = round(float(fill_price), 1)
+
+            if order.side == "BUY":
+                fill_cost = fill_price * order.quantity + self.commission
+                available_cash = self.get_available_cash(
+                    order.strategy_name,
+                    filled_at,
+                    conn,
+                    exclude_order_id=order.id,
+                )
+                if fill_cost > available_cash:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        """
+                        UPDATE virtual_orders
+                        SET status = 'CANCELLED', cancelled_at = ?,
+                            reserved_amount = NULL, fill_reason = ?, updated_at = ?
+                        WHERE id = ? AND status = 'PENDING'
+                        """,
+                        (now, "insufficient_cash_at_fill", now, order.id),
+                    )
+                    logger.warning(
+                        "BUY約定拒否(資金不足): %s 必要額%.2f 利用可能額%.2f",
+                        order.code,
+                        fill_cost,
+                        available_cash,
+                    )
+                    return None
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             fill = VirtualFill(
@@ -497,26 +720,44 @@ class VirtualTradeManager:
                 filled_at=filled_at,
                 fill_mode=fill_mode,
             )
-
             conn.execute(
                 """
                 INSERT INTO virtual_fills
-                (order_id, strategy_name, code, side, quantity, price, filled_at, fill_mode, created_at)
+                (order_id, strategy_name, code, side, quantity, price,
+                 filled_at, fill_mode, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (fill.order_id, fill.strategy_name, fill.code, fill.side, fill.quantity, fill.price, fill.filled_at, fill.fill_mode, now),
+                (
+                    fill.order_id,
+                    fill.strategy_name,
+                    fill.code,
+                    fill.side,
+                    fill.quantity,
+                    fill.price,
+                    fill.filled_at,
+                    fill.fill_mode,
+                    now,
+                ),
             )
             conn.execute(
                 """
                 UPDATE virtual_orders
-                SET status = 'FILLED', filled_at = ?, fill_price = ?, fill_reason = ?, updated_at = ?
+                SET status = 'FILLED', filled_at = ?, fill_price = ?,
+                    reserved_amount = NULL, fill_reason = ?, updated_at = ?
                 WHERE id = ? AND status = 'PENDING'
                 """,
                 (filled_at, fill_price, f"{fill_mode}で約定", now, order.id),
             )
             self._update_position_and_cash(conn, order, fill)
 
-        logger.info("仮想約定: %s %s %s株 @%.1f (%s)", order.code, order.side, order.quantity, fill_price, filled_at)
+        logger.info(
+            "仮想約定: %s %s %s株 @%.1f (%s)",
+            order.code,
+            order.side,
+            order.quantity,
+            fill_price,
+            filled_at,
+        )
         return fill
 
     def _calc_market_fill(

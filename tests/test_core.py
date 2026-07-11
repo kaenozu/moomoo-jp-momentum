@@ -11,7 +11,6 @@ import os
 import sqlite3
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 import pandas as pd
 
 from src.config import Config
@@ -564,7 +563,6 @@ class TestIdleCashOrder:
 class TestPendingCashReservation:
     """Task 5: pending BUY注文のcash予約テスト"""
 
-    @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
     def test_available_cash_deducts_pending_buys(self, tmp_path):
         """pending BUY注文がある場合、利用可能cashが減少すること"""
         db_path = tmp_path / "vtm_pending.db"
@@ -606,7 +604,6 @@ class TestPendingCashReservation:
         available = vtm.get_available_cash("default")
         assert available == 79600.0
 
-    @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
     def test_reserve_buffer_applied(self, tmp_path):
         """reserve_buffer_pct=2.0のとき、予約額が latest_close * qty * 1.02 になること"""
         db_path = tmp_path / "vtm_buffer.db"
@@ -647,7 +644,6 @@ class TestPendingCashReservation:
         # available = 50,000 - 10,500 = 39,500
         assert vtm2.get_available_cash("default") == 39500.0
 
-    @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
     def test_validate_buy_uses_available_cash(self, tmp_path):
         """_validate_buy_orderがavailable cash(buffer込み)を使って判定すること"""
         db_path = tmp_path / "vtm_validate.db"
