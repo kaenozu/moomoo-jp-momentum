@@ -72,7 +72,7 @@ class PerformanceEvaluator:
 
         benchmark_config = config.get("benchmark", {})
         primary = benchmark_config.get("primary", {})
-        self.primary_benchmark = primary.get("code", "JP.2559")
+        self.primary_benchmark = primary.get("code", "JP.1306")
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""

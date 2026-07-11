@@ -7,8 +7,8 @@
 関連ファイル: quote_service.py, data_store.py, config.py
 
 ベンチマーク:
-- JP.2559: MAXIS全世界株式（オール・カントリー）- 第一ベンチマーク
-- JP.1306: TOPIX連動ETF - 補助
+- JP.1306: TOPIX連動ETF - 第一ベンチマーク
+- JP.2559: MAXIS全世界株式（オール・カントリー）- 補助
 - JP.1320: 日経平均連動ETF - 補助
 - JP.2558: MAXIS米国株式（S&P500）- 補助
 """
@@ -55,7 +55,7 @@ class BenchmarkManager:
         primary = benchmark_config.get("primary", {})
         secondary = benchmark_config.get("secondary", [])
 
-        self.benchmark_codes = [primary.get("code", "JP.2559")]
+        self.benchmark_codes = [primary.get("code", "JP.1306")]
         for s in secondary:
             self.benchmark_codes.append(s.get("code", ""))
 

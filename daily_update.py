@@ -8,6 +8,10 @@ benchmark銘柄もデータ取得対象に含め、通常スクリーニング�
   history - request_history_kline中心（購読枠不要）、大量バックフィル向け
   latest  - get_cur_kline + subscribe/unsubscribe、日次少量更新向け
   auto    - 銘柄数に応じて自動選択（100超→history）
+
+注意:
+  - 土日は簡易判定するが、日本の祝日・休場日は考慮しない。
+  - 時刻比較はローカルタイム（JST前提）で行う。
 """
 
 import argparse
@@ -42,6 +46,10 @@ def get_latest_bar_date(data_store: DataStore, code: str) -> str | None:
 
 
 def should_skip_fetch(data_store: DataStore, code: str, today: str) -> bool:
+    """Return True when the latest bar already covers today or the weekend.
+
+    土日はdatetime.weekday()で判定するが、日本の祝日・休場日は非対応。
+    """
     latest_date = get_latest_bar_date(data_store, code)
     if latest_date is None:
         return False
@@ -77,7 +85,14 @@ def fetch_and_save_daily_klines(
     if effective_mode == "auto":
         effective_mode = "history" if len(codes) > 100 else "latest"
 
-    logger.info("fetch_and_save: mode=%s, force=%s, batch_size=%s, start=%s", effective_mode, force, batch_size, start)
+    logger.info(
+        "fetch_and_save: mode=%s, force=%s, batch_size=%s, start=%s, num_days=%s",
+        effective_mode,
+        force,
+        batch_size,
+        start,
+        num_days,
+    )
 
     # スキップ判定＋既存DB読み込み
     skip_codes: list[str] = []
@@ -138,7 +153,7 @@ def fetch_and_save_daily_klines(
 def save_benchmark_prices_from_indicators(data_store: DataStore, indicators_df: pd.DataFrame, benchmark_codes: set[str]) -> int:
     if indicators_df.empty or not benchmark_codes:
         return 0
-    rows = indicators_df[indicators_df["code"].isin(benchmark_codes)]
+    rows = indicators_df[indicators_df["code"].isin(list(benchmark_codes))]
     count = 0
     with sqlite3.connect(data_store.db_path) as conn:
         for _, row in rows.iterrows():
@@ -209,15 +224,24 @@ def main() -> int:
                         help="取得モード: history(request_history_kline), latest(get_cur_kline), auto(自動判別)")
     parser.add_argument("--start", default=None, help="取得開始日 (YYYY-MM-DD、デフォルト: 2025-01-01)")
     parser.add_argument("--batch-size", type=int, default=80, help="1バッチあたりの銘柄数 (デフォルト: 80)")
+    parser.add_argument("--num-days", type=int, default=None, help="取得日数 (--start未指定時は120)")
     args = parser.parse_args()
 
-    effective_start = args.start or "2025-01-01"
+    effective_start = args.start or DEFAULT_START
+    start_specified = args.start is not None
+    if start_specified and args.num_days is None:
+        start_dt = pd.Timestamp(effective_start)
+        today_dt = pd.Timestamp(datetime.now().strftime("%Y-%m-%d"))
+        effective_num_days = max(len(pd.bdate_range(start_dt, today_dt)), DEFAULT_NUM_DAYS)
+    else:
+        effective_num_days = args.num_days or DEFAULT_NUM_DAYS
 
     print("=" * 60)
     print("Moomoo 日次更新")
     print("=" * 60)
     print(f"  mode: {args.mode}")
     print(f"  start: {effective_start}")
+    print(f"  num-days: {effective_num_days}")
     print(f"  batch-size: {args.batch_size}")
 
     try:
@@ -246,6 +270,7 @@ def main() -> int:
         print(f"  対象銘柄: {codes[:5]}...")
         print(f"  mode: {args.mode}")
         print(f"  start: {effective_start}")
+        print(f"  num-days: {effective_num_days}")
         print(f"  batch-size: {args.batch_size}")
         return 0
 
@@ -270,7 +295,7 @@ def main() -> int:
         print("-" * 60)
         data_dict = fetch_and_save_daily_klines(
             quote_service, data_store, codes,
-            num_days=DEFAULT_NUM_DAYS,
+            num_days=effective_num_days,
             force=args.force,
             mode=args.mode,
             start=effective_start,

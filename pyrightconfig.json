@@ -1,7 +1,9 @@
 {
   "include": [
     "run_daily_cycle.py",
+    "daily_update.py",
     "screen_candidates.py",
+    "scheduler.py",
     "src/benchmark.py",
     "src/connection.py",
     "src/migrations.py",
@@ -18,6 +20,7 @@
     "tests/test_batch_fetch.py",
     "tests/test_core.py",
     "tests/test_daily_cycle.py",
+    "tests/test_operation_config.py",
     "tests/test_regressions.py",
     "tests/test_strategy_compare.py",
     "tests/test_virtual_integration.py",

@@ -31,3 +31,14 @@ Thumbs.db
 
 # ログ
 *.log
+
+# Generated market-data artifacts
+data/moomoo.db.bak
+data/symbols.generated.json
+data/yf_*.csv
+data/yf_*.txt
+
+# SQLite temporary files
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal

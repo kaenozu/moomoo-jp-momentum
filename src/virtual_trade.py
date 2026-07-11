@@ -83,7 +83,7 @@ class VirtualTradeManager:
         self.slippage_bps = float(vt_config.get("slippage_bps", 10))
         self.commission = float(vt_config.get("commission", 0))
         self.reserve_buffer_pct = float(vt_config.get("reserve_buffer_pct", 2.0))
-        self.default_benchmark = vt_config.get("default_benchmark", "JP.2559")
+        self.default_benchmark = vt_config.get("default_benchmark", "JP.1306")
 
         universe_config = config.get("universe", {})
         self.min_trade_price = float(universe_config.get("min_trade_price", 500))

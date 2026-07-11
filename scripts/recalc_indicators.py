@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path("C:/gemini-desktop/moomoo").resolve()))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
 from src.data_store import DataStore
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 def main():
     config = load_config("config.yaml")
     data_store = DataStore(config)
-    db_path = Path(DB_PATH)
+    db_path = Path(config.database_path)
 
     # Get all symbols with their names
     with sqlite3.connect(db_path) as conn:
@@ -55,7 +55,7 @@ def main():
             df = pd.read_sql_query(
                 "SELECT code, date as time_key, open, high, low, close, volume, turnover "
                 "FROM daily_bars WHERE code = ? ORDER BY date",
-                conn, params=(code,),
+                conn, params=[code],
             )
         if len(df) < MIN_HISTORY:
             logger.debug("  skip %s: %d rows (< %d)", code, len(df), MIN_HISTORY)
