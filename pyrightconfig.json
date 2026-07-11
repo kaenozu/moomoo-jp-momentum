@@ -15,8 +15,10 @@
     "reports",
     "logs",
     "scripts",
-    "**/__pycache__",
-    "src/benchmark.py"
+    "**/__pycache__"
+  ],
+  "ignore": [
+    "tests/test_core.py"
   ],
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic"
