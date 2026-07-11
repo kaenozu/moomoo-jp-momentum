@@ -37,24 +37,30 @@ jobs:
 
           virtual_path = Path("src/virtual_trade.py")
           virtual = virtual_path.read_text(encoding="utf-8")
-          virtual = replace_once(
-              virtual,
+
+          start = virtual.index("    def _get_pending_buy_reserved(")
+          end = virtual.index("    def get_available_cash(", start)
+          reservation = virtual[start:end]
+          reservation = replace_once(
+              reservation,
               """              AND status = 'PENDING'\n              AND (? IS NULL OR id <> ?)\n            \"\"\",\n            (strategy_name, exclude_order_id, exclude_order_id),""",
               """              AND status = 'PENDING'\n              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)\n              AND (? IS NULL OR id <> ?)\n            \"\"\",\n            (\n                strategy_name,\n                as_of_date,\n                as_of_date,\n                exclude_order_id,\n                exclude_order_id,\n            ),""",
               "pending reservation date filter",
           )
-          virtual = replace_once(
-              virtual,
+          reservation = replace_once(
+              reservation,
               "total += float(row[\"limit_price\"]) * int(row[\"quantity\"]) * buffer",
               "total += (\n                    float(row[\"limit_price\"]) * int(row[\"quantity\"]) * buffer\n                    + self.commission\n                )",
               "legacy limit reservation commission",
           )
-          virtual = replace_once(
-              virtual,
+          reservation = replace_once(
+              reservation,
               "total += price * int(row[\"quantity\"]) * buffer",
               "total += price * int(row[\"quantity\"]) * buffer + self.commission",
               "legacy market reservation commission",
           )
+          virtual = virtual[:start] + reservation + virtual[end:]
+
           virtual = replace_once(
               virtual,
               """        required_cash = ref_price * quantity + self.commission\n        available_cash = self.get_available_cash(""",
