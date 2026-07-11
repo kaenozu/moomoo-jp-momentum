@@ -25,7 +25,9 @@
     "tests/test_strategy_compare.py",
     "tests/test_virtual_integration.py",
     "tests/test_virtual_report.py",
-    "tests/test_virtual_trade_reservations.py"
+    "tests/test_virtual_trade_reservations.py",
+    "src/backtest_runner.py",
+    "tests/test_backtest_ranking.py"
   ],
   "exclude": [
     ".venv",

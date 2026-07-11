@@ -17,13 +17,13 @@ import sqlite3
 from dataclasses import dataclass
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
 
 import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
-from .strategies import StrategyRegistry
+from .strategies import StrategyRegistry, StrategyResult
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,37 @@ class _PendingOrder:
     signal_date: str
     exit_reason: Optional[str] = None
     avg_cost: float = 0.0  # SELL時のみ使用
+
+
+class _StrategyEvaluator(Protocol):
+    """Minimal strategy interface required for candidate ranking."""
+
+    def evaluate(
+        self,
+        indicators: StockIndicators,
+        benchmark_returns: Optional[dict] = None,
+    ) -> StrategyResult:
+        ...
+
+
+def _rank_buy_candidates(
+    valid_pairs: list[tuple[str, StockIndicators]],
+    strategy: _StrategyEvaluator,
+) -> list[tuple[str, StockIndicators]]:
+    """Evaluate every candidate, then rank BUY signals deterministically.
+
+    Database insertion order must never decide which symbols consume limited
+    position slots. Higher strategy scores rank first; symbol code is the stable
+    tie-breaker. WATCH/EXCLUDE results are removed before slot allocation.
+    """
+    evaluated: list[tuple[str, StockIndicators, StrategyResult]] = []
+    for code, indicators in valid_pairs:
+        result = strategy.evaluate(indicators)
+        if result.signal_type == "BUY_CANDIDATE":
+            evaluated.append((code, indicators, result))
+
+    evaluated.sort(key=lambda item: (-item[2].score, item[0]))
+    return [(code, indicators) for code, indicators, _ in evaluated]
 
 
 BM2559 = "JP.2559"
@@ -282,7 +313,7 @@ class BacktestRunner:
 
             # ── Phase 3: 新規シグナル評価 ──
             day_indicators: list[StockIndicators] = []
-            valid_pairs = []
+            valid_pairs: list[tuple[str, StockIndicators]] = []
             for sym in candidates:
                 code = sym["code"]
                 # 既にポジション or pending BUY があればスキップ
@@ -302,7 +333,7 @@ class BacktestRunner:
                     continue
 
                 day_indicators.append(ind)
-                valid_pairs.append((sym, ind))
+                valid_pairs.append((code, ind))
 
             if day_indicators:
                 add_cross_sectional_stats(day_indicators)
@@ -312,17 +343,13 @@ class BacktestRunner:
             pending_buy_count = sum(1 for o in pending_orders if o.side == "BUY")
             slots_available = self.max_total_positions - current_pos_count - pending_buy_count
 
-            for sym, ind in valid_pairs:
+            ranked_candidates = _rank_buy_candidates(valid_pairs, strategy)
+            for code, ind in ranked_candidates:
                 if slots_available <= 0:
                     break
-                code = sym["code"]
 
                 available_cash = self.cash - self.reserved_cash
                 if ind.close and ind.close > available_cash:
-                    continue
-
-                result = strategy.evaluate(ind)
-                if result.signal_type != "BUY_CANDIDATE":
                     continue
 
                 next_bar = self._next_open_bar(code, day)
