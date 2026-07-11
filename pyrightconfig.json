@@ -5,6 +5,7 @@
     "src/benchmark.py",
     "src/connection.py",
     "src/migrations.py",
+    "src/models.py",
     "src/performance.py",
     "src/relative_strength.py",
     "src/screener.py",
