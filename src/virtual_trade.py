@@ -272,7 +272,7 @@ class VirtualTradeManager:
             (int(row["quantity"]) for row in position_rows if row["code"] == code),
             0,
         )
-        if current_quantity + quantity > self.max_position_per_symbol:
+        if current_quantity >= self.max_position_per_symbol:
             return False, "同一銘柄の保有上限に達しています"
 
         pending_rows = conn.execute(
