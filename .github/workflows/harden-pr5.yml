@@ -1,0 +1,126 @@
+name: harden PR5 boundaries
+
+on:
+  push:
+    branches:
+      - fix/virtual-trade-cash-reservation
+    paths:
+      - harden-pr5.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/virtual-trade-cash-reservation
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply boundary corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          virtual_path = Path("src/virtual_trade.py")
+          virtual = virtual_path.read_text(encoding="utf-8")
+          virtual = replace_once(
+              virtual,
+              """              AND status = 'PENDING'\n              AND (? IS NULL OR id <> ?)\n            \"\"\",\n            (strategy_name, exclude_order_id, exclude_order_id),""",
+              """              AND status = 'PENDING'\n              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)\n              AND (? IS NULL OR id <> ?)\n            \"\"\",\n            (\n                strategy_name,\n                as_of_date,\n                as_of_date,\n                exclude_order_id,\n                exclude_order_id,\n            ),""",
+              "pending reservation date filter",
+          )
+          virtual = replace_once(
+              virtual,
+              "total += float(row[\"limit_price\"]) * int(row[\"quantity\"]) * buffer",
+              "total += (\n                    float(row[\"limit_price\"]) * int(row[\"quantity\"]) * buffer\n                    + self.commission\n                )",
+              "legacy limit reservation commission",
+          )
+          virtual = replace_once(
+              virtual,
+              "total += price * int(row[\"quantity\"]) * buffer",
+              "total += price * int(row[\"quantity\"]) * buffer + self.commission",
+              "legacy market reservation commission",
+          )
+          virtual = replace_once(
+              virtual,
+              """        required_cash = ref_price * quantity + self.commission\n        available_cash = self.get_available_cash(""",
+              """        buffer = 1.0 + self.reserve_buffer_pct / 100.0\n        required_reservation = ref_price * quantity * buffer + self.commission\n        available_cash = self.get_available_cash(""",
+              "buffered order requirement",
+          )
+          virtual = replace_once(
+              virtual,
+              """        if required_cash > available_cash:\n            return False, \"仮想cashが不足しています（pending BUY予約分を控除済み）\"""",
+              """        if required_reservation > available_cash:\n            return False, \"仮想cashが不足しています（予約バッファ・pending BUYを控除済み）\"""",
+              "buffered cash comparison",
+          )
+          virtual_path.write_text(virtual, encoding="utf-8")
+
+          cycle_path = Path("run_daily_cycle.py")
+          cycle = cycle_path.read_text(encoding="utf-8")
+          for old, label in (
+              ('    cash = manager.get_cash("default")\n', "local cash initialization"),
+              ('        if candidate.close and candidate.close > cash:\n            continue\n', "local cash precheck"),
+              ('            cash -= candidate.close or 0\n', "local cash decrement"),
+          ):
+              cycle = replace_once(cycle, old, "", label)
+          cycle_path.write_text(cycle, encoding="utf-8")
+
+          tests_path = Path("tests/test_virtual_trade_reservations.py")
+          tests = tests_path.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_order_requires_buffered_reservation(tmp_path):\n    manager, _ = _make_manager(tmp_path, cash=1019.0)\n\n    order = manager.place_order(\n        \"default\",\n        \"JP.0001\",\n        \"BUY\",\n        1,\n        submitted_at=\"2026-01-05\",\n    )\n\n    assert order is None\n    assert manager.get_available_cash(\"default\", \"2026-01-05\") == 1019.0\n\n\ndef test_future_pending_order_is_ignored_for_past_cash(tmp_path):\n    manager, db_path = _make_manager(tmp_path)\n    with sqlite3.connect(db_path) as conn:\n        conn.execute(\n            \"\"\"\n            INSERT INTO virtual_orders\n            (strategy_name, code, side, quantity, order_type, status,\n             submitted_at, reserved_amount, created_at, updated_at)\n            VALUES ('default', 'JP.0002', 'BUY', 1, 'MARKET_SIM', 'PENDING',\n                    '2026-01-10 15:30:00', 5000,\n                    '2026-01-10T00:00:00', '2026-01-10T00:00:00')\n            \"\"\"\n        )\n\n    assert manager.get_available_cash(\"default\", \"2026-01-05\") == 100000.0\n    assert manager.get_available_cash(\"default\") == 95000.0\n'''
+          if "def test_order_requires_buffered_reservation" in tests:
+              raise RuntimeError("boundary tests already exist")
+          tests_path.write_text(tests.rstrip() + addition + "\n", encoding="utf-8")
+          PY
+
+          rm -f harden-pr5.trigger .github/workflows/harden-pr5.yml
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
+
+      - name: Run ruff
+        run: >-
+          ruff check src/ tests/ run_daily_cycle.py daily_update.py
+          historical_backtest.py screen_candidates.py scheduler.py
+          performance_report.py --output-format=github
+
+      - name: Run pyright
+        run: pyright
+
+      - name: Run dry-run
+        run: >-
+          python run_daily_cycle.py --dry-run
+          --config tests/fixtures/config.test.yaml
+
+      - name: Verify no runtime artifacts
+        run: |
+          test ! -e data/moomoo.db
+          test ! -d logs
+          test ! -d reports
+
+      - name: Commit hardened implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: enforce reservation boundaries and single cash authority"
+          git push origin HEAD:fix/virtual-trade-cash-reservation
