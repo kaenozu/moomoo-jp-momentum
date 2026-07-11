@@ -1,0 +1,1 @@
+apply defensive score handling
