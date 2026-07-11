@@ -1,9 +1,6 @@
 # Moomoo 開発用依存関係
 # pip install -r requirements-dev.txt
 
-# プロダクション依存（requirements.txt から）
--r requirements.txt
-
 # テスト
 pytest>=9.0.0
 pytest-mock>=3.14.0

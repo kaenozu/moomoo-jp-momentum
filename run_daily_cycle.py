@@ -25,17 +25,23 @@ from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
 from daily_update import add_relative_strength, save_benchmark_prices_from_indicators, save_indicators_to_db
 
-log_dir = Path("logs")
-log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
-)
 logger = logging.getLogger(__name__)
+
+
+def configure_logging(log_to_file: bool = True, log_dir: str | Path | None = None) -> None:
+    """ログ設定を行う（import時には実行しないこと）"""
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_to_file:
+        log_path = Path(log_dir or "logs")
+        log_path.mkdir(parents=True, exist_ok=True)
+        log_file = log_path / f"app_{datetime.now().strftime('%Y%m%d')}.log"
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=handlers,
+    )
 
 
 def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
@@ -53,6 +59,38 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         opend_conn = None
         quote_ctx = None
     results["connection"] = True
+
+    if dry_run:
+        # dry-run: DataStoreを作らずJSONをread-onlyで検証
+        import json
+        try:
+            wl_file = config.watchlist_file
+            with open(wl_file, encoding="utf-8") as f:
+                symbols_data: list[dict] = json.load(f)
+            jp_symbols = [s for s in symbols_data if isinstance(s, dict) and s.get("code", "").startswith("JP.")]
+            codes = [s["code"] for s in jp_symbols]
+            symbols_info = {s["code"]: s.get("name", "") for s in jp_symbols}
+            benchmark_codes = {s["code"] for s in jp_symbols if s.get("role") == "benchmark"}
+            results["symbols"] = len(codes)
+        except FileNotFoundError:
+            logger.warning("銘柄リストファイルが見つかりません: %s", wl_file)
+            codes = []
+            symbols_info = {}
+            benchmark_codes = set()
+            results["symbols"] = 0
+        data_dict = {}
+        results["daily_bars"] = 0
+        results["indicators"] = 0
+        results["benchmark_prices"] = 0
+        results["signals"] = 0
+        results["virtual_orders"] = 0
+        results["fills"] = 0
+        results["exits"] = 0
+        results["price_updates"] = 0
+        results["alerts"] = 0
+        if opend_conn:
+            opend_conn.disconnect()
+        return results
 
     data_store = DataStore(config)
     data_store.sync_symbols_from_json(config.watchlist_file)
@@ -166,6 +204,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="テスト実行")
     parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
     args = parser.parse_args()
+
+    # dry-run時はファイル出力なし
+    configure_logging(log_to_file=not args.dry_run)
 
     print("=" * 60)
     print("Moomoo 日次運用サイクル")

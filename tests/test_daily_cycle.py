@@ -101,6 +101,6 @@ class TestDailyCycle:
             def database_path(self):
                 return "data/nonexistent_xyz.db"
 
-        guard = DataFreshnessGuard(TestConfig())
+        guard = DataFreshnessGuard(TestConfig())  # type: ignore[arg-type]  # test stub, not full Config
         status = guard.check_freshness()
         assert status.level == "error"

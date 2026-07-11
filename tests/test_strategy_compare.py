@@ -82,7 +82,7 @@ class TestStrategyNames:
             @property
             def opend_port(self): return 11111
 
-        strategy = ETFRotationStrategy(Cfg())
+        strategy = ETFRotationStrategy(Cfg())  # type: ignore[arg-type]  # test stub, not full Config
         assert strategy._is_etf("JP.2559") is True
         assert strategy._is_etf("JP.7203") is False
 

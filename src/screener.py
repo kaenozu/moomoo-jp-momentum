@@ -120,7 +120,7 @@ class Screener:
             code=_none_if_nan(row.get("code")) or "",
             name=_none_if_nan(row.get("name")),
             date=_none_if_nan(row.get("date")) or "",
-            close=_none_if_nan(row.get("close")),
+            close=float(_none_if_nan(row.get("close")) or 0),
             open=0.0,
             high=0.0,
             low=0.0,

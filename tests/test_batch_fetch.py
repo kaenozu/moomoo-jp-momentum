@@ -47,7 +47,7 @@ def mock_ctx():
 
 @pytest.fixture
 def quote_service(mock_ctx):
-    return QuoteService(DummyConfig(), mock_ctx)
+    return QuoteService(DummyConfig(), mock_ctx)  # type: ignore[arg-type]  # test stub, not full Config
 
 
 def make_mock_kline_data(codes: list[str], num_rows: int = 50) -> dict:

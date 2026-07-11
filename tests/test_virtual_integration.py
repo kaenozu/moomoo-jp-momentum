@@ -73,7 +73,7 @@ class TestVirtualTradeIntegration:
             @property
             def database_path(self): return str(db_path)
 
-        mgr = VirtualTradeManager(TestConfig())
+        mgr = VirtualTradeManager(TestConfig())  # type: ignore[arg-type]  # test stub, not full Config
         assert mgr.place_order("default", "JP.2559", "BUY", 1, "MARKET_SIM") is None
         assert mgr.place_order("default", "JP.7203", "BUY", 1, "MARKET_SIM") is None
 

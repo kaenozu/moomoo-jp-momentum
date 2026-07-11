@@ -79,6 +79,7 @@ class OpenDConnection:
             self._status = ConnectionStatus(False, msg, hint)
             return self._status
 
+        assert self._quote_context is not None
         ret, data = self._quote_context.get_market_snapshot(["US.SPY"])
 
         if ret == RET_OK:
@@ -88,7 +89,6 @@ class OpenDConnection:
                 message="接続成功",
                 quote_context=self._quote_context,
             )
-            return self._status
 
         error_str = str(data).lower()
         msg = f"接続テスト失敗: {data}"

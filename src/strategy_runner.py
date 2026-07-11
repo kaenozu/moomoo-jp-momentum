@@ -65,7 +65,8 @@ class StrategyRunner:
         strategy_name: str,
     ) -> int:
         """単一戦略を実行し、シグナルを保存"""
-        return self.run_all(indicators_list, target_date, [strategy_name]).get(strategy_name, 0)
+        result = self.run_all(indicators_list, target_date, [strategy_name]).get(strategy_name)
+        return len(result) if result else 0
 
     def _save_signals(self, signals: list, strategy_name: str) -> int:
         """戦略のシグナルをsignalsテーブルに保存"""
