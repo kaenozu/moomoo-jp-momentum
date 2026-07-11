@@ -1,0 +1,49 @@
+name: one-shot test config cleanup
+
+on:
+  push:
+    branches:
+      - fix/self-contained-test-environment
+    paths:
+      - .github/workflows/fix-test-core-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/self-contained-test-environment
+          fetch-depth: 0
+
+      - name: Replace destructive config assignments
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_core.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'config._config = {"database": {"path": str(db_path)}}'
+          new = 'config._config["database"] = {"path": str(db_path)}'
+          count = text.count(old)
+          if count == 0:
+              print("No matching assignments remain")
+              raise SystemExit(0)
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          print(f"Replaced {count} destructive assignment(s)")
+          PY
+
+      - name: Commit cleanup
+        run: |
+          if git diff --quiet -- tests/test_core.py; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_core.py
+          git commit -m "test: preserve fixture config overrides"
+          git push origin HEAD:fix/self-contained-test-environment
