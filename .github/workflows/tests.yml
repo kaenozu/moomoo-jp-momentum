@@ -30,15 +30,21 @@ jobs:
         run: python -m pytest tests/ -m "not slow" -q
 
       - name: Run ruff
-        run: ruff check src/ tests/ run_daily_cycle.py daily_update.py historical_backtest.py screen_candidates.py scheduler.py performance_report.py --output-format=github
+        run: >-
+          ruff check src/ tests/ run_daily_cycle.py daily_update.py
+          historical_backtest.py screen_candidates.py scheduler.py
+          performance_report.py --output-format=github
 
       - name: Run pyright
         run: pyright
 
       - name: Test dry-run with test config
-        run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
+        run: >-
+          python run_daily_cycle.py --dry-run
+          --config tests/fixtures/config.test.yaml
 
       - name: Verify no artifacts created
+        if: always()
         run: |
           echo "=== git status after ==="
           git status --porcelain
