@@ -218,22 +218,16 @@ class TestSlippage:
 class TestDataFreshness:
     """データ鮮度テスト"""
 
-    def test_stale_data_stops_screening(self):
+    def test_stale_data_stops_screening(self, tmp_path):
         """古いデータでは例外が発生する"""
         from src.data_freshness import DataFreshnessGuard
 
-        class TestConfig(Config):
-            def __init__(self):
-                super().__init__()
-                self._config = {"database": {"path": "data/nonexistent.db"}}
-            def get(self, key_path, default=None):
-                if key_path == "database":
-                    return {"path": "data/nonexistent.db"}
-                return default
+        test_db_path = tmp_path / "freshness_missing.db"
 
+        class TestConfig(Config):
             @property
-            def database_path(self):
-                return "data/nonexistent.db"
+            def database_path(self) -> str:
+                return str(test_db_path)
 
         guard = DataFreshnessGuard(TestConfig())
         status = guard.check_freshness(max_stale_days=5)
