@@ -9,16 +9,15 @@
 
 import sys
 import os
-import time
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pandas as pd
 import pytest
 
-from src.quote_service import QuoteService, BATCH_SLEEP_SECONDS
+from src.quote_service import QuoteService
 from src.config import Config
 
 
@@ -78,7 +77,6 @@ class TestBatchModeSelection:
         codes = [f"JP.{i:04d}" for i in range(150)]
         # mock batch_fetchで呼ばれるinternal methodを検証する代わりに
         # ロジックを再現: mode="auto" → 100超 = history
-        from src.quote_service import QuoteService as QS
         # autoモードの解決ロジックをinlineテスト
         mode = "history" if len(codes) > 100 else "latest"
         assert mode == "history"
@@ -197,6 +195,7 @@ class TestBatchFetch:
         )
         assert result == {}
 
+    @pytest.mark.slow
     def test_auto_mode_delegation(self, quote_service, mock_ctx):
         """autoモードで101銘柄 → historyが使われる"""
         codes = [f"JP.{i:04d}" for i in range(101)]
@@ -207,7 +206,7 @@ class TestBatchFetch:
 
         mock_ctx.request_history_kline.side_effect = side_effect
 
-        result = quote_service.batch_fetch_daily_klines(
+        quote_service.batch_fetch_daily_klines(
             codes, mode="auto", num=50, batch_size=50
         )
         # history mode → request_history_kline called
@@ -257,7 +256,7 @@ class TestDailyUpdateBatch:
         qs.batch_fetch_daily_klines.return_value = {}
 
         # DBにデータがないのでforce=Falseでもスキップされない
-        result = fetch_and_save_daily_klines(
+        fetch_and_save_daily_klines(
             qs, data_store, ["JP.7203"],
             force=False, mode="history",
         )
@@ -271,7 +270,6 @@ class TestIntegrationWithDailyUpdate:
     def test_parse_args_dry_run(self):
         """--dry-runが正常にパースされる"""
         import argparse
-        from daily_update import main
         # argparseのテストはsys.argvを使うと面倒なので
         # ArgumentParserを直接テスト
         parser = argparse.ArgumentParser()
