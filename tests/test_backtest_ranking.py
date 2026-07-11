@@ -124,3 +124,38 @@ def test_limited_slots_take_only_the_top_n_ranked_candidates() -> None:
 
     ranked = _codes(pairs, strategy)
     assert ranked[:2] == ["JP.0002", "JP.0003"]
+
+
+class _LooseScoreStrategy:
+    """Test double that can violate the runtime score annotation."""
+
+    def __init__(self, scores: dict[str, float | None]) -> None:
+        self.scores = scores
+
+    def evaluate(
+        self,
+        indicators: StockIndicators,
+        benchmark_returns: dict | None = None,
+    ) -> StrategyResult:
+        result = StrategyResult(
+            code=indicators.code,
+            name=indicators.name,
+            date=indicators.date,
+            strategy_name="loose-test",
+            signal_type="BUY_CANDIDATE",
+            score=0.0,
+            price_at_signal=indicators.close,
+        )
+        result.score = self.scores[indicators.code]  # type: ignore[assignment]
+        return result
+
+
+def test_none_score_is_treated_as_zero_instead_of_crashing() -> None:
+    pairs = [
+        ("JP.0001", _indicator("JP.0001")),
+        ("JP.0002", _indicator("JP.0002")),
+    ]
+    strategy = _LooseScoreStrategy({"JP.0001": None, "JP.0002": 10.0})
+
+    ranked = [code for code, _ in _rank_buy_candidates(pairs, strategy)]
+    assert ranked == ["JP.0002", "JP.0001"]

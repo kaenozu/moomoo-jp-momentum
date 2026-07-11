@@ -69,7 +69,7 @@ def _rank_buy_candidates(
         if result.signal_type == "BUY_CANDIDATE":
             evaluated.append((code, indicators, result))
 
-    evaluated.sort(key=lambda item: (-item[2].score, item[0]))
+    evaluated.sort(key=lambda item: (-(item[2].score or 0.0), item[0]))
     return [(code, indicators) for code, indicators, _ in evaluated]
 
 
