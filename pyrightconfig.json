@@ -17,7 +17,11 @@
     "tests/test_regressions.py",
     "tests/test_strategy_compare.py",
     "tests/test_virtual_integration.py",
-    "tests/test_virtual_report.py"
+    "tests/test_virtual_report.py",
+    "src/migrations.py",
+    "src/virtual_trade.py",
+    "tests/test_core.py",
+    "tests/test_virtual_trade_reservations.py"
   ],
   "exclude": [
     ".venv",

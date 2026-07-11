@@ -234,6 +234,7 @@ CREATE TABLE IF NOT EXISTS virtual_orders (
     cancelled_at TEXT,
     fill_price REAL,
     fill_reason TEXT,
+    reserved_amount REAL,
     created_at TEXT,
     updated_at TEXT
 );
