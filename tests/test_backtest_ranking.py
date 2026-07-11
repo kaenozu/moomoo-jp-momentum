@@ -104,3 +104,23 @@ def test_ranking_is_independent_of_input_order() -> None:
     expected = ["JP.0002", "JP.0003", "JP.0001"]
     assert _codes(pairs, strategy) == expected
     assert _codes(list(reversed(pairs)), strategy) == expected
+
+
+def test_limited_slots_take_only_the_top_n_ranked_candidates() -> None:
+    pairs = [
+        ("JP.0004", _indicator("JP.0004")),
+        ("JP.0001", _indicator("JP.0001")),
+        ("JP.0003", _indicator("JP.0003")),
+        ("JP.0002", _indicator("JP.0002")),
+    ]
+    strategy = _ScoreStrategy(
+        {
+            "JP.0001": 75.0,
+            "JP.0002": 95.0,
+            "JP.0003": 85.0,
+            "JP.0004": 65.0,
+        }
+    )
+
+    ranked = _codes(pairs, strategy)
+    assert ranked[:2] == ["JP.0002", "JP.0003"]
