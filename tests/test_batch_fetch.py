@@ -224,7 +224,7 @@ class TestDailyUpdateBatch:
         from src.data_store import DataStore
 
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": ":memory:"}}
+        config._config["database"] = {"path": ":memory:"}
 
         data_store = DataStore(config)
         qs = MagicMock()
@@ -240,7 +240,7 @@ class TestDailyUpdateBatch:
 
         db_path = tmp_path / "test.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
 
         data_store = DataStore(config)
         # テスト用のシンボルを直接DBに登録

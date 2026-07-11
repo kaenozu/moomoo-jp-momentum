@@ -244,7 +244,7 @@ class TestDailyBarSource:
     def test_save_dataframe_preserves_source_columns(self, tmp_path):
         db_path = tmp_path / "source.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         store = DataStore(config)
 
         df = pd.DataFrame([{
@@ -521,12 +521,8 @@ class TestIdleCashOrder:
         """idle cash benchmark上昇時にequity_curveのtotal_equityも上がる"""
         db_path = tmp_path / "idle.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {
-            "database": {"path": str(db_path)},
-            "backtest": {
-                "idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"},
-            },
-        }
+        config._config["database"] = {"path": str(db_path)}
+        config._config["backtest"] = {"idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"}}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -786,14 +782,9 @@ class TestBacktestCashFlowIntegration:
     @staticmethod
     def _build_db(db_path):
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {
-            "database": {"path": str(db_path)},
-            "screening": {"min_turnover": 50_000_000},
-            "backtest": {
-                "max_positions": 5,
-                "idle_cash_allocation": {"enabled": False},
-            },
-        }
+        config._config["database"] = {"path": str(db_path)}
+        config._config["screening"] = {"min_turnover": 50_000_000}
+        config._config["backtest"] = {"max_positions": 5, "idle_cash_allocation": {"enabled": False}}
         DataStore(config)
 
         bars = []

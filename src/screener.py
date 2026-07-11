@@ -116,11 +116,17 @@ class Screener:
             )
 
     def _row_to_indicators(self, row: pd.Series) -> StockIndicators:
+        code = _none_if_nan(row.get("code")) or ""
+        name = _none_if_nan(row.get("name"))
+        date = _none_if_nan(row.get("date")) or ""
+        close = _none_if_nan(row.get("close"))
+        if close is None:
+            raise ValueError(f"indicator row is missing close: code={code}, date={date}")
         return StockIndicators(
-            code=_none_if_nan(row.get("code")) or "",
-            name=_none_if_nan(row.get("name")),
-            date=_none_if_nan(row.get("date")) or "",
-            close=float(_none_if_nan(row.get("close")) or 0),
+            code=code,
+            name=name,
+            date=date,
+            close=close,
             open=0.0,
             high=0.0,
             low=0.0,

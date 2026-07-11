@@ -32,7 +32,7 @@ class StrategyRunner:
         indicators_list: list[StockIndicators],
         target_date: str,
         strategy_names: Optional[list[str]] = None,
-    ) -> dict[str, list]:
+    ) -> dict[str, int]:
         """全戦略を実行し、シグナルを保存"""
         if strategy_names is None:
             strategy_names = StrategyRegistry.list_names()
@@ -65,8 +65,7 @@ class StrategyRunner:
         strategy_name: str,
     ) -> int:
         """単一戦略を実行し、シグナルを保存"""
-        result = self.run_all(indicators_list, target_date, [strategy_name]).get(strategy_name)
-        return len(result) if result else 0
+        return self.run_all(indicators_list, target_date, [strategy_name]).get(strategy_name, 0)
 
     def _save_signals(self, signals: list, strategy_name: str) -> int:
         """戦略のシグナルをsignalsテーブルに保存"""

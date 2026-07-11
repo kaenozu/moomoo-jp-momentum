@@ -15,7 +15,8 @@
     "reports",
     "logs",
     "scripts",
-    "**/__pycache__"
+    "**/__pycache__",
+    "src/benchmark.py"
   ],
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic"

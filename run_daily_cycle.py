@@ -45,7 +45,7 @@ def configure_logging(log_to_file: bool = True, log_dir: str | Path | None = Non
 
 
 def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
-    results: dict[str, int | bool] = {}
+    results: dict[str, int | bool | str] = {}
     config = load_config(config_path)
 
     if not dry_run:
@@ -58,38 +58,30 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
     else:
         opend_conn = None
         quote_ctx = None
-    results["connection"] = True
+
+    results["connection_attempted"] = False
 
     if dry_run:
+        vt_config = config.get("virtual_trade", {})
+        results["virtual_trade_enabled"] = vt_config.get("enabled", True)
         # dry-run: DataStoreを作らずJSONをread-onlyで検証
         import json
-        try:
-            wl_file = config.watchlist_file
-            with open(wl_file, encoding="utf-8") as f:
-                symbols_data: list[dict] = json.load(f)
-            jp_symbols = [s for s in symbols_data if isinstance(s, dict) and s.get("code", "").startswith("JP.")]
-            codes = [s["code"] for s in jp_symbols]
-            symbols_info = {s["code"]: s.get("name", "") for s in jp_symbols}
-            benchmark_codes = {s["code"] for s in jp_symbols if s.get("role") == "benchmark"}
-            results["symbols"] = len(codes)
-        except FileNotFoundError:
-            logger.warning("銘柄リストファイルが見つかりません: %s", wl_file)
-            codes = []
-            symbols_info = {}
-            benchmark_codes = set()
-            results["symbols"] = 0
-        data_dict = {}
-        results["daily_bars"] = 0
-        results["indicators"] = 0
-        results["benchmark_prices"] = 0
-        results["signals"] = 0
-        results["virtual_orders"] = 0
-        results["fills"] = 0
-        results["exits"] = 0
-        results["price_updates"] = 0
-        results["alerts"] = 0
-        if opend_conn:
-            opend_conn.disconnect()
+        wl_file = config.watchlist_file
+        with open(wl_file, encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, list):
+            raise RuntimeError(f"watchlist JSONのトップレベルがlistではありません: {type(raw).__name__}")
+        jp_symbols = [s for s in raw if isinstance(s, dict) and s.get("code", "").startswith("JP.")]
+        if not jp_symbols:
+            raise RuntimeError("JP. 銘柄が0件です")
+        codes = [s["code"] for s in jp_symbols]
+        symbols_info = {s["code"]: s.get("name", "") for s in jp_symbols}
+        benchmark_codes = {s["code"] for s in jp_symbols if s.get("role") == "benchmark"}
+        if not benchmark_codes:
+            raise RuntimeError("benchmark が0件です")
+        results["symbols"] = len(codes)
+        results["benchmarks"] = len(benchmark_codes)
+        results["database_write_attempted"] = False
         return results
 
     data_store = DataStore(config)
