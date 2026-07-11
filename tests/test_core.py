@@ -225,6 +225,9 @@ class TestDataFreshness:
         test_db_path = tmp_path / "freshness_missing.db"
 
         class TestConfig(Config):
+            def __init__(self):
+                self._config = {}
+
             @property
             def database_path(self) -> str:
                 return str(test_db_path)
