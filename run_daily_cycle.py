@@ -186,7 +186,6 @@ def run_cycle(
     manager = VirtualTradeManager(config)
     virtual_trade_config = config.get("virtual_trade", {})
     score_threshold = virtual_trade_config.get("score_threshold_for_order", 70)
-    cash = manager.get_cash("default")
     created = 0
     for candidate in candidates:
         if candidate.signal_type != "BUY_CANDIDATE":
@@ -194,8 +193,6 @@ def run_cycle(
         if candidate.role != "trade_candidate" or not candidate.tradable:
             continue
         if candidate.score < score_threshold:
-            continue
-        if candidate.close and candidate.close > cash:
             continue
         order = manager.place_order(
             strategy_name="default",
@@ -207,7 +204,6 @@ def run_cycle(
         )
         if order:
             created += 1
-            cash -= candidate.close or 0
     results["virtual_orders"] = created
 
     manager = VirtualTradeManager(config)

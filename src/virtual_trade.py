@@ -160,9 +160,16 @@ class VirtualTradeManager:
             WHERE strategy_name = ?
               AND side = 'BUY'
               AND status = 'PENDING'
+              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
               AND (? IS NULL OR id <> ?)
             """,
-            (strategy_name, exclude_order_id, exclude_order_id),
+            (
+                strategy_name,
+                as_of_date,
+                as_of_date,
+                exclude_order_id,
+                exclude_order_id,
+            ),
         ).fetchall()
         buffer = 1.0 + self.reserve_buffer_pct / 100.0
         total = 0.0
@@ -173,13 +180,16 @@ class VirtualTradeManager:
                 total += float(stored)
                 continue
             if row["order_type"] == "LIMIT_SIM" and row["limit_price"] is not None:
-                total += float(row["limit_price"]) * int(row["quantity"]) * buffer
+                total += (
+                    float(row["limit_price"]) * int(row["quantity"]) * buffer
+                    + self.commission
+                )
                 continue
             price = self._latest_close(conn, row["code"], as_of_date)
             if price is None:
                 unresolved.append(row["code"])
                 continue
-            total += price * int(row["quantity"]) * buffer
+            total += price * int(row["quantity"]) * buffer + self.commission
         if unresolved:
             logger.warning(
                 "仮想予約: 参照価格が取得できないため予約をスキップ: %s",
@@ -249,15 +259,16 @@ class VirtualTradeManager:
         if ref_price * quantity > self.max_position_amount:
             return False, f"注文金額が1銘柄上限{self.max_position_amount:,.0f}円を超えています"
 
-        required_cash = ref_price * quantity + self.commission
+        buffer = 1.0 + self.reserve_buffer_pct / 100.0
+        required_reservation = ref_price * quantity * buffer + self.commission
         available_cash = self.get_available_cash(
             strategy_name,
             reference_date,
             conn,
             exclude_order_id,
         )
-        if required_cash > available_cash:
-            return False, "仮想cashが不足しています（pending BUY予約分を控除済み）"
+        if required_reservation > available_cash:
+            return False, "仮想cashが不足しています（予約バッファ・pending BUYを控除済み）"
 
         position_rows = conn.execute(
             """

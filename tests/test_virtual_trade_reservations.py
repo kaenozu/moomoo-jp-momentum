@@ -177,3 +177,36 @@ def test_migration_is_idempotent_for_legacy_pending_orders(tmp_path):
 
     assert "reserved_amount" in columns
     assert value is None
+
+def test_order_requires_buffered_reservation(tmp_path):
+    manager, _ = _make_manager(tmp_path, cash=1019.0)
+
+    order = manager.place_order(
+        "default",
+        "JP.0001",
+        "BUY",
+        1,
+        submitted_at="2026-01-05",
+    )
+
+    assert order is None
+    assert manager.get_available_cash("default", "2026-01-05") == 1019.0
+
+
+def test_future_pending_order_is_ignored_for_past_cash(tmp_path):
+    manager, db_path = _make_manager(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO virtual_orders
+            (strategy_name, code, side, quantity, order_type, status,
+             submitted_at, reserved_amount, created_at, updated_at)
+            VALUES ('default', 'JP.0002', 'BUY', 1, 'MARKET_SIM', 'PENDING',
+                    '2026-01-10 15:30:00', 5000,
+                    '2026-01-10T00:00:00', '2026-01-10T00:00:00')
+            """
+        )
+
+    assert manager.get_available_cash("default", "2026-01-05") == 100000.0
+    assert manager.get_available_cash("default") == 95000.0
+
