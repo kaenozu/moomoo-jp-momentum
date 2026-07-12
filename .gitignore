@@ -19,6 +19,10 @@ config.yaml
 # レポート
 reports/
 
+# Operational runtime artifacts
+.runtime/
+backups/
+
 # IDE
 .vscode/
 .idea/

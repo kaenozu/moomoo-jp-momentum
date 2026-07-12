@@ -80,13 +80,17 @@ benchmark:
 database:
   path: data/moomoo.db
 database_backup:
-  enabled: false
+  enabled: true
   directory: backups
   retain_daily: 7
   retain_weekly: 4
   retain_pre_cycle: 7
   retain_post_cycle: 7
   verify_after_backup: true
+cycle_control:
+  enabled: true
+  lock_directory: .runtime/cycle-locks
+  stale_after_seconds: 21600
 output:
   csv: true
   html: true

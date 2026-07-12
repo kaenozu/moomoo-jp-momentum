@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -25,8 +26,17 @@ from daily_update import (
 from src.alerts import AlertManager
 from src.config import load_config
 from src.connection import OpenDConnection
+from src.cycle_run import (
+    CycleControlError,
+    CycleControlSettings,
+    CycleFileLock,
+    CycleRunLedger,
+    config_fingerprint,
+    resolve_git_commit_sha,
+)
 from src.data_freshness import DataFreshnessGuard, FreshnessStatus
 from src.data_store import DataStore
+from src.database_backup import BackupResult, DatabaseBackupManager
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
 from src.market_calendar import JST, get_jpx_calendar
 from src.operational_notifier import OperationalNotifier
@@ -196,9 +206,7 @@ def _log_virtual_trade_integrity_report(report: IntegrityReport) -> None:
             if finding.context
             else "{}"
         )
-        message = (
-            "仮想取引整合性: severity=%s code=%s message=%s context=%s"
-        )
+        message = "仮想取引整合性: severity=%s code=%s message=%s context=%s"
         if finding.severity == "error":
             logger.error(
                 message,
@@ -263,12 +271,7 @@ def _load_indicator_inputs(
     target_date: str,
     history_limit: int = DEFAULT_HISTORY_LIMIT,
 ) -> dict[str, pd.DataFrame]:
-    """全対象銘柄の指標入力をDBから対象日以前に限定して読み込む。
-
-    APIレスポンスは保存処理の入力にだけ使い、指標計算ではSQLiteを正規の
-    データソースにする。これにより一時的なAPI取得失敗で銘柄がクロス
-    セクション計算から脱落せず、過去日実行で未来データも混入しない。
-    """
+    """全対象銘柄の指標入力をDBから対象日以前に限定して読み込む。"""
     if history_limit <= 0:
         raise ValueError("history_limitは1以上で指定してください")
 
@@ -297,7 +300,7 @@ def _load_indicator_inputs(
     return {code: loaded_inputs[code] for code in normalized_codes}
 
 
-def run_cycle(
+def _run_cycle_core(
     target_date: str,
     dry_run: bool = False,
     config_path: str = "config.yaml",
@@ -398,10 +401,10 @@ def run_cycle(
                 context={"symbol_count": len(codes)},
             ) from error
         results["fresh_symbols"] = sum(
-            1 for status in freshness_by_code.values() if status.is_fresh
+            1 for freshness in freshness_by_code.values() if freshness.is_fresh
         )
         results["freshness_warnings"] = sum(
-            1 for status in freshness_by_code.values() if status.level == "warning"
+            1 for freshness in freshness_by_code.values() if freshness.level == "warning"
         )
 
         data_dict = _load_indicator_inputs(
@@ -486,6 +489,182 @@ def run_cycle(
         opend_conn.disconnect()
 
 
+def _backup_details(result: BackupResult | None, *, skipped: str = "") -> dict[str, Any]:
+    if result is None:
+        return {"skipped": skipped or "disabled"}
+    return {
+        "backup_path": result.backup_path,
+        "metadata_path": result.metadata_path,
+        "pruned_files": list(result.pruned_files),
+    }
+
+
+def _finish_failed_cycle_run(
+    ledger: CycleRunLedger | None,
+    error: BaseException,
+    result: dict[str, Any] | None,
+) -> None:
+    """Best-effort FAILED finalization that never masks the original error."""
+    if ledger is None or ledger.run_id is None:
+        return
+    try:
+        ledger.finish_run("FAILED", result=result, error=error)
+    except Exception as ledger_error:
+        logger.error(
+            "実行台帳をFAILEDへ終端できませんでした: original=%s ledger_error=%s",
+            error,
+            ledger_error,
+        )
+
+
+def run_cycle(
+    target_date: str,
+    dry_run: bool = False,
+    config_path: str = "config.yaml",
+    *,
+    force_rerun: bool = False,
+    rerun_reason: str | None = None,
+) -> dict:
+    """Run one cycle with an optional cross-entrypoint lock and execution ledger."""
+    config = load_config(config_path)
+    calendar = get_jpx_calendar()
+    is_trading_day = calendar.is_trading_day(target_date)
+
+    # Preserve the strict no-op boundary: no lock, backup, or SQLite access.
+    if dry_run or not is_trading_day:
+        return _run_cycle_core(target_date, dry_run=dry_run, config_path=config_path)
+
+    control_enabled = _read_bool_setting(config, "cycle_control.enabled", False)
+    backup_manager = DatabaseBackupManager(config)
+    backup_enabled = backup_manager.settings.enabled
+    if not control_enabled and not backup_enabled:
+        return _run_cycle_core(target_date, dry_run=False, config_path=config_path)
+
+    lock: CycleFileLock | None = None
+    ledger: CycleRunLedger | None = None
+    preflight_ledger: CycleRunLedger | None = None
+    pre_backup: BackupResult | None = None
+    post_backup: BackupResult | None = None
+    acquisition = None
+    record = None
+    results: dict[str, Any] | None = None
+    source_database_existed = backup_manager.source_path.is_file()
+
+    try:
+        if control_enabled:
+            lock = CycleFileLock(
+                CycleControlSettings.from_config(config),
+                target_date,
+            )
+            acquisition = lock.acquire()
+
+        if control_enabled or backup_enabled:
+            preflight_ledger = CycleRunLedger(Path(config.database_path))
+            preflight_ledger.assert_rerun_allowed(
+                target_date=target_date,
+                force_rerun=force_rerun,
+                rerun_reason=rerun_reason,
+            )
+        if control_enabled:
+            ledger = preflight_ledger
+
+        if backup_enabled and source_database_existed:
+            try:
+                pre_backup = backup_manager.create_backup(kind="pre_cycle")
+            except Exception as error:
+                raise DailyCycleStoppedError(
+                    f"pre-cycle SQLiteバックアップに失敗しました: {error}",
+                    event_type="database_backup_failure",
+                    context={"backup_kind": "pre_cycle"},
+                ) from error
+
+        if ledger is not None:
+            record = ledger.start_run(
+                target_date=target_date,
+                force_rerun=force_rerun,
+                rerun_reason=rerun_reason,
+                git_commit_sha=resolve_git_commit_sha(Path(__file__).parent),
+                config_sha256=config_fingerprint(config),
+                stale_lock_recovered=bool(
+                    acquisition and acquisition.recovered_stale_lock
+                ),
+            )
+
+        try:
+            if ledger is not None:
+                ledger.start_stage(
+                    "pre_cycle_backup",
+                    _backup_details(
+                        pre_backup,
+                        skipped=(
+                            "source_database_missing"
+                            if backup_enabled and not source_database_existed
+                            else "disabled"
+                        ),
+                    ),
+                )
+                ledger.finish_stage()
+                ledger.start_stage("daily_pipeline")
+
+            results = _run_cycle_core(
+                target_date,
+                dry_run=False,
+                config_path=config_path,
+            )
+
+            if ledger is not None:
+                ledger.finish_stage(
+                    {
+                        "symbols": results.get("symbols", 0),
+                        "signals": results.get("signals", 0),
+                        "fills": results.get("fills", 0),
+                        "alerts": results.get("alerts", 0),
+                    }
+                )
+
+            if backup_enabled:
+                if ledger is not None:
+                    ledger.start_stage("post_cycle_backup")
+                try:
+                    post_backup = backup_manager.create_backup(kind="post_cycle")
+                except Exception as error:
+                    raise DailyCycleStoppedError(
+                        f"post-cycle SQLiteバックアップに失敗しました: {error}",
+                        event_type="database_backup_failure",
+                        context={"backup_kind": "post_cycle"},
+                    ) from error
+                if ledger is not None:
+                    ledger.finish_stage(_backup_details(post_backup))
+
+            results["cycle_control_enabled"] = control_enabled
+            results["cycle_lock_acquired"] = acquisition is not None
+            results["stale_lock_recovered"] = bool(
+                acquisition and acquisition.recovered_stale_lock
+            )
+            results["cycle_run_id"] = record.run_id if record is not None else 0
+            results["pre_cycle_backup"] = (
+                pre_backup.backup_path if pre_backup else ""
+            )
+            results["post_cycle_backup"] = (
+                post_backup.backup_path if post_backup else ""
+            )
+            if ledger is not None:
+                ledger.finish_run("SUCCEEDED", result=results)
+            return results
+        except Exception as error:
+            _finish_failed_cycle_run(ledger, error, results)
+            raise
+    except CycleControlError as error:
+        raise DailyCycleStoppedError(
+            str(error),
+            event_type="cycle_concurrency_failure",
+            context={"force_rerun": force_rerun},
+        ) from error
+    finally:
+        if lock is not None:
+            lock.release()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Moomoo 日次運用サイクル")
     parser.add_argument(
@@ -495,6 +674,16 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="テスト実行")
     parser.add_argument("--config", default="config.yaml", help="設定ファイルパス")
+    parser.add_argument(
+        "--force-rerun",
+        action="store_true",
+        help="既存の対象日を理由付きで再実行する",
+    )
+    parser.add_argument(
+        "--rerun-reason",
+        default=None,
+        help="--force-rerunを使用する理由",
+    )
     args = parser.parse_args()
 
     configure_logging(log_to_file=not args.dry_run)
@@ -510,6 +699,8 @@ def main() -> int:
             args.date,
             dry_run=args.dry_run,
             config_path=args.config,
+            force_rerun=args.force_rerun,
+            rerun_reason=args.rerun_reason,
         )
     except DailyCycleStoppedError as error:
         logger.error("日次サイクル停止: %s", error)
