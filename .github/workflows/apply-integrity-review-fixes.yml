@@ -1,0 +1,34 @@
+name: apply-integrity-review-fixes
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Apply integrity review fixes
+        run: python scripts/apply_integrity_review_fixes.py
+      - name: Commit final patch
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          rm scripts/apply_integrity_review_fixes.py
+          rm .github/workflows/apply-integrity-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden read-only virtual trade diagnostics"
+          git push origin "HEAD:${BRANCH}"
