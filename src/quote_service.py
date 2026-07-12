@@ -40,6 +40,98 @@ class QuoteService:
         self.config = config
         self.ctx = quote_context
 
+
+    def _request_history_kline_pages(
+        self,
+        code: str,
+        num: int,
+        start: Optional[str],
+        end: Optional[str],
+        log_label: str,
+    ) -> pd.DataFrame:
+        """Fetch all requested history pages using Futu continuation keys."""
+        if num <= 0:
+            return pd.DataFrame()
+
+        pages: list[pd.DataFrame] = []
+        remaining = num
+        page_req_key = None
+        seen_page_keys: set[str] = set()
+        page_number = 1
+
+        while remaining > 0:
+            batch_size = min(remaining, MAX_KLINE_PER_REQUEST)
+            ret, data, next_page_req_key = self.ctx.request_history_kline(
+                code,
+                ktype=KLType.K_DAY,
+                max_count=batch_size,
+                start=start,
+                end=end,
+                page_req_key=page_req_key,
+            )
+
+            if ret != RET_OK:
+                logger.error(
+                    "日足取得失敗%s: %s - page=%s - %s",
+                    log_label,
+                    code,
+                    page_number,
+                    data,
+                )
+                return pd.DataFrame()
+
+            if not isinstance(data, pd.DataFrame):
+                logger.error(
+                    "日足取得失敗%s: %s - page=%s - DataFrameではありません",
+                    log_label,
+                    code,
+                    page_number,
+                )
+                return pd.DataFrame()
+
+            if data.empty:
+                if next_page_req_key is not None:
+                    logger.error(
+                        "日足取得失敗%s: %s - page=%s - "
+                        "空ページに継続キーが返されました",
+                        log_label,
+                        code,
+                        page_number,
+                    )
+                    return pd.DataFrame()
+                break
+
+            pages.append(data)
+            remaining -= len(data)
+
+            if remaining <= 0 or next_page_req_key is None:
+                break
+
+            key_marker = repr(next_page_req_key)
+            if key_marker in seen_page_keys:
+                logger.error(
+                    "日足取得失敗%s: %s - page=%s - 継続キーが循環しました",
+                    log_label,
+                    code,
+                    page_number,
+                )
+                return pd.DataFrame()
+
+            seen_page_keys.add(key_marker)
+            page_req_key = next_page_req_key
+            page_number += 1
+
+        if not pages:
+            return pd.DataFrame()
+
+        combined = pd.concat(pages, ignore_index=True)
+        if "time_key" in combined.columns:
+            combined = combined.drop_duplicates(subset=["time_key"], keep="first")
+        else:
+            combined = combined.drop_duplicates(keep="first")
+
+        return combined.iloc[:num].reset_index(drop=True)
+
     def get_stock_snapshot(self, codes: list[str]) -> pd.DataFrame:
         """複数銘柄のマーケットスナップショットを取得する"""
         if not codes:
@@ -83,57 +175,17 @@ class QuoteService:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
-        """日足ローソク足を取得する"""
+        """日足ローソク足をFutuの継続キーを辿って取得する。"""
         logger.info("日足取得: %s (num=%s)", code, num)
-
-        if num <= MAX_KLINE_PER_REQUEST:
-            ret, data, _ = self.ctx.request_history_kline(
-                code,
-                ktype=KLType.K_DAY,
-                max_count=num,
-                start=start,
-                end=end,
-            )
-
-            if ret != RET_OK:
-                logger.error("日足取得失敗: %s - %s", code, data)
-                return pd.DataFrame()
-
-            return data
-
-        all_data = pd.DataFrame()
-        remaining = num
-        current_end = end
-
-        while remaining > 0:
-            batch_size = min(remaining, MAX_KLINE_PER_REQUEST)
-
-            ret, data, page_req_key = self.ctx.request_history_kline(
-                code,
-                ktype=KLType.K_DAY,
-                max_count=batch_size,
-                start=start,
-                end=current_end,
-            )
-
-            if ret != RET_OK:
-                logger.error("日足取得失敗: %s - %s", code, data)
-                break
-
-            if data.empty:
-                break
-
-            all_data = pd.concat([all_data, data], ignore_index=True)
-            remaining -= len(data)
-
-            if page_req_key is None or len(data) < batch_size:
-                break
-
-            oldest_date = data["time_key"].min()[:10]
-            current_end = oldest_date
-
-        logger.info("日足取得完了: %s - %s件", code, len(all_data))
-        return all_data
+        data = self._request_history_kline_pages(
+            code,
+            num,
+            start,
+            end,
+            "",
+        )
+        logger.info("日足取得完了: %s - %s件", code, len(data))
+        return data
 
     def get_cur_daily_klines(self, code: str, num: int = 30) -> pd.DataFrame:
         """get_cur_klineで直近の日足を取得する（取引時間中の当日不完全足は除外）"""
@@ -223,53 +275,23 @@ class QuoteService:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
-        """request_history_klineのみで日足を取得する（購読枠を消費しない）。
-
-        get_cur_klineを使わないためmoomoo OpenDの購読枠制限に影響しない。
-        バックテスト用の大量バックフィルに最適。
-        """
-        logger.info("日足取得(history): %s (num=%s, start=%s, end=%s)", code, num, start, end)
-
-        if num <= MAX_KLINE_PER_REQUEST:
-            ret, data, _ = self.ctx.request_history_kline(
-                code,
-                ktype=KLType.K_DAY,
-                max_count=num,
-                start=start,
-                end=end,
-            )
-            if ret != RET_OK:
-                logger.error("日足取得失敗(history): %s - %s", code, data)
-                return pd.DataFrame()
-            return data
-
-        all_data = pd.DataFrame()
-        remaining = num
-        current_end = end
-
-        while remaining > 0:
-            batch_size = min(remaining, MAX_KLINE_PER_REQUEST)
-            ret, data, page_req_key = self.ctx.request_history_kline(
-                code,
-                ktype=KLType.K_DAY,
-                max_count=batch_size,
-                start=start,
-                end=current_end,
-            )
-            if ret != RET_OK:
-                logger.error("日足取得失敗(history): %s - %s", code, data)
-                break
-            if data.empty:
-                break
-            all_data = pd.concat([all_data, data], ignore_index=True)
-            remaining -= len(data)
-            if page_req_key is None or len(data) < batch_size:
-                break
-            oldest_date = data["time_key"].min()[:10]
-            current_end = oldest_date
-
-        logger.info("日足取得完了(history): %s - %s件", code, len(all_data))
-        return all_data
+        """購読枠を消費せず、Futuの継続キーを辿って日足を取得する。"""
+        logger.info(
+            "日足取得(history): %s (num=%s, start=%s, end=%s)",
+            code,
+            num,
+            start,
+            end,
+        )
+        data = self._request_history_kline_pages(
+            code,
+            num,
+            start,
+            end,
+            "(history)",
+        )
+        logger.info("日足取得完了(history): %s - %s件", code, len(data))
+        return data
 
     def get_daily_klines_latest_only(self, code: str, num: int = 30) -> pd.DataFrame:
         """get_cur_klineで直近日足を取得する（subscribe→取得→unsubscribe）。
