@@ -13,6 +13,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from daily_update import (
@@ -31,6 +33,8 @@ from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_HISTORY_LIMIT = 120
 
 
 def configure_logging(
@@ -102,6 +106,46 @@ def _assert_cycle_data_freshness(
     )
 
 
+def _load_indicator_inputs(
+    data_store: DataStore,
+    codes: list[str],
+    target_date: str,
+    history_limit: int = DEFAULT_HISTORY_LIMIT,
+) -> dict[str, pd.DataFrame]:
+    """全対象銘柄の指標入力をDBから対象日以前に限定して読み込む。
+
+    APIレスポンスは保存処理の入力にだけ使い、指標計算ではSQLiteを正規の
+    データソースにする。これにより一時的なAPI取得失敗で銘柄がクロス
+    セクション計算から脱落せず、過去日実行で未来データも混入しない。
+    """
+    if history_limit <= 0:
+        raise ValueError("history_limitは1以上で指定してください")
+
+    normalized_codes = list(
+        dict.fromkeys(code.strip() for code in codes if code.strip())
+    )
+    loaded_inputs = data_store.get_daily_bars_for_codes(
+        normalized_codes,
+        end_date=target_date,
+        limit_per_code=history_limit,
+    )
+
+    missing_codes = [code for code in normalized_codes if code not in loaded_inputs]
+    if missing_codes:
+        missing_codes_text = ", ".join(missing_codes)
+        logger.error(
+            "鮮度確認後にDB日足を読み込めない銘柄があります: target=%s, codes=%s",
+            target_date,
+            missing_codes_text,
+        )
+        raise SystemError(
+            "指標計算用の日足をDBから取得できない銘柄があります: "
+            + missing_codes_text
+        )
+
+    return {code: loaded_inputs[code] for code in normalized_codes}
+
+
 def run_cycle(
     target_date: str,
     dry_run: bool = False,
@@ -144,23 +188,21 @@ def run_cycle(
         }
         results["symbols"] = len(codes)
 
+        fetched_symbols = 0
         if quote_ctx:
             quote_service = QuoteService(config, quote_ctx)
-            data_dict = {}
             for index, code in enumerate(codes, 1):
                 logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
                 dataframe = quote_service.get_daily_klines_with_fallback(
                     code,
-                    num=120,
+                    num=DEFAULT_HISTORY_LIMIT,
                     start="2025-01-01",
                 )
                 if not dataframe.empty:
                     data_store.save_dataframe_to_daily_bars(dataframe, code)
-                    data_dict[code] = dataframe
-            results["daily_bars"] = len(data_dict)
-        else:
-            data_dict = {}
-            results["daily_bars"] = 0
+                    fetched_symbols += 1
+        results["daily_bars"] = fetched_symbols
+        results["fetched_symbols"] = fetched_symbols
 
         freshness_by_code = _assert_cycle_data_freshness(
             config,
@@ -174,26 +216,30 @@ def run_cycle(
             1 for status in freshness_by_code.values() if status.level == "warning"
         )
 
-        if data_dict:
-            indicators = calculate_indicators_batch(data_dict, symbols_info)
-            indicators_df = indicators_to_dataframe(indicators)
-            benchmark_code = config.get(
-                "signals.relative_strength.benchmark_code",
-                "JP.1306",
-            )
-            indicators_df = add_relative_strength(indicators_df, benchmark_code)
-            results["indicators"] = save_indicators_to_db(
-                data_store,
-                indicators_df,
-            )
-            results["benchmark_prices"] = save_benchmark_prices_from_indicators(
-                data_store,
-                indicators_df,
-                benchmark_codes,
-            )
-        else:
-            results["indicators"] = 0
-            results["benchmark_prices"] = 0
+        data_dict = _load_indicator_inputs(
+            data_store,
+            codes,
+            target_date,
+            history_limit=DEFAULT_HISTORY_LIMIT,
+        )
+        results["indicator_input_symbols"] = len(data_dict)
+
+        indicators = calculate_indicators_batch(data_dict, symbols_info)
+        indicators_df = indicators_to_dataframe(indicators)
+        benchmark_code = config.get(
+            "signals.relative_strength.benchmark_code",
+            "JP.1306",
+        )
+        indicators_df = add_relative_strength(indicators_df, benchmark_code)
+        results["indicators"] = save_indicators_to_db(
+            data_store,
+            indicators_df,
+        )
+        results["benchmark_prices"] = save_benchmark_prices_from_indicators(
+            data_store,
+            indicators_df,
+            benchmark_codes,
+        )
 
         screener = Screener(config)
         candidates = screener.screen_candidates(date=target_date)
