@@ -105,12 +105,12 @@ class VirtualTradeIntegrityChecker:
     def _add(
         report: IntegrityReport,
         severity: str,
-        code: str,
+        finding_code: str,
         message: str,
         **context: Any,
     ) -> None:
         report.findings.append(
-            IntegrityFinding(severity, code, message, context)
+            IntegrityFinding(severity, finding_code, message, context)
         )
 
     @staticmethod
