@@ -1,0 +1,140 @@
+"""Regression coverage for canonical DB-backed daily-cycle indicator inputs."""
+
+from pathlib import Path
+
+import pytest
+
+from run_daily_cycle import _load_indicator_inputs
+from src.config import Config
+from src.data_store import DataStore
+from src.indicators import calculate_indicators_batch
+from src.models import DailyBar, Symbol
+
+
+def _store(tmp_path: Path) -> DataStore:
+    config = Config("tests/fixtures/config.test.yaml")
+    config._config["database"] = {"path": str(tmp_path / "cycle.db")}
+    store = DataStore(config)
+    store.save_symbol = None  # type: ignore[attr-defined]
+    return store
+
+
+def _insert_symbol(store: DataStore, code: str) -> None:
+    with store._get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO symbols
+            (code, name, market, type, role, tradable, enabled)
+            VALUES (?, ?, 'JP', 'stock', 'trade_candidate', 1, 1)
+            """,
+            (code, code),
+        )
+
+
+def _insert_bars(
+    store: DataStore,
+    code: str,
+    dates: list[str],
+    base_close: float,
+) -> None:
+    _insert_symbol(store, code)
+    for index, date in enumerate(dates):
+        close = base_close + index
+        store.save_daily_bar(
+            DailyBar(
+                code=code,
+                date=date,
+                open=close - 1,
+                high=close + 1,
+                low=close - 2,
+                close=close,
+                volume=1000 + index,
+                turnover=close * (1000 + index),
+            )
+        )
+
+
+def test_loads_every_required_symbol_from_database(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dates = [f"2026-07-{day:02d}" for day in range(1, 11)]
+    _insert_bars(store, "JP.1306", dates, 100.0)
+    _insert_bars(store, "JP.7203", dates, 200.0)
+
+    inputs = _load_indicator_inputs(
+        store,
+        ["JP.1306", "JP.7203"],
+        target_date="2026-07-10",
+    )
+    indicators = calculate_indicators_batch(
+        inputs,
+        {"JP.1306": "TOPIX", "JP.7203": "Toyota"},
+    )
+
+    assert set(inputs) == {"JP.1306", "JP.7203"}
+    assert {indicator.code for indicator in indicators} == {
+        "JP.1306",
+        "JP.7203",
+    }
+
+
+def test_excludes_rows_after_target_date(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _insert_bars(
+        store,
+        "JP.1306",
+        ["2026-07-09", "2026-07-10", "2026-07-11"],
+        100.0,
+    )
+
+    inputs = _load_indicator_inputs(
+        store,
+        ["JP.1306"],
+        target_date="2026-07-10",
+    )
+
+    assert list(inputs["JP.1306"]["date"]) == [
+        "2026-07-10",
+        "2026-07-09",
+    ]
+
+
+def test_respects_history_limit(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dates = [f"2026-06-{day:02d}" for day in range(1, 21)]
+    _insert_bars(store, "JP.1306", dates, 100.0)
+
+    inputs = _load_indicator_inputs(
+        store,
+        ["JP.1306"],
+        target_date="2026-06-20",
+        history_limit=5,
+    )
+
+    assert len(inputs["JP.1306"]) == 5
+    assert inputs["JP.1306"]["date"].iloc[0] == "2026-06-20"
+
+
+def test_missing_required_symbol_stops_before_indicator_calculation(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _insert_bars(store, "JP.1306", ["2026-07-10"], 100.0)
+
+    with pytest.raises(SystemError, match="JP.7203"):
+        _load_indicator_inputs(
+            store,
+            ["JP.1306", "JP.7203"],
+            target_date="2026-07-10",
+        )
+
+
+def test_non_positive_history_limit_is_rejected(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    with pytest.raises(ValueError, match="history_limit"):
+        _load_indicator_inputs(
+            store,
+            ["JP.1306"],
+            target_date="2026-07-10",
+            history_limit=0,
+        )
