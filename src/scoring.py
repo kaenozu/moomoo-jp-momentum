@@ -27,6 +27,13 @@ _BASE_COMPONENT_MAXIMA = {
     "high_20d": 10.0,
     "risk_warning": -30.0,
 }
+_POSITIVE_WEIGHT_KEYS = (
+    "trend",
+    "volume",
+    "relative_strength",
+    "liquidity",
+    "high_20d",
+)
 
 
 @dataclass
@@ -75,6 +82,14 @@ class Scorer:
                 penalty=True,
             ),
         }
+        self.max_possible_score = sum(
+            self.weights[key] for key in _POSITIVE_WEIGHT_KEYS
+        )
+        if self.max_possible_score > 100.0 + 1e-9:
+            raise ValueError(
+                "scoring.weights の加点合計は100以下で指定してください: "
+                f"{self.max_possible_score}"
+            )
 
         screening_config = config.get("screening", {})
         self.min_turnover = screening_config.get("min_turnover", 1_000_000_000)
@@ -113,7 +128,11 @@ class Scorer:
         return weight
 
     @staticmethod
-    def _scale_component(raw_score: float, key: str, configured_weight: float) -> float:
+    def _scale_component(
+        raw_score: float,
+        key: str,
+        configured_weight: float,
+    ) -> float:
         """従来の生点を設定済み最大配点へ比例変換する。"""
         base_maximum = _BASE_COMPONENT_MAXIMA[key]
         if base_maximum == 0:
@@ -294,7 +313,7 @@ class Scorer:
         )
 
         total = trend + volume + relative_strength + liquidity + high_20d + risk_penalty
-        total = max(0.0, min(100.0, total))
+        total = max(0.0, min(self.max_possible_score, total))
 
         return ScoreBreakdown(
             trend=trend,
