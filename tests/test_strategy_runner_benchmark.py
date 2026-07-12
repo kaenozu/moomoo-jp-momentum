@@ -166,6 +166,7 @@ def test_empty_run_removes_stale_signals_for_target_date(tmp_path: Path) -> None
 
     assert dates == [("2026-01-07",)]
 
+
 def test_benchmark_returns_require_full_period_history(tmp_path: Path) -> None:
     config = _config(tmp_path)
 
@@ -210,3 +211,30 @@ def test_momentum_uses_20d_and_60d_benchmark_returns(tmp_path: Path) -> None:
     assert result.return_20d_vs_benchmark == pytest.approx(10.0)
     assert result.return_60d_vs_benchmark == pytest.approx(18.0)
 
+
+def test_runner_uses_periods_from_current_relative_strength_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config._config["signals"]["relative_strength"]["periods"] = [5, 10]
+    runner = StrategyRunner(config)
+    calls: list[tuple[str, str, int]] = []
+
+    def fake_return(code: str, target_date: str, period: int) -> float:
+        calls.append((code, target_date, period))
+        return float(period)
+
+    monkeypatch.setattr(
+        runner.relative_strength,
+        "calc_benchmark_return",
+        fake_return,
+    )
+
+    returns = runner._benchmark_returns("2026-01-08")
+
+    assert returns == {"return_5d": 5.0, "return_10d": 10.0}
+    assert calls == [
+        ("JP.1306", "2026-01-08", 5),
+        ("JP.1306", "2026-01-08", 10),
+    ]
