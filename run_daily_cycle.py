@@ -119,13 +119,11 @@ def _read_bool_setting(config, key: str, default: bool) -> bool:
     return value
 
 
-def _virtual_trade_integrity_settings(config) -> tuple[bool, bool]:
+def _virtual_trade_integrity_settings(
+    config,
+    virtual_trade_enabled: bool,
+) -> tuple[bool, bool]:
     """Return whether the daily integrity gate is enabled and strict on warnings."""
-    virtual_trade_enabled = _read_bool_setting(
-        config,
-        "virtual_trade.enabled",
-        True,
-    )
     if not virtual_trade_enabled:
         return False, False
     return (
@@ -274,7 +272,7 @@ def run_cycle(
         True,
     )
     integrity_enabled, integrity_fail_on_warning = (
-        _virtual_trade_integrity_settings(config)
+        _virtual_trade_integrity_settings(config, virtual_trade_enabled)
     )
     results["virtual_trade_enabled"] = virtual_trade_enabled
     results["integrity_check_enabled"] = integrity_enabled

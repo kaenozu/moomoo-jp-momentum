@@ -48,7 +48,10 @@ def _install_checker(
 def test_integrity_settings_disable_gate_with_virtual_trade() -> None:
     config = _ConfigStub({"virtual_trade.enabled": False})
 
-    assert run_daily_cycle._virtual_trade_integrity_settings(config) == (False, False)
+    assert run_daily_cycle._virtual_trade_integrity_settings(config, False) == (
+        False,
+        False,
+    )
 
 
 def test_integrity_settings_reject_truthy_strings() -> None:
@@ -60,7 +63,7 @@ def test_integrity_settings_reject_truthy_strings() -> None:
     )
 
     with pytest.raises(ValueError, match="true/false"):
-        run_daily_cycle._virtual_trade_integrity_settings(config)
+        run_daily_cycle._virtual_trade_integrity_settings(config, True)
 
 
 def test_integrity_gate_passes_clean_report_and_uses_target_date(
