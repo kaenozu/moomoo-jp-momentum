@@ -116,27 +116,19 @@ def _load_indicator_inputs(
     データソースにする。これにより一時的なAPI取得失敗で銘柄がクロス
     セクション計算から脱落せず、過去日実行で未来データも混入しない。
     """
-    if history_limit <= 0:
-        raise ValueError("history_limitは1以上で指定してください")
-
-    inputs: dict[str, pd.DataFrame] = {}
-    for code in codes:
-        dataframe = data_store.get_daily_bars(
-            code,
-            end_date=target_date,
-            limit=history_limit,
-        )
-        if dataframe.empty:
-            logger.error(
-                "鮮度確認後にDB日足を読み込めませんでした: code=%s, target=%s",
-                code,
-                target_date,
-            )
-            continue
-        inputs[code] = dataframe
+    inputs = data_store.get_daily_bars_for_codes(
+        codes,
+        end_date=target_date,
+        limit_per_code=history_limit,
+    )
 
     missing_codes = sorted(set(codes) - set(inputs))
     if missing_codes:
+        logger.error(
+            "鮮度確認後にDB日足を読み込めない銘柄があります: target=%s, codes=%s",
+            target_date,
+            ", ".join(missing_codes[:20]),
+        )
         raise SystemError(
             "指標計算用の日足をDBから取得できない銘柄があります: "
             + ", ".join(missing_codes[:20])
