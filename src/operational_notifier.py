@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ConfigLike(Protocol):
     """Minimum configuration interface required by the notifier."""
 
-    def get(self, key: str, default: Any = None) -> Any: ...
+    def get(self, key_path: str, default: Any = None, /) -> Any: ...
 
 
 def _read_bool(config: ConfigLike, key: str, default: bool) -> bool:
