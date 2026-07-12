@@ -15,17 +15,17 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run focused tests
+      - name: Run full fast tests
         run: |
           set +e
-          python -m pytest tests/test_daily_cycle_integrity.py tests/test_virtual_fill_commission_integrity.py -vv > "$RUNNER_TEMP/pytest.log" 2>&1
+          python -m pytest tests/ -m "not slow" -vv > "$RUNNER_TEMP/pytest.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/pytest.log"
           exit $status
-      - name: Upload focused log
+      - name: Upload full log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pr22-focused-pytest
+          name: pr22-full-pytest
           path: ${{ runner.temp }}/pytest.log
           retention-days: 1
