@@ -1,0 +1,1 @@
+apply current config path
