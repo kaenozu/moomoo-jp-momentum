@@ -56,6 +56,10 @@ def test_previous_trading_day_crosses_golden_week() -> None:
     assert previous_trading_day("2026-05-07") == date(2026, 5, 1)
 
 
+def test_previous_trading_day_crosses_repository_start_year() -> None:
+    assert previous_trading_day("2025-01-01") == date(2024, 12, 30)
+
+
 def test_latest_expected_day_changes_at_market_close() -> None:
     before_close = datetime(2026, 7, 13, 10, 0, tzinfo=JST)
     after_close = datetime(2026, 7, 13, 15, 30, tzinfo=JST)
