@@ -371,3 +371,72 @@ def test_rebuild_refuses_inconsistent_legacy_cash_history(tmp_path: Path) -> Non
 
     assert not rebuilt
     assert manager.get_cash("default", "2026-01-10") == pytest.approx(12345)
+
+
+def test_invalid_fill_values_fall_back_without_raising(tmp_path: Path) -> None:
+    manager, db_path = _make_manager(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO virtual_fills
+            (order_id, strategy_name, code, side, quantity, price,
+             filled_at, fill_mode, created_at)
+            VALUES (1, 'default', 'JP.0001', 'BUY', 'bad', 'bad',
+                    '2026-01-05 10:00:00', 'test', 'corrupt')
+            """
+        )
+
+    assert manager.get_cash("default", "2026-01-05") == pytest.approx(100000)
+
+
+def test_equity_rebuild_replays_cash_only_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, db_path = _make_manager(tmp_path)
+    _insert_fill(
+        db_path,
+        order_id=2,
+        side="BUY",
+        quantity=1,
+        price=200,
+        filled_at="2026-01-10 10:00:00",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO virtual_equity_curve
+            (strategy_name, date, cash, position_value, total_equity, created_at)
+            VALUES ('default', ?, 99800, 0, 99800, 'before-backfill')
+            """,
+            [("2026-01-10",), ("2026-01-11",), ("2026-01-12",)],
+        )
+    _insert_fill(
+        db_path,
+        order_id=1,
+        side="BUY",
+        quantity=1,
+        price=100,
+        filled_at="2026-01-05 10:00:00",
+    )
+
+    original = manager._replay_cash_with_conn
+    calls = 0
+
+    def counted_replay(*args: object, **kwargs: object) -> tuple[float, bool]:
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_replay_cash_with_conn", counted_replay)
+    with manager._get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rebuilt = manager._rebuild_equity_curve_from_fills(
+            conn,
+            "default",
+            "2026-01-05",
+            exclude_order_id=1,
+        )
+
+    assert rebuilt
+    assert calls == 1

@@ -752,20 +752,38 @@ class VirtualTradeManager:
         cash = self.initial_cash
         complete = True
         for row in rows:
+            delta, valid = self._cash_delta_from_fill_row(row)
+            if not valid:
+                complete = False
+                continue
+            cash += delta
+        return cash, complete
+
+    def _cash_delta_from_fill_row(
+        self,
+        row: sqlite3.Row,
+    ) -> tuple[float, bool]:
+        if (
+            row["side"] is None
+            or row["quantity"] is None
+            or row["price"] is None
+            or not row["filled_at"]
+        ):
+            return 0.0, False
+        try:
             side = str(row["side"])
             quantity = int(row["quantity"])
             price = float(row["price"])
-            if not row["filled_at"] or quantity <= 0 or price < 0:
-                complete = False
-                continue
-            gross = price * quantity
-            if side == "BUY":
-                cash -= gross + self.commission
-            elif side == "SELL":
-                cash += gross - self.commission
-            else:
-                complete = False
-        return cash, complete
+        except (TypeError, ValueError):
+            return 0.0, False
+        if quantity <= 0 or price < 0:
+            return 0.0, False
+        gross = price * quantity
+        if side == "BUY":
+            return -(gross + self.commission), True
+        if side == "SELL":
+            return gross - self.commission, True
+        return 0.0, False
 
     def _cash_history_matches_replay(
         self,
@@ -920,15 +938,33 @@ class VirtualTradeManager:
             (strategy_name, start_date),
         ).fetchall()
         dates = sorted({start_date, *(str(row["date"]) for row in rows)})
+        fills = conn.execute(
+            """
+            SELECT side, quantity, price, filled_at
+            FROM virtual_fills
+            WHERE strategy_name = ?
+            ORDER BY COALESCE(filled_at, ''), id
+            """,
+            (strategy_name,),
+        ).fetchall()
+
         rebuilt: list[tuple[str, float]] = []
+        cash = self.initial_cash
+        fill_index = 0
         for target_date in dates:
-            cash, complete = self._replay_cash_with_conn(
-                conn,
-                strategy_name,
-                target_date,
-            )
-            if not complete:
-                return False
+            while fill_index < len(fills):
+                fill_row = fills[fill_index]
+                filled_at = fill_row["filled_at"]
+                if not filled_at:
+                    return False
+                fill_date = str(filled_at)[:10]
+                if fill_date > target_date:
+                    break
+                delta, valid = self._cash_delta_from_fill_row(fill_row)
+                if not valid:
+                    return False
+                cash += delta
+                fill_index += 1
             rebuilt.append((target_date, cash))
 
         now = datetime.now().isoformat()
