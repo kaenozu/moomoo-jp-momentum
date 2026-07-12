@@ -13,6 +13,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from daily_update import (
@@ -102,6 +104,48 @@ def _assert_cycle_data_freshness(
     )
 
 
+def _load_indicator_inputs(
+    data_store: DataStore,
+    codes: list[str],
+    target_date: str,
+    history_limit: int = 120,
+) -> dict[str, pd.DataFrame]:
+    """全対象銘柄の指標入力をDBから対象日以前に限定して読み込む。
+
+    APIレスポンスは保存処理の入力にだけ使い、指標計算ではSQLiteを正規の
+    データソースにする。これにより一時的なAPI取得失敗で銘柄がクロス
+    セクション計算から脱落せず、過去日実行で未来データも混入しない。
+    """
+    if history_limit <= 0:
+        raise ValueError("history_limitは1以上で指定してください")
+
+    inputs: dict[str, pd.DataFrame] = {}
+    for code in codes:
+        dataframe = data_store.get_daily_bars(
+            code,
+            end_date=target_date,
+            limit=history_limit,
+        )
+        if dataframe.empty:
+            logger.error(
+                "鮮度確認後にDB日足を読み込めませんでした: code=%s, target=%s",
+                code,
+                target_date,
+            )
+            continue
+        inputs[code] = dataframe
+
+    missing_codes = sorted(set(codes) - set(inputs))
+    if missing_codes:
+        raise SystemError(
+            "指標計算用の日足をDBから取得できない銘柄があります: "
+            + ", ".join(missing_codes[:20])
+            + (f" ほか{len(missing_codes) - 20}件" if len(missing_codes) > 20 else "")
+        )
+
+    return inputs
+
+
 def run_cycle(
     target_date: str,
     dry_run: bool = False,
@@ -144,9 +188,9 @@ def run_cycle(
         }
         results["symbols"] = len(codes)
 
+        fetched_symbols = 0
         if quote_ctx:
             quote_service = QuoteService(config, quote_ctx)
-            data_dict = {}
             for index, code in enumerate(codes, 1):
                 logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
                 dataframe = quote_service.get_daily_klines_with_fallback(
@@ -156,11 +200,9 @@ def run_cycle(
                 )
                 if not dataframe.empty:
                     data_store.save_dataframe_to_daily_bars(dataframe, code)
-                    data_dict[code] = dataframe
-            results["daily_bars"] = len(data_dict)
-        else:
-            data_dict = {}
-            results["daily_bars"] = 0
+                    fetched_symbols += 1
+        results["daily_bars"] = fetched_symbols
+        results["fetched_symbols"] = fetched_symbols
 
         freshness_by_code = _assert_cycle_data_freshness(
             config,
@@ -174,26 +216,30 @@ def run_cycle(
             1 for status in freshness_by_code.values() if status.level == "warning"
         )
 
-        if data_dict:
-            indicators = calculate_indicators_batch(data_dict, symbols_info)
-            indicators_df = indicators_to_dataframe(indicators)
-            benchmark_code = config.get(
-                "signals.relative_strength.benchmark_code",
-                "JP.1306",
-            )
-            indicators_df = add_relative_strength(indicators_df, benchmark_code)
-            results["indicators"] = save_indicators_to_db(
-                data_store,
-                indicators_df,
-            )
-            results["benchmark_prices"] = save_benchmark_prices_from_indicators(
-                data_store,
-                indicators_df,
-                benchmark_codes,
-            )
-        else:
-            results["indicators"] = 0
-            results["benchmark_prices"] = 0
+        data_dict = _load_indicator_inputs(
+            data_store,
+            codes,
+            target_date,
+            history_limit=120,
+        )
+        results["indicator_input_symbols"] = len(data_dict)
+
+        indicators = calculate_indicators_batch(data_dict, symbols_info)
+        indicators_df = indicators_to_dataframe(indicators)
+        benchmark_code = config.get(
+            "signals.relative_strength.benchmark_code",
+            "JP.1306",
+        )
+        indicators_df = add_relative_strength(indicators_df, benchmark_code)
+        results["indicators"] = save_indicators_to_db(
+            data_store,
+            indicators_df,
+        )
+        results["benchmark_prices"] = save_benchmark_prices_from_indicators(
+            data_store,
+            indicators_df,
+            benchmark_codes,
+        )
 
         screener = Screener(config)
         candidates = screener.screen_candidates(date=target_date)
