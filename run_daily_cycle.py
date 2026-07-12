@@ -31,10 +31,15 @@ from src.indicators import calculate_indicators_batch, indicators_to_dataframe
 from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
+from src.virtual_trade_integrity import IntegrityReport, VirtualTradeIntegrityChecker
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_HISTORY_LIMIT = 120
+
+
+class DailyCycleStoppedError(RuntimeError):
+    """Expected operational stop caused by a failed daily-cycle guard."""
 
 
 def configure_logging(
@@ -106,6 +111,105 @@ def _assert_cycle_data_freshness(
     )
 
 
+def _read_bool_setting(config, key: str, default: bool) -> bool:
+    """Read a boolean setting without accepting truthy strings or integers."""
+    value = config.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key}はtrue/falseで指定してください: {value!r}")
+    return value
+
+
+def _virtual_trade_integrity_settings(
+    config,
+    virtual_trade_enabled: bool,
+) -> tuple[bool, bool]:
+    """Return whether the daily integrity gate is enabled and strict on warnings."""
+    if not virtual_trade_enabled:
+        return False, False
+    return (
+        _read_bool_setting(
+            config,
+            "virtual_trade.integrity_check.enabled",
+            True,
+        ),
+        _read_bool_setting(
+            config,
+            "virtual_trade.integrity_check.fail_on_warning",
+            False,
+        ),
+    )
+
+
+def _log_virtual_trade_integrity_report(report: IntegrityReport) -> None:
+    """Write every actionable finding to the normal operation log."""
+    for finding in report.findings:
+        context = (
+            json.dumps(
+                finding.context,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            if finding.context
+            else "{}"
+        )
+        message = (
+            "仮想取引整合性: severity=%s code=%s message=%s context=%s"
+        )
+        if finding.severity == "error":
+            logger.error(
+                message,
+                finding.severity,
+                finding.code,
+                finding.message,
+                context,
+            )
+        else:
+            logger.warning(
+                message,
+                finding.severity,
+                finding.code,
+                finding.message,
+                context,
+            )
+
+
+def _run_virtual_trade_integrity_gate(
+    config,
+    strategy_name: str,
+    target_date: str,
+    *,
+    fail_on_warning: bool,
+) -> IntegrityReport:
+    """Run the read-only integrity checker and enforce the configured policy."""
+    report = VirtualTradeIntegrityChecker(config).run(
+        strategy_name,
+        as_of_date=target_date,
+    )
+    _log_virtual_trade_integrity_report(report)
+    error_count = len(report.errors)
+    warning_count = len(report.warnings)
+    if error_count > 0:
+        raise DailyCycleStoppedError(
+            "仮想取引整合性チェックでエラーを検出しました: "
+            f"strategy={strategy_name}, date={target_date}, "
+            f"errors={error_count}, warnings={warning_count}"
+        )
+    if fail_on_warning and warning_count > 0:
+        raise DailyCycleStoppedError(
+            "仮想取引整合性チェックの警告を厳格設定によりエラー扱いします: "
+            f"strategy={strategy_name}, date={target_date}, "
+            f"warnings={warning_count}"
+        )
+    logger.info(
+        "仮想取引整合性チェック完了: strategy=%s, date=%s, warnings=%d",
+        strategy_name,
+        target_date,
+        warning_count,
+    )
+    return report
+
+
 def _load_indicator_inputs(
     data_store: DataStore,
     codes: list[str],
@@ -154,15 +258,27 @@ def run_cycle(
     results: dict[str, int | bool | str] = {
         "connection_attempted": False,
         "database_write_attempted": False,
+        "virtual_trade_enabled": False,
+        "integrity_check_enabled": False,
+        "integrity_fail_on_warning": False,
+        "integrity_errors": 0,
+        "integrity_warnings": 0,
+        "integrity_exit_code": 0,
     }
     config = load_config(config_path)
+    virtual_trade_enabled = _read_bool_setting(
+        config,
+        "virtual_trade.enabled",
+        True,
+    )
+    integrity_enabled, integrity_fail_on_warning = (
+        _virtual_trade_integrity_settings(config, virtual_trade_enabled)
+    )
+    results["virtual_trade_enabled"] = virtual_trade_enabled
+    results["integrity_check_enabled"] = integrity_enabled
+    results["integrity_fail_on_warning"] = integrity_fail_on_warning
 
     if dry_run:
-        virtual_trade_config = config.get("virtual_trade", {})
-        results["virtual_trade_enabled"] = virtual_trade_config.get(
-            "enabled",
-            True,
-        )
         symbol_count, benchmark_count = _validate_watchlist_for_dry_run(config)
         results["symbols"] = symbol_count
         results["benchmarks"] = benchmark_count
@@ -279,6 +395,17 @@ def run_cycle(
         )
         manager.save_equity_curve("default", target_date)
 
+        if integrity_enabled:
+            integrity_report = _run_virtual_trade_integrity_gate(
+                config,
+                "default",
+                target_date,
+                fail_on_warning=integrity_fail_on_warning,
+            )
+            results["integrity_errors"] = len(integrity_report.errors)
+            results["integrity_warnings"] = len(integrity_report.warnings)
+            results["integrity_exit_code"] = integrity_report.exit_code
+
         alert_manager = AlertManager(config)
         alerts = alert_manager.run_all_checks()
         results["alerts"] = len(alerts)
@@ -312,7 +439,7 @@ def main() -> int:
             dry_run=args.dry_run,
             config_path=args.config,
         )
-    except SystemError as error:
+    except (SystemError, DailyCycleStoppedError) as error:
         logger.error("日次サイクル停止: %s", error)
         return 1
     except Exception as error:

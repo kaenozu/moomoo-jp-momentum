@@ -186,6 +186,11 @@ def test_dry_run_is_read_only(monkeypatch, tmp_path):
         "connection_attempted": False,
         "database_write_attempted": False,
         "virtual_trade_enabled": True,
+        "integrity_check_enabled": True,
+        "integrity_fail_on_warning": False,
+        "integrity_errors": 0,
+        "integrity_warnings": 0,
+        "integrity_exit_code": 0,
         "symbols": 2,
         "benchmarks": 1,
     }

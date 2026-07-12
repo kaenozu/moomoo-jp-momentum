@@ -347,3 +347,25 @@ def test_cli_returns_report_exit_code(tmp_path: Path) -> None:
         "momentum",
         "--json",
     ]) == 0
+
+def test_as_of_latest_fill_still_checks_current_position_cache(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, commission=55.0)
+    _fill_buy(config)
+    with sqlite3.connect(config.database_path) as connection:
+        connection.execute(
+            "UPDATE virtual_positions SET quantity = quantity + 1 "
+            "WHERE strategy_name = 'momentum'"
+        )
+
+    report = VirtualTradeIntegrityChecker(config).run(
+        "momentum",
+        as_of_date="2026-07-14",
+    )
+
+    assert any(
+        item.code == "position.quantity_mismatch" for item in report.errors
+    )
+    assert report.checked["position_comparison_skipped_future_fills"] == 0
+

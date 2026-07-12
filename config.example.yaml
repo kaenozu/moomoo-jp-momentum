@@ -130,6 +130,9 @@ virtual_trade:
   reserve_buffer_pct: 2.0
   tax_enabled: false
   default_benchmark: JP.1306
+  integrity_check:
+    enabled: true
+    fail_on_warning: false
 paper_trade:
   enabled: false
   jp_api_simulate_supported: false

@@ -136,6 +136,9 @@ virtual_trade:
   commission: 0
   reserve_buffer_pct: 2.0
   default_benchmark: "JP.2559"
+  integrity_check:
+    enabled: true
+    fail_on_warning: false
 
 paper_trade:
   enabled: false
