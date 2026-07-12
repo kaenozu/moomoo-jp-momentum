@@ -1,11 +1,9 @@
 name: diagnose-pr22
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/daily-cycle-integrity-gate
-    paths:
-      - .github/workflows/diagnose-pr22.yml
+      - master
 
 jobs:
   diagnose:
