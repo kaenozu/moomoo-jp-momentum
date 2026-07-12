@@ -20,6 +20,37 @@ from .models import CREATE_TABLES_SQL, DailyBar, Quote, Symbol
 
 logger = logging.getLogger(__name__)
 
+SymbolParams = tuple[
+    str,
+    str,
+    str,
+    str,
+    str,
+    int,
+    str | None,
+    str | None,
+    str | None,
+    int,
+]
+
+_SYMBOL_UPSERT_SQL = """
+    INSERT INTO symbols
+    (code, name, market, type, role, tradable, sector,
+     benchmark_group, notes, enabled, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(code) DO UPDATE SET
+        name = excluded.name,
+        market = excluded.market,
+        type = excluded.type,
+        role = excluded.role,
+        tradable = excluded.tradable,
+        sector = excluded.sector,
+        benchmark_group = excluded.benchmark_group,
+        notes = excluded.notes,
+        enabled = excluded.enabled,
+        updated_at = datetime('now', 'localtime')
+"""
+
 
 class DataStore:
     """SQLiteデータベース操作クラス"""
@@ -42,44 +73,65 @@ class DataStore:
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
         """既存DB向けに不足カラムを追加する。"""
+
         def add_missing(table: str, columns: dict[str, str]) -> None:
-            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            existing = {
+                row[1]
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
             for name, definition in columns.items():
                 if name not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                    )
 
-        add_missing("symbols", {
-            "type": "TEXT NOT NULL DEFAULT 'stock'",
-            "role": "TEXT NOT NULL DEFAULT 'trade_candidate'",
-            "tradable": "INTEGER NOT NULL DEFAULT 1",
-            "benchmark_group": "TEXT",
-            "notes": "TEXT",
-        })
-        add_missing("daily_bars", {
-            "source": "TEXT NOT NULL DEFAULT 'moomoo'",
-            "turnover_source": "TEXT NOT NULL DEFAULT 'actual'",
-        })
-        add_missing("indicators", {
-            "volume": "INTEGER",
-            "return_20d": "REAL",
-            "return_60d": "REAL",
-            "history_days": "INTEGER",
-            "return_5d_vs_benchmark": "REAL",
-            "return_20d_vs_benchmark": "REAL",
-            "return_60d_vs_benchmark": "REAL",
-            "relative_strength_rank": "INTEGER",
-            "volume_ratio_percentile": "REAL",
-            "volume_ratio_rank": "INTEGER",
-            "relative_volume_ratio": "REAL",
-            "market_median_volume_ratio": "REAL",
-        })
-        add_missing("virtual_orders", {
-            "exit_reason": "TEXT",
-            "order_reason": "TEXT",
-        })
-        add_missing("signals", {
-            "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
-        })
+        add_missing(
+            "symbols",
+            {
+                "type": "TEXT NOT NULL DEFAULT 'stock'",
+                "role": "TEXT NOT NULL DEFAULT 'trade_candidate'",
+                "tradable": "INTEGER NOT NULL DEFAULT 1",
+                "benchmark_group": "TEXT",
+                "notes": "TEXT",
+            },
+        )
+        add_missing(
+            "daily_bars",
+            {
+                "source": "TEXT NOT NULL DEFAULT 'moomoo'",
+                "turnover_source": "TEXT NOT NULL DEFAULT 'actual'",
+            },
+        )
+        add_missing(
+            "indicators",
+            {
+                "volume": "INTEGER",
+                "return_20d": "REAL",
+                "return_60d": "REAL",
+                "history_days": "INTEGER",
+                "return_5d_vs_benchmark": "REAL",
+                "return_20d_vs_benchmark": "REAL",
+                "return_60d_vs_benchmark": "REAL",
+                "relative_strength_rank": "INTEGER",
+                "volume_ratio_percentile": "REAL",
+                "volume_ratio_rank": "INTEGER",
+                "relative_volume_ratio": "REAL",
+                "market_median_volume_ratio": "REAL",
+            },
+        )
+        add_missing(
+            "virtual_orders",
+            {
+                "exit_reason": "TEXT",
+                "order_reason": "TEXT",
+            },
+        )
+        add_missing(
+            "signals",
+            {
+                "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
+            },
+        )
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -88,53 +140,117 @@ class DataStore:
 
     # === 銘柄リスト関連 ===
 
-    def load_symbols_from_json(self, json_path: str) -> int:
-        """
-        JSONファイルから銘柄リストを読み込んで保存する。
+    @staticmethod
+    def _read_symbol_params(json_path: str) -> list[SymbolParams]:
+        """watchlist JSONをDB更新前に検証してSQLパラメータへ変換する。"""
+        with open(json_path, encoding="utf-8") as file:
+            symbols_data = json.load(file)
 
-        benchmark銘柄も日足取得・相対強度計算に必要なため enabled=1 で保存する。
-        通常スクリーニングでは role=benchmark を別途除外する。
-        """
-        with open(json_path, encoding="utf-8") as f:
-            symbols_data = json.load(f)
+        if not isinstance(symbols_data, list):
+            raise ValueError("watchlist JSONのトップレベルはlistである必要があります")
+        if not symbols_data:
+            raise ValueError("watchlist JSONが空です。既存銘柄は変更しません")
 
-        params = []
-        for item in symbols_data:
-            params.append((
-                item["code"],
-                item["name"],
-                item.get("market", "JP"),
-                item.get("type", "stock"),
-                item.get("role", "trade_candidate"),
-                1 if item.get("tradable", True) else 0,
-                item.get("sector"),
-                item.get("benchmark_group"),
-                item.get("notes"),
-                1 if item.get("enabled", True) else 0,
-            ))
+        params: list[SymbolParams] = []
+        seen_codes: set[str] = set()
+        for index, item in enumerate(symbols_data):
+            if not isinstance(item, dict):
+                raise ValueError(f"watchlist[{index}]はobjectである必要があります")
 
-        with self._get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO symbols
-                (code, name, market, type, role, tradable, sector,
-                 benchmark_group, notes, enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-                """,
-                params,
+            code = item.get("code")
+            name = item.get("name")
+            if not isinstance(code, str) or not code.strip():
+                raise ValueError(f"watchlist[{index}].codeが不正です")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"watchlist[{index}].nameが不正です")
+
+            normalized_code = code.strip()
+            if normalized_code in seen_codes:
+                raise ValueError(
+                    f"watchlistに重複したcodeがあります: {normalized_code}"
+                )
+            seen_codes.add(normalized_code)
+
+            params.append(
+                (
+                    normalized_code,
+                    name.strip(),
+                    str(item.get("market", "JP")),
+                    str(item.get("type", "stock")),
+                    str(item.get("role", "trade_candidate")),
+                    1 if item.get("tradable", True) else 0,
+                    item.get("sector"),
+                    item.get("benchmark_group"),
+                    item.get("notes"),
+                    1 if item.get("enabled", True) else 0,
+                )
             )
+
+        return params
+
+    @staticmethod
+    def _upsert_symbols(
+        conn: sqlite3.Connection,
+        params: list[SymbolParams],
+    ) -> None:
+        conn.executemany(_SYMBOL_UPSERT_SQL, params)
+
+    def load_symbols_from_json(self, json_path: str) -> int:
+        """JSONの銘柄を追加・更新する。既存の未記載銘柄は変更しない。
+
+        benchmark銘柄も日足取得・相対強度計算に必要なため、JSON上の
+        ``enabled`` が省略されていればenabled=1で保存する。
+        """
+        params = self._read_symbol_params(json_path)
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._upsert_symbols(conn, params)
 
         logger.info("銘柄リストを読み込みました: %s件", len(params))
         return len(params)
 
     def sync_symbols_from_json(self, json_path: str | None = None) -> int:
-        """
-        毎回実行用の同期処理。load_symbols_from_json と同じ。
-        日次更新・日次サイクル起動時に毎回呼び出して symbols.json の変更をDBに反映する。
+        """watchlist JSONを権威データとしてsymbolsテーブルへ原子的に同期する。
+
+        JSONから削除された銘柄は履歴データを削除せず ``enabled=0`` にする。
+        再追加された銘柄はJSONの ``enabled`` 値で再度更新される。入力の検証が
+        失敗した場合はDBを変更しない。
         """
         if json_path is None:
             json_path = self.config.watchlist_file
-        return self.load_symbols_from_json(json_path)
+        params = self._read_symbol_params(json_path)
+        codes = [(row[0],) for row in params]
+
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS watchlist_sync_codes "
+                "(code TEXT PRIMARY KEY)"
+            )
+            conn.execute("DELETE FROM watchlist_sync_codes")
+            conn.executemany(
+                "INSERT INTO watchlist_sync_codes(code) VALUES (?)",
+                codes,
+            )
+            cursor = conn.execute(
+                """
+                UPDATE symbols
+                SET enabled = 0,
+                    updated_at = datetime('now', 'localtime')
+                WHERE enabled != 0
+                  AND code NOT IN (SELECT code FROM watchlist_sync_codes)
+                """
+            )
+            disabled_count = max(cursor.rowcount, 0)
+            self._upsert_symbols(conn, params)
+            conn.execute("DROP TABLE watchlist_sync_codes")
+
+        logger.info(
+            "銘柄リストを同期しました: input=%d, disabled_missing=%d",
+            len(params),
+            disabled_count,
+        )
+        return len(params)
 
     def get_enabled_symbols(self, include_benchmarks: bool = False) -> list[Symbol]:
         """有効な銘柄リストを取得する。"""
@@ -168,7 +284,7 @@ class DataStore:
         ]
 
     def get_symbol_codes(self) -> list[str]:
-        return [s.code for s in self.get_enabled_symbols()]
+        return [symbol.code for symbol in self.get_enabled_symbols()]
 
     # === リアルタイム株価関連 ===
 
@@ -180,7 +296,16 @@ class DataStore:
                 (code, timestamp, price, open, high, low, volume, turnover)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (quote.code, quote.timestamp, quote.price, quote.open, quote.high, quote.low, quote.volume, quote.turnover),
+                (
+                    quote.code,
+                    quote.timestamp,
+                    quote.price,
+                    quote.open,
+                    quote.high,
+                    quote.low,
+                    quote.volume,
+                    quote.turnover,
+                ),
             )
 
     def save_quotes_batch(self, quotes: list[Quote]) -> int:
@@ -191,7 +316,19 @@ class DataStore:
             (code, timestamp, price, open, high, low, volume, turnover)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = [(q.code, q.timestamp, q.price, q.open, q.high, q.low, q.volume, q.turnover) for q in quotes]
+        params = [
+            (
+                quote.code,
+                quote.timestamp,
+                quote.price,
+                quote.open,
+                quote.high,
+                quote.low,
+                quote.volume,
+                quote.turnover,
+            )
+            for quote in quotes
+        ]
         with self._get_connection() as conn:
             conn.executemany(sql, params)
         return len(quotes)
@@ -207,8 +344,16 @@ class DataStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    bar.code, bar.date, bar.open, bar.high, bar.low, bar.close,
-                    bar.volume, bar.turnover, bar.source, bar.turnover_source,
+                    bar.code,
+                    bar.date,
+                    bar.open,
+                    bar.high,
+                    bar.low,
+                    bar.close,
+                    bar.volume,
+                    bar.turnover,
+                    bar.source,
+                    bar.turnover_source,
                 ),
             )
 
@@ -222,10 +367,18 @@ class DataStore:
         """
         params = [
             (
-                b.code, b.date, b.open, b.high, b.low, b.close,
-                b.volume, b.turnover, b.source, b.turnover_source,
+                bar.code,
+                bar.date,
+                bar.open,
+                bar.high,
+                bar.low,
+                bar.close,
+                bar.volume,
+                bar.turnover,
+                bar.source,
+                bar.turnover_source,
             )
-            for b in bars
+            for bar in bars
         ]
         with self._get_connection() as conn:
             conn.executemany(sql, params)
@@ -271,7 +424,9 @@ class DataStore:
                 volume=row.get("volume"),
                 turnover=row.get("turnover"),
                 source=str(row.get("source") or source),
-                turnover_source=str(row.get("turnover_source") or turnover_source),
+                turnover_source=str(
+                    row.get("turnover_source") or turnover_source
+                ),
             )
             for _, row in df.iterrows()
         ]
@@ -279,7 +434,12 @@ class DataStore:
 
     # === ベンチマーク関連 ===
 
-    def save_benchmark_price(self, benchmark_code: str, date: str, price: float) -> None:
+    def save_benchmark_price(
+        self,
+        benchmark_code: str,
+        date: str,
+        price: float,
+    ) -> None:
         with self._get_connection() as conn:
             conn.execute(
                 """
