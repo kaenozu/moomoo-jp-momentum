@@ -351,6 +351,65 @@ class DataStore:
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
 
+    def get_daily_bars_for_codes(
+        self,
+        codes: list[str],
+        end_date: Optional[str] = None,
+        limit_per_code: int = 100,
+    ) -> dict[str, pd.DataFrame]:
+        """複数銘柄の最新N件を1接続・1集約クエリで取得する。"""
+        if limit_per_code <= 0:
+            raise ValueError("limit_per_codeは1以上で指定してください")
+
+        normalized_codes = sorted({code.strip() for code in codes if code.strip()})
+        if not normalized_codes:
+            return {}
+
+        with self._get_connection() as conn:
+            conn.execute(
+                "CREATE TEMP TABLE requested_daily_bar_codes "
+                "(code TEXT PRIMARY KEY)"
+            )
+            conn.executemany(
+                "INSERT INTO requested_daily_bar_codes(code) VALUES (?)",
+                [(code,) for code in normalized_codes],
+            )
+
+            date_filter = " AND bars.date <= ?" if end_date else ""
+            params: list[object] = []
+            if end_date:
+                params.append(end_date)
+            params.append(limit_per_code)
+            query = f"""
+                WITH ranked AS (
+                    SELECT
+                        bars.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY bars.code
+                            ORDER BY bars.date DESC
+                        ) AS row_number
+                    FROM daily_bars AS bars
+                    INNER JOIN requested_daily_bar_codes AS requested
+                        ON requested.code = bars.code
+                    WHERE 1 = 1{date_filter}
+                )
+                SELECT
+                    id, code, date, open, high, low, close, volume,
+                    turnover, source, turnover_source
+                FROM ranked
+                WHERE row_number <= ?
+                ORDER BY code, date DESC
+            """
+            dataframe = pd.read_sql_query(query, conn, params=params)
+
+        if dataframe.empty:
+            return {}
+
+        return {
+            str(code): group.reset_index(drop=True)
+            for code, group in dataframe.groupby("code", sort=False)
+        }
+
     def save_dataframe_to_daily_bars(
         self,
         df: pd.DataFrame,
