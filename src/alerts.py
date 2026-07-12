@@ -16,8 +16,21 @@ from pathlib import Path
 import requests
 
 from .config import Config
+from .market_calendar import JST
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_target_date(target_date: str | None) -> str:
+    if target_date is None:
+        return datetime.now(JST).strftime("%Y-%m-%d")
+    try:
+        parsed = datetime.strptime(target_date, "%Y-%m-%d")
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"target_dateはYYYY-MM-DD形式で指定してください: {target_date!r}") from error
+    if parsed.strftime("%Y-%m-%d") != target_date:
+        raise ValueError(f"target_dateはYYYY-MM-DD形式で指定してください: {target_date!r}")
+    return target_date
 
 
 @dataclass
@@ -171,13 +184,13 @@ class AlertManager:
 
         return True
 
-    def check_new_candidates(self) -> list[Alert]:
-        """新しい買い候補をチェックする"""
+    def check_new_candidates(self, target_date: str | None = None) -> list[Alert]:
+        """指定対象日の新しい買い候補をチェックする。"""
         if not self.notify_new_candidates:
             return []
 
         alerts = []
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = _resolve_target_date(target_date)
 
         with self._get_connection() as conn:
             candidates = conn.execute(
@@ -216,13 +229,13 @@ class AlertManager:
 
         return alerts
 
-    def check_sell_watch(self) -> list[Alert]:
-        """売り警戒をチェックする"""
+    def check_sell_watch(self, target_date: str | None = None) -> list[Alert]:
+        """指定対象日の売り警戒をチェックする。"""
         if not self.notify_sell_watch:
             return []
 
         alerts = []
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = _resolve_target_date(target_date)
 
         with self._get_connection() as conn:
             positions = conn.execute(
@@ -258,20 +271,21 @@ class AlertManager:
 
         return alerts
 
-    def check_data_freshness(self) -> list[Alert]:
-        """データ鮮度をチェックする"""
+    def check_data_freshness(self, target_date: str | None = None) -> list[Alert]:
+        """指定対象日を基準にデータ鮮度をチェックする。"""
         if not self.notify_stale_data:
             return []
 
         from .data_freshness import DataFreshnessGuard
 
+        resolved_date = _resolve_target_date(target_date)
         guard = DataFreshnessGuard(self.config)
-        status = guard.check_freshness()
+        status = guard.check_freshness(reference_date=resolved_date)
 
         if status.level in ["warning", "error"]:
             return [Alert(
                 code="SYSTEM",
-                date=datetime.now().strftime("%Y-%m-%d"),
+                date=resolved_date,
                 alert_type="STALE_DATA",
                 message=(
                     f"データ鮮度警告: {status.message}\n"
@@ -282,16 +296,17 @@ class AlertManager:
 
         return []
 
-    def run_all_checks(self) -> list[Alert]:
-        """全アラートチェックを実行する"""
+    def run_all_checks(self, target_date: str | None = None) -> list[Alert]:
+        """指定対象日について全アラートチェックを実行する。"""
         if not self.enabled:
             logger.info("alerts.enabled=false のためアラート送信をスキップします")
             return []
 
+        resolved_date = _resolve_target_date(target_date)
         all_alerts = []
-        all_alerts.extend(self.check_new_candidates())
-        all_alerts.extend(self.check_sell_watch())
-        all_alerts.extend(self.check_data_freshness())
+        all_alerts.extend(self.check_new_candidates(resolved_date))
+        all_alerts.extend(self.check_sell_watch(resolved_date))
+        all_alerts.extend(self.check_data_freshness(resolved_date))
 
         sent_alerts = []
         for alert in all_alerts:

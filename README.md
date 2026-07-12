@@ -178,3 +178,22 @@ python virtual_order.py --generate-exits --date YYYY-MM-DD
 python virtual_order.py --performance
 streamlit run app.py
 ```
+
+
+## 運用上の安全策
+
+- `run_daily_cycle.py` はJPX休場日にはOpenDやSQLiteへ接続せず正常スキップします。
+- 通常アラートは `--date` で指定した対象日を使用します。
+- 運用異常Webhookは既定で無効です。利用時は次を設定します。
+
+```yaml
+alerts:
+  webhook:
+    enabled: true
+    url: "https://example.invalid/webhook"
+  operational:
+    enabled: true
+    timeout_seconds: 10
+```
+
+運用異常通知はSQLiteへ依存せず、OpenD接続失敗、データ鮮度停止、仮想取引整合性停止、想定外例外、scheduler timeoutを通知対象にします。

@@ -28,6 +28,8 @@ from src.connection import OpenDConnection
 from src.data_freshness import DataFreshnessGuard, FreshnessStatus
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
+from src.market_calendar import JST, get_jpx_calendar
+from src.operational_notifier import OperationalNotifier
 from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
@@ -40,6 +42,47 @@ DEFAULT_HISTORY_LIMIT = 120
 
 class DailyCycleStoppedError(RuntimeError):
     """Expected operational stop caused by a failed daily-cycle guard."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        event_type: str = "cycle_stopped",
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.event_type = event_type
+        self.context = context or {}
+
+
+def _default_target_date() -> str:
+    """Resolve the command default in JST rather than host-local time."""
+    return datetime.now(JST).strftime("%Y-%m-%d")
+
+
+def _notify_operational_failure(
+    config_path: str,
+    event_type: str,
+    target_date: str,
+    message: str,
+    context: dict[str, object] | None = None,
+) -> bool:
+    """Best-effort notification that never masks the original failure."""
+    try:
+        config = load_config(config_path)
+        return OperationalNotifier(config).send_failure(
+            event_type,
+            message,
+            target_date=target_date,
+            context=context,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "運用異常通知の初期化または送信に失敗しました: event=%s error=%s",
+            event_type,
+            notify_error,
+        )
+        return False
 
 
 def configure_logging(
@@ -193,13 +236,17 @@ def _run_virtual_trade_integrity_gate(
         raise DailyCycleStoppedError(
             "仮想取引整合性チェックでエラーを検出しました: "
             f"strategy={strategy_name}, date={target_date}, "
-            f"errors={error_count}, warnings={warning_count}"
+            f"errors={error_count}, warnings={warning_count}",
+            event_type="integrity_failure",
+            context={"errors": error_count, "warnings": warning_count},
         )
     if fail_on_warning and warning_count > 0:
         raise DailyCycleStoppedError(
             "仮想取引整合性チェックの警告を厳格設定によりエラー扱いします: "
             f"strategy={strategy_name}, date={target_date}, "
-            f"warnings={warning_count}"
+            f"warnings={warning_count}",
+            event_type="integrity_warning_strict",
+            context={"warnings": warning_count},
         )
     logger.info(
         "仮想取引整合性チェック完了: strategy=%s, date=%s, warnings=%d",
@@ -264,6 +311,10 @@ def run_cycle(
         "integrity_errors": 0,
         "integrity_warnings": 0,
         "integrity_exit_code": 0,
+        "calendar_checked": False,
+        "is_trading_day": False,
+        "cycle_skipped": False,
+        "skip_reason": "",
     }
     config = load_config(config_path)
     virtual_trade_enabled = _read_bool_setting(
@@ -278,6 +329,16 @@ def run_cycle(
     results["integrity_check_enabled"] = integrity_enabled
     results["integrity_fail_on_warning"] = integrity_fail_on_warning
 
+    calendar = get_jpx_calendar()
+    results["calendar_checked"] = True
+    is_trading_day = calendar.is_trading_day(target_date)
+    results["is_trading_day"] = is_trading_day
+    if not is_trading_day:
+        results["cycle_skipped"] = True
+        results["skip_reason"] = "jpx_market_closed"
+        logger.info("JPX休場日のため日次サイクルをスキップします: %s", target_date)
+        return results
+
     if dry_run:
         symbol_count, benchmark_count = _validate_watchlist_for_dry_run(config)
         results["symbols"] = symbol_count
@@ -289,7 +350,11 @@ def run_cycle(
     status = opend_conn.connect()
     if not status.connected:
         logger.error("OpenD接続失敗: %s", status.message)
-        return results
+        raise DailyCycleStoppedError(
+            f"OpenD接続失敗: {status.message}",
+            event_type="opend_connection_failure",
+            context={"status_message": status.message},
+        )
     quote_ctx = status.quote_context
 
     try:
@@ -320,11 +385,18 @@ def run_cycle(
         results["daily_bars"] = fetched_symbols
         results["fetched_symbols"] = fetched_symbols
 
-        freshness_by_code = _assert_cycle_data_freshness(
-            config,
-            codes,
-            target_date,
-        )
+        try:
+            freshness_by_code = _assert_cycle_data_freshness(
+                config,
+                codes,
+                target_date,
+            )
+        except SystemError as error:
+            raise DailyCycleStoppedError(
+                str(error),
+                event_type="data_freshness_failure",
+                context={"symbol_count": len(codes)},
+            ) from error
         results["fresh_symbols"] = sum(
             1 for status in freshness_by_code.values() if status.is_fresh
         )
@@ -407,7 +479,7 @@ def run_cycle(
             results["integrity_exit_code"] = integrity_report.exit_code
 
         alert_manager = AlertManager(config)
-        alerts = alert_manager.run_all_checks()
+        alerts = alert_manager.run_all_checks(target_date=target_date)
         results["alerts"] = len(alerts)
         return results
     finally:
@@ -418,7 +490,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Moomoo 日次運用サイクル")
     parser.add_argument(
         "--date",
-        default=datetime.now().strftime("%Y-%m-%d"),
+        default=_default_target_date(),
         help="基準日",
     )
     parser.add_argument("--dry-run", action="store_true", help="テスト実行")
@@ -439,11 +511,37 @@ def main() -> int:
             dry_run=args.dry_run,
             config_path=args.config,
         )
-    except (SystemError, DailyCycleStoppedError) as error:
+    except DailyCycleStoppedError as error:
         logger.error("日次サイクル停止: %s", error)
+        if not args.dry_run:
+            _notify_operational_failure(
+                args.config,
+                error.event_type,
+                args.date,
+                str(error),
+                error.context,
+            )
+        return 1
+    except SystemError as error:
+        logger.error("日次サイクル停止: %s", error)
+        if not args.dry_run:
+            _notify_operational_failure(
+                args.config,
+                "cycle_stopped",
+                args.date,
+                str(error),
+            )
         return 1
     except Exception as error:
         logger.error("日次サイクル失敗: %s", error)
+        if not args.dry_run:
+            _notify_operational_failure(
+                args.config,
+                "unexpected_failure",
+                args.date,
+                str(error),
+                {"exception_type": type(error).__name__},
+            )
         return 1
 
     elapsed = time.time() - start
@@ -453,11 +551,12 @@ def main() -> int:
     for key, value in results.items():
         print(f"  {key}: {value}")
     print(f"  所要時間: {elapsed:.1f}秒")
-    print(
-        "\n[DONE] dry-run 完了"
-        if args.dry_run
-        else f"\n[DONE] 日次サイクル完了: {args.date}"
-    )
+    if args.dry_run:
+        print("\n[DONE] dry-run 完了")
+    elif results.get("cycle_skipped"):
+        print(f"\n[SKIP] JPX休場日のため処理なし: {args.date}")
+    else:
+        print(f"\n[DONE] 日次サイクル完了: {args.date}")
     return 0
 
 
