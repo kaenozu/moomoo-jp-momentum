@@ -187,6 +187,11 @@ class JPXTradingCalendar:
         reference_date: DateLike,
     ) -> int:
         latest = _coerce_date(latest_date)
+        if not self.is_trading_day(latest):
+            raise ValueError(
+                "最新データ日がJPX取引日ではありません: "
+                f"{latest.isoformat()}"
+            )
         if isinstance(reference_date, datetime):
             expected = self.latest_expected_trading_day(reference_date)
         else:

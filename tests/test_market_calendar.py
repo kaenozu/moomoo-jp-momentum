@@ -80,6 +80,11 @@ def test_missing_days_count_uses_sessions_not_calendar_days() -> None:
     assert count_missing_trading_days("2026-07-16", "2026-07-21") == 2
 
 
+def test_missing_days_rejects_non_trading_latest_date() -> None:
+    with pytest.raises(ValueError, match="JPX取引日ではありません"):
+        count_missing_trading_days("2026-07-20", "2026-07-21")
+
+
 def test_unsupported_year_is_rejected_explicitly() -> None:
     calendar = get_jpx_calendar()
 
