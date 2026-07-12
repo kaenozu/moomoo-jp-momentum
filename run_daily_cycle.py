@@ -121,26 +121,29 @@ def _load_indicator_inputs(
     if history_limit <= 0:
         raise ValueError("history_limitは1以上で指定してください")
 
-    inputs = data_store.get_daily_bars_for_codes(
-        codes,
+    normalized_codes = list(
+        dict.fromkeys(code.strip() for code in codes if code.strip())
+    )
+    loaded_inputs = data_store.get_daily_bars_for_codes(
+        normalized_codes,
         end_date=target_date,
         limit_per_code=history_limit,
     )
 
-    missing_codes = sorted(set(codes) - set(inputs))
+    missing_codes = [code for code in normalized_codes if code not in loaded_inputs]
     if missing_codes:
+        missing_codes_text = ", ".join(missing_codes)
         logger.error(
             "鮮度確認後にDB日足を読み込めない銘柄があります: target=%s, codes=%s",
             target_date,
-            ", ".join(missing_codes[:20]),
+            missing_codes_text,
         )
         raise SystemError(
             "指標計算用の日足をDBから取得できない銘柄があります: "
-            + ", ".join(missing_codes[:20])
-            + (f" ほか{len(missing_codes) - 20}件" if len(missing_codes) > 20 else "")
+            + missing_codes_text
         )
 
-    return inputs
+    return {code: loaded_inputs[code] for code in normalized_codes}
 
 
 def run_cycle(
