@@ -73,7 +73,11 @@ def fetch_and_save_daily_klines(
     start: str | None = DEFAULT_START,
     batch_size: int = 80,
 ) -> dict[str, pd.DataFrame]:
-    """日足を取得・保存する（バッチ処理＋リトライ対応）。
+    """日足を取得・保存し、指標入力はSQLiteから全銘柄分を再構築する。
+
+    APIレスポンスはSQLiteへの保存にだけ使用する。指標計算用の戻り値は、
+    API取得成否に依存せず、SQLiteを正規データソースとして全対象銘柄分を
+    再取得する。
 
     mode履歴:
       history -> request_history_kline のみ（購読枠不要）
@@ -94,7 +98,6 @@ def fetch_and_save_daily_klines(
         num_days,
     )
 
-    # スキップ判定＋既存DB読み込み
     skip_codes: list[str] = []
     fetch_codes: list[str] = []
     for code in codes:
@@ -105,15 +108,8 @@ def fetch_and_save_daily_klines(
 
     logger.info("  取得対象: %s銘柄, スキップ: %s銘柄", len(fetch_codes), len(skip_codes))
 
-    data_dict: dict[str, pd.DataFrame] = {}
+    saved_or_skipped_codes: set[str] = set(skip_codes)
 
-    # スキップ分はDBから読み込む
-    for code in skip_codes:
-        df = data_store.get_daily_bars(code, limit=num_days)
-        if not df.empty:
-            data_dict[code] = df
-
-    # 取得対象をバッチ処理
     if fetch_codes:
         total = len(fetch_codes)
         n_batches = (total + batch_size - 1) // batch_size
@@ -132,22 +128,36 @@ def fetch_and_save_daily_klines(
                 retry_count=2,
             )
 
-            # 保存
             for code, df in batch_dict.items():
                 count = data_store.save_dataframe_to_daily_bars(df, code)
                 logger.info("    [%s] 保存完了: %s件", code, count)
-                data_dict[code] = df
+                if not df.empty:
+                    saved_or_skipped_codes.add(code)
 
             if batch_idx + batch_size < total:
                 time.sleep(BATCH_SLEEP_SECONDS)
 
+    canonical_data = data_store.get_daily_bars_for_codes(
+        codes,
+        limit_per_code=num_days,
+    )
+    missing_codes = [code for code in codes if code not in canonical_data]
+    if missing_codes:
+        logger.error(
+            "API取得・保存後にDB日足を復元できない銘柄があります: %s",
+            ", ".join(missing_codes),
+        )
+        return {}
+
     logger.info(
-        "取得完了: 成功=%d, スキップ=%d, 取得対象=%d",
-        len(data_dict),
+        "取得・保存完了: API成功またはスキップ=%d, スキップ=%d, "
+        "取得対象=%d, 指標入力=%d",
+        len(saved_or_skipped_codes),
         len(skip_codes),
         len(fetch_codes),
+        len(canonical_data),
     )
-    return data_dict
+    return canonical_data
 
 
 def save_benchmark_prices_from_indicators(data_store: DataStore, indicators_df: pd.DataFrame, benchmark_codes: set[str]) -> int:
@@ -302,9 +312,9 @@ def main() -> int:
             batch_size=args.batch_size,
         )
         if not data_dict:
-            print("[ERROR] データが取得できませんでした")
+            print("[ERROR] DBから全対象銘柄の指標入力を復元できませんでした")
             return 1
-        print(f"\n[OK] 取得完了: {len(data_dict)}/{len(codes)}銘柄")
+        print(f"\n[OK] DB指標入力準備完了: {len(data_dict)}/{len(codes)}銘柄")
 
         print("\n" + "-" * 60)
         print("指標計算")
@@ -338,7 +348,7 @@ def main() -> int:
             bar_count = conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
             indicator_count = conn.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
 
-        print(f"\n  取得成功: {len(data_dict)}/{len(codes)}銘柄")
+        print(f"\n  指標入力: {len(data_dict)}/{len(codes)}銘柄")
         print(f"  取得モード: {args.mode}")
         print(f"  バッチサイズ: {args.batch_size}")
         print(f"  最終daily_bars件数: {bar_count}")
