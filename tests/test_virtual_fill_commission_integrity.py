@@ -200,7 +200,9 @@ def test_legacy_null_commission_uses_config_and_is_reported(
     report = VirtualTradeIntegrityChecker(config).run("momentum")
 
     assert report.exit_code == 1
-    assert any(item.code == "fill.legacy_commission" for item in report.warnings)
+    assert sum(
+        item.code == "fill.legacy_commission" for item in report.warnings
+    ) == 1
 
 
 def test_invalid_negative_commission_is_rejected_by_replay(tmp_path: Path) -> None:
@@ -300,6 +302,11 @@ def test_integrity_checker_does_not_migrate_read_only_database(
                 cash REAL,
                 position_value REAL,
                 total_equity REAL
+            );
+            CREATE TABLE daily_bars (
+                code TEXT,
+                date TEXT,
+                close REAL
             );
             """
         )

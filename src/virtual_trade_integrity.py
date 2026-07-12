@@ -83,6 +83,7 @@ class VirtualTradeIntegrityChecker:
         "virtual_fills",
         "virtual_positions",
         "virtual_equity_curve",
+        "daily_bars",
     }
 
     def __init__(self, config: Config):
@@ -95,7 +96,7 @@ class VirtualTradeIntegrityChecker:
     def _connect_read_only(self) -> sqlite3.Connection:
         if not self.db_path.exists():
             raise FileNotFoundError(f"データベースが見つかりません: {self.db_path}")
-        uri = f"file:{self.db_path.resolve()}?mode=ro"
+        uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True)
         connection.row_factory = sqlite3.Row
         return connection
@@ -210,6 +211,7 @@ class VirtualTradeIntegrityChecker:
                 "schema.missing_fill_commission",
                 "virtual_fills.commissionがありません。マイグレーションが必要です",
             )
+            return False
         return True
 
     def _load_fills(
@@ -577,7 +579,8 @@ class VirtualTradeIntegrityChecker:
             target_date,
             has_commission,
         )
-        expected_cash, positions, complete = self._replay(report, fills)
+        equity_report = IntegrityReport(strategy_name=strategy_name)
+        expected_cash, positions, complete = self._replay(equity_report, fills)
         if not complete:
             self._add(
                 report,
