@@ -794,9 +794,17 @@ class VirtualTradeManager:
         )
         if snapshot_date is None or latest_fill_date is None:
             return True
+        expected_cash = replayed_cash
         if snapshot_date < latest_fill_date:
-            return True
-        return abs(snapshot_cash - replayed_cash) <= 0.01
+            expected_cash, snapshot_complete = self._replay_cash_with_conn(
+                conn,
+                strategy_name,
+                snapshot_date,
+                exclude_order_id,
+            )
+            if not snapshot_complete:
+                return False
+        return abs(snapshot_cash - expected_cash) <= 0.01
 
     def _get_cash_with_conn(
         self,
@@ -923,8 +931,36 @@ class VirtualTradeManager:
                 return False
             rebuilt.append((target_date, cash))
 
+        now = datetime.now().isoformat()
         for target_date, cash in rebuilt:
-            self._set_cash(conn, strategy_name, target_date, cash)
+            position_value = self._position_value_with_conn(
+                conn,
+                strategy_name,
+                target_date,
+            )
+            total_equity = cash + position_value
+            conn.execute(
+                """
+                INSERT INTO virtual_equity_curve
+                (strategy_name, date, cash, position_value, total_equity,
+                 benchmark_code, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(strategy_name, date) DO UPDATE SET
+                    cash = excluded.cash,
+                    position_value = excluded.position_value,
+                    total_equity = excluded.total_equity,
+                    created_at = excluded.created_at
+                """,
+                (
+                    strategy_name,
+                    target_date,
+                    cash,
+                    position_value,
+                    total_equity,
+                    self.default_benchmark,
+                    now,
+                ),
+            )
         self._recalculate_equity_returns_from_date(
             conn,
             strategy_name,

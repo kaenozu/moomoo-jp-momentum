@@ -194,6 +194,30 @@ def test_available_cash_uses_replayed_cash_before_pending_reservations(
     )
 
 
+def test_older_manual_cash_snapshot_is_not_treated_as_stale(
+    tmp_path: Path,
+) -> None:
+    manager, db_path = _make_manager(tmp_path, seed_equity=False)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO virtual_equity_curve
+            (strategy_name, date, cash, position_value, total_equity, created_at)
+            VALUES ('default', '2026-01-04', 90000, 0, 90000, 'manual')
+            """
+        )
+    _insert_fill(
+        db_path,
+        order_id=1,
+        side="BUY",
+        quantity=1,
+        price=100,
+        filled_at="2026-01-05 10:00:00",
+    )
+
+    assert manager.get_cash("default", "2026-01-05") == pytest.approx(90000)
+
+
 def test_inconsistent_current_snapshot_falls_back_conservatively(
     tmp_path: Path,
 ) -> None:
@@ -249,6 +273,13 @@ def test_out_of_order_fill_repairs_later_equity_rows(tmp_path: Path) -> None:
                 ("2026-01-11", 100050, 100050),
             ],
         )
+        conn.execute(
+            """
+            UPDATE virtual_equity_curve
+            SET benchmark_code = 'JP.CUSTOM', benchmark_return = 0.2
+            WHERE strategy_name = 'default' AND date = '2026-01-10'
+            """
+        )
 
     _insert_fill(
         db_path,
@@ -277,7 +308,8 @@ def test_out_of_order_fill_repairs_later_equity_rows(tmp_path: Path) -> None:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT date, cash, position_value, total_equity, daily_return
+            SELECT date, cash, position_value, total_equity, daily_return,
+                   benchmark_code, benchmark_return
             FROM virtual_equity_curve
             WHERE strategy_name = 'default' AND date >= '2026-01-05'
             ORDER BY date
@@ -297,6 +329,8 @@ def test_out_of_order_fill_repairs_later_equity_rows(tmp_path: Path) -> None:
     assert rows[0]["daily_return"] == pytest.approx(0)
     assert rows[1]["daily_return"] == pytest.approx(0.1)
     assert rows[2]["daily_return"] == pytest.approx(100 / 100100 * 100)
+    assert rows[1]["benchmark_code"] == "JP.CUSTOM"
+    assert rows[1]["benchmark_return"] == pytest.approx(0.2)
 
 
 def test_rebuild_refuses_inconsistent_legacy_cash_history(tmp_path: Path) -> None:
