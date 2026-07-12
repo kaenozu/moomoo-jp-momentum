@@ -178,6 +178,7 @@ def test_migration_is_idempotent_for_legacy_pending_orders(tmp_path):
     assert "reserved_amount" in columns
     assert value is None
 
+
 def test_order_requires_buffered_reservation(tmp_path):
     manager, _ = _make_manager(tmp_path, cash=1019.0)
 
@@ -210,3 +211,49 @@ def test_future_pending_order_is_ignored_for_past_cash(tmp_path):
     assert manager.get_available_cash("default", "2026-01-05") == 100000.0
     assert manager.get_available_cash("default") == 95000.0
 
+
+def test_historical_fill_uses_cash_as_of_fill_date(tmp_path):
+    manager, db_path = _make_manager(tmp_path)
+    order = manager.place_order(
+        "default",
+        "JP.0001",
+        "BUY",
+        1,
+        submitted_at="2026-01-05",
+    )
+    assert order is not None
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO virtual_equity_curve
+            (strategy_name, date, cash, position_value, total_equity, created_at)
+            VALUES ('default', '2026-01-10', 50000, 0, 50000,
+                    '2026-01-10T00:00:00')
+            """
+        )
+
+    fills = manager.process_fills("default", "2026-01-06")
+
+    assert len(fills) == 1
+    assert manager.get_cash("default", "2026-01-06") == 98999.0
+    assert manager.get_cash("default", "2026-01-10") == 50000.0
+
+
+def test_historical_equity_curve_uses_cash_as_of_target_date(tmp_path):
+    manager, db_path = _make_manager(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO virtual_equity_curve
+            (strategy_name, date, cash, position_value, total_equity, created_at)
+            VALUES ('default', '2026-01-10', 50000, 0, 50000,
+                    '2026-01-10T00:00:00')
+            """
+        )
+
+    snapshot = manager.save_equity_curve("default", "2026-01-06")
+
+    assert snapshot["cash"] == 100000.0
+    assert manager.get_cash("default", "2026-01-06") == 100000.0
+    assert manager.get_cash("default", "2026-01-10") == 50000.0

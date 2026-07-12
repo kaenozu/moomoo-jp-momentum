@@ -413,7 +413,7 @@ class VirtualTradeManager:
         )
 
     def _apply_cash_delta(self, conn: sqlite3.Connection, strategy_name: str, target_date: str, delta: float) -> None:
-        current_cash = self._get_cash_with_conn(conn, strategy_name)
+        current_cash = self._get_cash_with_conn(conn, strategy_name, target_date)
         self._set_cash(conn, strategy_name, target_date, current_cash + delta)
 
     def get_positions(self, strategy_name: str = "default") -> list[VirtualPosition]:
@@ -963,7 +963,7 @@ class VirtualTradeManager:
             benchmark_code = self.default_benchmark
 
         with self._get_connection() as conn:
-            cash = self._get_cash_with_conn(conn, strategy_name)
+            cash = self._get_cash_with_conn(conn, strategy_name, target_date)
             position_value = self._position_value_with_conn(conn, strategy_name)
             total_equity = cash + position_value
             prev = conn.execute(
