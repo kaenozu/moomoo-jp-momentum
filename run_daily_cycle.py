@@ -23,7 +23,7 @@ from daily_update import (
 from src.alerts import AlertManager
 from src.config import load_config
 from src.connection import OpenDConnection
-from src.data_freshness import DataFreshnessGuard
+from src.data_freshness import DataFreshnessGuard, FreshnessStatus
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
 from src.quote_service import QuoteService
@@ -86,6 +86,22 @@ def _validate_watchlist_for_dry_run(config) -> tuple[int, int]:
     return len(jp_symbols), len(benchmark_codes)
 
 
+def _assert_cycle_data_freshness(
+    config,
+    codes: list[str],
+    target_date: str,
+) -> dict[str, FreshnessStatus]:
+    """日次処理で使用する全enabled銘柄を対象日基準で個別検証する。"""
+    max_stale_days = int(config.get("data_freshness.max_stale_days", 5))
+    guard = DataFreshnessGuard(config)
+    return guard.assert_required_codes_fresh_or_stop(
+        codes,
+        reference_date=target_date,
+        max_stale_days=max_stale_days,
+        table_name="daily_bars",
+    )
+
+
 def run_cycle(
     target_date: str,
     dry_run: bool = False,
@@ -145,6 +161,18 @@ def run_cycle(
         data_dict = {}
         results["daily_bars"] = 0
 
+    freshness_by_code = _assert_cycle_data_freshness(
+        config,
+        codes,
+        target_date,
+    )
+    results["fresh_symbols"] = sum(
+        status.is_fresh for status in freshness_by_code.values()
+    )
+    results["freshness_warnings"] = sum(
+        status.level == "warning" for status in freshness_by_code.values()
+    )
+
     if data_dict:
         indicators = calculate_indicators_batch(data_dict, symbols_info)
         indicators_df = indicators_to_dataframe(indicators)
@@ -165,19 +193,6 @@ def run_cycle(
     else:
         results["indicators"] = 0
         results["benchmark_prices"] = 0
-
-    guard = DataFreshnessGuard(config)
-    freshness = guard.check_freshness()
-    if freshness.level == "error" and freshness.days_stale < 9000:
-        raise SystemError(
-            "データが古すぎるため処理を停止します: "
-            f"{freshness.message}"
-        )
-    if freshness.level == "warning":
-        logger.warning(
-            "データが古いですが処理を続行します: %s",
-            freshness.message,
-        )
 
     screener = Screener(config)
     candidates = screener.screen_candidates(date=target_date)
