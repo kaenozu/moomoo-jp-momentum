@@ -164,7 +164,7 @@ class VirtualTradeManager:
             WHERE strategy_name = ?
               AND side = 'BUY'
               AND status = 'PENDING'
-              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
+              AND (? IS NULL OR COALESCE(substr(submitted_at, 1, 10), '') <= ?)
               AND (? IS NULL OR id <> ?)
             """,
             (
@@ -297,7 +297,7 @@ class VirtualTradeManager:
             WHERE strategy_name = ?
               AND side = 'BUY'
               AND status = 'PENDING'
-              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
+              AND (? IS NULL OR COALESCE(substr(submitted_at, 1, 10), '') <= ?)
               AND (? IS NULL OR id <> ?)
             """,
             (
@@ -343,7 +343,7 @@ class VirtualTradeManager:
               AND code = ?
               AND side = 'SELL'
               AND status = 'PENDING'
-              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
+              AND (? IS NULL OR COALESCE(substr(submitted_at, 1, 10), '') <= ?)
               AND (? IS NULL OR id <> ?)
             LIMIT 1
             """,
@@ -945,7 +945,7 @@ class VirtualTradeManager:
                     """
                     SELECT 1 FROM virtual_orders
                     WHERE strategy_name = ? AND code = ? AND side = 'SELL' AND status = 'PENDING'
-                      AND substr(submitted_at, 1, 10) <= ?
+                      AND COALESCE(substr(submitted_at, 1, 10), '') <= ?
                     LIMIT 1
                     """,
                     (strategy_name, pos.code, target_date),

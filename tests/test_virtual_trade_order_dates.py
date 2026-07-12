@@ -3,6 +3,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from src.config import Config
 from src.data_store import DataStore
 from src.virtual_trade import VirtualTradeManager
@@ -255,3 +257,110 @@ def test_manager_migrates_legacy_pending_index(tmp_path: Path) -> None:
     assert row is not None
     assert "substr(submitted_at, 1, 10)" in str(row[0])
 
+
+
+def test_null_submitted_pending_is_conservative_and_unique(tmp_path: Path) -> None:
+    db_path = tmp_path / "nullable_submitted_at.db"
+    config = Config("tests/fixtures/config.test.yaml")
+    config._config["database"] = {"path": str(db_path)}
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE virtual_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strategy_name TEXT NOT NULL,
+                code TEXT NOT NULL,
+                side TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                order_type TEXT NOT NULL,
+                limit_price REAL,
+                status TEXT NOT NULL,
+                signal_id INTEGER,
+                exit_reason TEXT,
+                order_reason TEXT,
+                submitted_at TEXT,
+                filled_at TEXT,
+                cancelled_at TEXT,
+                fill_price REAL,
+                fill_reason TEXT,
+                reserved_amount REAL,
+                created_at TEXT,
+                updated_at TEXT
+            );
+            CREATE UNIQUE INDEX idx_virtual_orders_pending
+            ON virtual_orders(
+                strategy_name, code, side, substr(submitted_at, 1, 10)
+            )
+            WHERE status = 'PENDING';
+            """
+        )
+
+    DataStore(config)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO symbols
+            (code, name, type, role, tradable, enabled)
+            VALUES ('JP.0001', 'JP.0001', 'stock', 'trade_candidate', 1, 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO daily_bars
+            (code, date, open, high, low, close, volume, turnover)
+            VALUES ('JP.0001', '2026-01-05', 1000, 1010, 990, 1000,
+                    10000, 10000000)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO virtual_equity_curve
+            (strategy_name, date, cash, position_value, total_equity, created_at)
+            VALUES ('default', '2026-01-04', 100000, 0, 100000,
+                    '2026-01-04T00:00:00')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO virtual_orders
+            (strategy_name, code, side, quantity, order_type, status,
+             submitted_at, reserved_amount, created_at, updated_at)
+            VALUES ('default', 'JP.0001', 'BUY', 1, 'MARKET_SIM',
+                    'PENDING', NULL, NULL, 'legacy', 'legacy')
+            """
+        )
+
+    manager = VirtualTradeManager(config)
+    with manager._get_connection() as conn:
+        ok, reason = manager._validate_buy_order(
+            conn,
+            "default",
+            "JP.0001",
+            1,
+            "MARKET_SIM",
+            None,
+            "2026-01-05",
+        )
+
+    assert not ok
+    assert "未約定BUY注文" in reason
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_virtual_orders_pending'"
+        ).fetchone()
+        assert row is not None
+        assert "COALESCE(substr(submitted_at, 1, 10), '')" in str(row[0])
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO virtual_orders
+                (strategy_name, code, side, quantity, order_type, status,
+                 submitted_at, reserved_amount, created_at, updated_at)
+                VALUES ('default', 'JP.0001', 'BUY', 1, 'MARKET_SIM',
+                        'PENDING', NULL, NULL, 'legacy-2', 'legacy-2')
+                """
+            )

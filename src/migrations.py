@@ -55,7 +55,8 @@ def migrate_virtual_orders_pending_index(conn: sqlite3.Connection) -> None:
         "AND name = 'idx_virtual_orders_pending'"
     ).fetchone()
     index_sql = str(index_row[0] or "") if index_row else ""
-    if "substr(submitted_at, 1, 10)" in index_sql:
+    normalized_index_sql = index_sql.lower()
+    if "coalesce(substr(submitted_at, 1, 10), '')" in normalized_index_sql:
         return
 
     conn.execute("DROP INDEX IF EXISTS idx_virtual_orders_pending")
@@ -66,7 +67,7 @@ def migrate_virtual_orders_pending_index(conn: sqlite3.Connection) -> None:
             strategy_name,
             code,
             side,
-            substr(submitted_at, 1, 10)
+            COALESCE(substr(submitted_at, 1, 10), '')
         )
         WHERE status = 'PENDING'
         """

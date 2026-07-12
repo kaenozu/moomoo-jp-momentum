@@ -293,7 +293,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_manual_code ON trades_manual(code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_code ON benchmark_prices(benchmark_code);
 CREATE INDEX IF NOT EXISTS idx_benchmark_prices_date ON benchmark_prices(date);
 CREATE INDEX IF NOT EXISTS idx_signal_backtests_code ON signal_backtests(code);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side, substr(submitted_at, 1, 10)) WHERE status = 'PENDING';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_virtual_orders_pending ON virtual_orders(strategy_name, code, side, COALESCE(substr(submitted_at, 1, 10), '')) WHERE status = 'PENDING';
 CREATE INDEX IF NOT EXISTS idx_virtual_fills_order ON virtual_fills(order_id);
 
 -- バックテスト管理
