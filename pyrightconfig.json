@@ -24,6 +24,7 @@
     "tests/test_daily_cycle.py",
     "tests/test_operation_config.py",
     "tests/test_regressions.py",
+    "tests/test_relative_strength_connections.py",
     "tests/test_strategy_compare.py",
     "tests/test_strategy_runner_benchmark.py",
     "tests/test_virtual_integration.py",
