@@ -134,7 +134,7 @@ class VirtualTradeManager:
         return float(row["close"]) if row and row["close"] is not None else None
 
 
-    def _snapshot_positions_with_conn(
+    def _snapshot_position_cache_with_conn(
         self,
         conn: sqlite3.Connection,
         strategy_name: str,
@@ -142,12 +142,45 @@ class VirtualTradeManager:
         rows = conn.execute(
             """
             SELECT * FROM virtual_positions
-            WHERE strategy_name = ? AND quantity > 0
+            WHERE strategy_name = ?
             ORDER BY code
             """,
             (strategy_name,),
         ).fetchall()
         return {str(row["code"]): self._row_to_position(row) for row in rows}
+
+    def _snapshot_positions_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+    ) -> dict[str, VirtualPosition]:
+        return {
+            code: position
+            for code, position in self._snapshot_position_cache_with_conn(
+                conn,
+                strategy_name,
+            ).items()
+            if position.quantity > 0
+        }
+
+    def _position_cache_matches_replay(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        replayed: dict[str, VirtualPosition],
+    ) -> bool:
+        cached = self._snapshot_position_cache_with_conn(conn, strategy_name)
+        if set(cached) != set(replayed):
+            return False
+        for code, cached_position in cached.items():
+            replayed_position = replayed[code]
+            if cached_position.quantity != replayed_position.quantity:
+                return False
+            if abs(cached_position.avg_cost - replayed_position.avg_cost) > 1e-6:
+                return False
+            if abs(cached_position.realized_pl - replayed_position.realized_pl) > 1e-6:
+                return False
+        return True
 
     def _has_fill_history_with_conn(
         self,
@@ -165,6 +198,7 @@ class VirtualTradeManager:
         conn: sqlite3.Connection,
         strategy_name: str,
         as_of_date: str | None = None,
+        exclude_order_id: int | None = None,
     ) -> tuple[dict[str, VirtualPosition], bool]:
         """Replay fills in chronological order and return positions plus completeness.
 
@@ -175,23 +209,30 @@ class VirtualTradeManager:
         if as_of_date:
             rows = conn.execute(
                 """
-                SELECT id, code, side, quantity, price, filled_at
+                SELECT id, order_id, code, side, quantity, price, filled_at
                 FROM virtual_fills
                 WHERE strategy_name = ?
                   AND COALESCE(substr(filled_at, 1, 10), '') <= ?
+                  AND (? IS NULL OR order_id <> ?)
                 ORDER BY COALESCE(filled_at, ''), id
                 """,
-                (strategy_name, as_of_date),
+                (
+                    strategy_name,
+                    as_of_date,
+                    exclude_order_id,
+                    exclude_order_id,
+                ),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT id, code, side, quantity, price, filled_at
+                SELECT id, order_id, code, side, quantity, price, filled_at
                 FROM virtual_fills
                 WHERE strategy_name = ?
+                  AND (? IS NULL OR order_id <> ?)
                 ORDER BY COALESCE(filled_at, ''), id
                 """,
-                (strategy_name,),
+                (strategy_name, exclude_order_id, exclude_order_id),
             ).fetchall()
 
         states: dict[str, _PositionReplayState] = {}
@@ -260,19 +301,32 @@ class VirtualTradeManager:
         reference_date: str | None,
     ) -> dict[str, VirtualPosition]:
         if reference_date and self._has_fill_history_with_conn(conn, strategy_name):
-            replayed, complete = self._replay_positions_with_conn(
+            current_replayed, current_complete = self._replay_positions_with_conn(
                 conn,
                 strategy_name,
-                reference_date,
             )
-            if complete:
-                return {
-                    code: position
-                    for code, position in replayed.items()
-                    if position.quantity > 0
-                }
+            cache_complete = (
+                current_complete
+                and self._position_cache_matches_replay(
+                    conn,
+                    strategy_name,
+                    current_replayed,
+                )
+            )
+            if cache_complete:
+                replayed, complete = self._replay_positions_with_conn(
+                    conn,
+                    strategy_name,
+                    reference_date,
+                )
+                if complete:
+                    return {
+                        code: position
+                        for code, position in replayed.items()
+                        if position.quantity > 0
+                    }
             logger.warning(
-                "仮想ポジション履歴をfillsだけで再構築できないため"
+                "仮想ポジション履歴と現在キャッシュの整合性を確認できないため"
                 "現在スナップショットへフォールバックします: strategy=%s, date=%s",
                 strategy_name,
                 reference_date,
@@ -283,10 +337,23 @@ class VirtualTradeManager:
         self,
         conn: sqlite3.Connection,
         strategy_name: str,
+        exclude_order_id: int | None = None,
     ) -> bool:
-        """Rebuild the current-position cache when fill history is self-contained."""
+        """Rebuild the cache only when existing state is fully fill-derived."""
         if not self._has_fill_history_with_conn(conn, strategy_name):
             return False
+        previous_replayed, previous_complete = self._replay_positions_with_conn(
+            conn,
+            strategy_name,
+            exclude_order_id=exclude_order_id,
+        )
+        if not previous_complete or not self._position_cache_matches_replay(
+            conn,
+            strategy_name,
+            previous_replayed,
+        ):
+            return False
+
         replayed, complete = self._replay_positions_with_conn(conn, strategy_name)
         if not complete:
             return False
@@ -1023,7 +1090,11 @@ class VirtualTradeManager:
         fill: VirtualFill,
     ) -> None:
         gross = fill.price * fill.quantity
-        if self._rebuild_position_cache_from_fills(conn, order.strategy_name):
+        if self._rebuild_position_cache_from_fills(
+            conn,
+            order.strategy_name,
+            exclude_order_id=order.id,
+        ):
             delta = (
                 -(gross + self.commission)
                 if order.side == "BUY"

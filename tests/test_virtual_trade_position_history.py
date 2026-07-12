@@ -103,6 +103,7 @@ def _set_snapshot(
     code: str,
     quantity: int,
     avg_cost: float,
+    realized_pl: float = 0.0,
 ) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -110,14 +111,22 @@ def _set_snapshot(
             INSERT INTO virtual_positions
             (strategy_name, code, quantity, avg_cost, market_price,
              market_value, unrealized_pl, realized_pl, updated_at)
-            VALUES ('default', ?, ?, ?, ?, ?, 0, 0, 'snapshot')
+            VALUES ('default', ?, ?, ?, ?, ?, 0, ?, 'snapshot')
             ON CONFLICT(strategy_name, code) DO UPDATE SET
                 quantity = excluded.quantity,
                 avg_cost = excluded.avg_cost,
                 market_price = excluded.market_price,
-                market_value = excluded.market_value
+                market_value = excluded.market_value,
+                realized_pl = excluded.realized_pl
             """,
-            (code, quantity, avg_cost, avg_cost, quantity * avg_cost),
+            (
+                code,
+                quantity,
+                avg_cost,
+                avg_cost,
+                quantity * avg_cost,
+                realized_pl,
+            ),
         )
 
 
@@ -199,7 +208,13 @@ def test_future_sell_does_not_reduce_historical_sellable_quantity(
         price=200,
         filled_at="2026-01-10 10:00:00",
     )
-    _set_snapshot(db_path, code="JP.0001", quantity=0, avg_cost=100)
+    _set_snapshot(
+        db_path,
+        code="JP.0001",
+        quantity=0,
+        avg_cost=100,
+        realized_pl=200,
+    )
 
     with manager._get_connection() as conn:
         ok, reason = manager._validate_sell_order(
@@ -329,11 +344,21 @@ def test_rebuild_cache_replays_out_of_order_historical_fill(tmp_path: Path) -> N
         price=100,
         filled_at="2026-01-05 10:00:00",
     )
-    _set_snapshot(db_path, code="JP.0001", quantity=0, avg_cost=200)
+    _set_snapshot(
+        db_path,
+        code="JP.0001",
+        quantity=0,
+        avg_cost=200,
+        realized_pl=500,
+    )
 
     with manager._get_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        rebuilt = manager._rebuild_position_cache_from_fills(conn, "default")
+        rebuilt = manager._rebuild_position_cache_from_fills(
+            conn,
+            "default",
+            exclude_order_id=1,
+        )
 
     positions = manager.get_positions("default")
 
@@ -357,3 +382,41 @@ def test_snapshot_only_legacy_position_remains_supported(tmp_path: Path) -> None
         )
 
     assert ok, reason
+
+
+def test_mixed_snapshot_only_position_blocks_destructive_cache_rebuild(
+    tmp_path: Path,
+) -> None:
+    manager, db_path = _make_manager(tmp_path)
+    _set_snapshot(db_path, code="JP.0002", quantity=2, avg_cost=100)
+    _insert_fill(
+        db_path,
+        order_id=1,
+        code="JP.0001",
+        side="BUY",
+        quantity=1,
+        price=200,
+        filled_at="2026-01-10 10:00:00",
+    )
+
+    with manager._get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rebuilt = manager._rebuild_position_cache_from_fills(
+            conn,
+            "default",
+            exclude_order_id=1,
+        )
+
+    assert not rebuilt
+    current_positions = manager.get_positions("default")
+    assert [(position.code, position.quantity) for position in current_positions] == [
+        ("JP.0002", 2)
+    ]
+
+    historical_positions = manager.get_positions(
+        "default",
+        as_of_date="2026-01-05",
+    )
+    assert [(position.code, position.quantity) for position in historical_positions] == [
+        ("JP.0002", 2)
+    ]

@@ -5,33 +5,6 @@ on:
   pull_request:
 
 jobs:
-  apply-position-history-completeness-fix:
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      ((github.event_name == 'push' && github.ref_name == 'fix/virtual-positions-as-of-date') ||
-       (github.event_name == 'pull_request' && github.head_ref == 'fix/virtual-positions-as-of-date'))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: fix/virtual-positions-as-of-date
-          fetch-depth: 0
-
-      - name: Apply cache completeness guard
-        run: python .agent_fix_position_history_completeness.py
-
-      - name: Restore workflow and commit fix
-        run: |
-          git checkout origin/master -- .github/workflows/tests.yml
-          git rm .agent_fix_position_history_completeness.py
-          git add src/virtual_trade.py tests/test_virtual_trade_position_history.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "fix: guard mixed legacy position caches"
-          git push origin HEAD:fix/virtual-positions-as-of-date
-
   test:
     runs-on: ubuntu-latest
     steps:
