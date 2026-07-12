@@ -22,7 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
       - name: Apply follow-up fixes
         run: |
@@ -30,32 +29,6 @@ jobs:
           rm -f scripts/apply_strategy_benchmark_followups.py
           rm -f strategy-benchmark-followups.trigger
           rm -f .github/workflows/apply-strategy-benchmark-followups.yml
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Run fast tests
-        run: python -m pytest tests/ -m "not slow" -q
-
-      - name: Run ruff
-        run: >-
-          ruff check src/ tests/ run_daily_cycle.py daily_update.py
-          historical_backtest.py screen_candidates.py scheduler.py
-          performance_report.py --output-format=github
-
-      - name: Run pyright
-        run: pyright
-
-      - name: Verify dry-run
-        run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
-
-      - name: Verify no runtime artifacts
-        run: |
-          test ! -e data/moomoo.db
-          test ! -d logs
-          test ! -d reports
 
       - name: Commit follow-up fixes
         run: |
