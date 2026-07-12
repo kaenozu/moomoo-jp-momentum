@@ -52,13 +52,13 @@ class BackupSettings:
         directory = raw.get("directory", "backups")
         if not isinstance(directory, str) or not directory.strip():
             raise BackupError("database_backup.directoryは空でない文字列で指定してください")
-        retain_daily = _non_negative_int(raw.get("retain_daily", 7), "retain_daily")
-        retain_weekly = _non_negative_int(raw.get("retain_weekly", 4), "retain_weekly")
-        retain_pre_cycle = _non_negative_int(
+        retain_daily = _positive_int(raw.get("retain_daily", 7), "retain_daily")
+        retain_weekly = _positive_int(raw.get("retain_weekly", 4), "retain_weekly")
+        retain_pre_cycle = _positive_int(
             raw.get("retain_pre_cycle", retain_daily),
             "retain_pre_cycle",
         )
-        retain_post_cycle = _non_negative_int(
+        retain_post_cycle = _positive_int(
             raw.get("retain_post_cycle", retain_daily),
             "retain_post_cycle",
         )
@@ -112,9 +112,9 @@ class RestoreResult:
     integrity_warnings: int
 
 
-def _non_negative_int(value: Any, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise BackupError(f"database_backup.{name}は0以上の整数で指定してください")
+def _positive_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise BackupError(f"database_backup.{name}は1以上の整数で指定してください")
     return value
 
 
@@ -357,8 +357,7 @@ class DatabaseBackupManager:
         if destination_path.exists():
             raise BackupError(f"復元先が既に存在します: {destination_path}")
 
-        metadata = self.verify_backup(backup_path)
-        if metadata is None:
+        if self.verify_backup(backup_path) is None:
             raise BackupVerificationError(
                 "復元にはSHA-256を含むバックアップメタデータが必要です"
             )
