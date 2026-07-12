@@ -454,6 +454,7 @@ class VirtualTradeIntegrityChecker:
             (strategy_name,),
         ).fetchall()
         report.checked["position_rows"] = len(rows)
+        report.checked["position_comparison_skipped_future_fills"] = 0
         if as_of_date is not None:
             future_fill = connection.execute(
                 """

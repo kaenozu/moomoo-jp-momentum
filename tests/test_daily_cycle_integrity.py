@@ -89,7 +89,10 @@ def test_integrity_gate_always_fails_on_errors(
     )
     _install_checker(monkeypatch, report)
 
-    with pytest.raises(SystemError, match="errors=1"):
+    with pytest.raises(
+        run_daily_cycle.DailyCycleStoppedError,
+        match="errors=1",
+    ):
         run_daily_cycle._run_virtual_trade_integrity_gate(
             _ConfigStub({}),
             "default",
@@ -125,7 +128,10 @@ def test_integrity_warning_can_be_strict(
     )
     _install_checker(monkeypatch, report)
 
-    with pytest.raises(SystemError, match="警告を厳格設定"):
+    with pytest.raises(
+        run_daily_cycle.DailyCycleStoppedError,
+        match="警告を厳格設定",
+    ):
         run_daily_cycle._run_virtual_trade_integrity_gate(
             _ConfigStub({}),
             "default",
