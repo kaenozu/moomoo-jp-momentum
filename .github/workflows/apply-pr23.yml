@@ -7,6 +7,12 @@ on:
     paths:
       - .github/scripts/apply_pr23.py
       - .github/workflows/apply-pr23.yml
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/scripts/apply_pr23.py
+      - .github/workflows/apply-pr23.yml
 
 permissions:
   contents: write
