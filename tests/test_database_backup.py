@@ -25,16 +25,23 @@ class StubConfig:
         *,
         daily: int = 7,
         weekly: int = 4,
+        pre_cycle: int | None = None,
+        post_cycle: int | None = None,
     ) -> None:
         self.database_path = str(db_path)
+        backup_config: dict[str, Any] = {
+            "enabled": True,
+            "directory": str(backup_dir),
+            "retain_daily": daily,
+            "retain_weekly": weekly,
+            "verify_after_backup": True,
+        }
+        if pre_cycle is not None:
+            backup_config["retain_pre_cycle"] = pre_cycle
+        if post_cycle is not None:
+            backup_config["retain_post_cycle"] = post_cycle
         self._values: dict[str, Any] = {
-            "database_backup": {
-                "enabled": True,
-                "directory": str(backup_dir),
-                "retain_daily": daily,
-                "retain_weekly": weekly,
-                "verify_after_backup": True,
-            },
+            "database_backup": backup_config,
             "virtual_trade": {"initial_cash": 100000, "commission": 0},
         }
 
@@ -114,22 +121,36 @@ def test_prune_only_managed_generations(tmp_path: Path) -> None:
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     manager = DatabaseBackupManager(
-        StubConfig(database_path, backup_dir, daily=2, weekly=1)
-    )
-    for index in range(4):
-        path = backup_dir / (
-            f"source-2026070{index + 1}T000000.000000Z-daily.sqlite3"
+        StubConfig(
+            database_path,
+            backup_dir,
+            daily=2,
+            weekly=1,
+            pre_cycle=1,
+            post_cycle=1,
         )
-        path.write_bytes(b"x")
-        path.with_suffix(path.suffix + ".json").write_text("{}", encoding="utf-8")
+    )
+    for kind in ("daily", "pre_cycle", "post_cycle"):
+        for index in range(4):
+            path = backup_dir / (
+                f"source-2026070{index + 1}T000000.000000Z-{kind}.sqlite3"
+            )
+            path.write_bytes(b"x")
+            path.with_suffix(path.suffix + ".json").write_text(
+                "{}",
+                encoding="utf-8",
+            )
     unrelated = backup_dir / "notes.txt"
     unrelated.write_text("keep", encoding="utf-8")
 
     deleted = manager.prune()
 
-    assert len([path for path in deleted if path.suffix == ".sqlite3"]) == 2
+    deleted_databases = [path for path in deleted if path.suffix == ".sqlite3"]
+    assert len(deleted_databases) == 8
     assert unrelated.exists()
     assert len(list(backup_dir.glob("*-daily.sqlite3"))) == 2
+    assert len(list(backup_dir.glob("*-pre_cycle.sqlite3"))) == 1
+    assert len(list(backup_dir.glob("*-post_cycle.sqlite3"))) == 1
 
 
 def test_dry_run_creates_no_files(tmp_path: Path) -> None:
@@ -171,6 +192,20 @@ def test_restore_refuses_live_database_path(tmp_path: Path) -> None:
 
     with pytest.raises(BackupError, match="同じパス"):
         manager.restore_backup(backup_path, database_path)
+
+
+def test_restore_requires_metadata(tmp_path: Path) -> None:
+    database_path = tmp_path / "source.db"
+    create_db(database_path).close()
+    manager = DatabaseBackupManager(
+        StubConfig(database_path, tmp_path / "backups")
+    )
+    result = manager.create_backup()
+    backup_path = Path(result.backup_path or "")
+    Path(result.metadata_path or "").unlink()
+
+    with pytest.raises(BackupVerificationError, match="メタデータ"):
+        manager.restore_backup(backup_path, tmp_path / "restored.db")
 
 
 def test_checksum_mismatch_detected(tmp_path: Path) -> None:
