@@ -6,12 +6,14 @@ on:
       - fix/daily-cycle-operational-guards
     paths:
       - .github/scripts/apply_pr23.py
+      - .github/scripts/fix_pr23_applicator.py
       - .github/workflows/apply-pr23.yml
   pull_request:
     branches:
       - master
     paths:
       - .github/scripts/apply_pr23.py
+      - .github/scripts/fix_pr23_applicator.py
       - .github/workflows/apply-pr23.yml
 
 permissions:
@@ -27,6 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Fix applicator
+        run: python .github/scripts/fix_pr23_applicator.py
       - name: Apply implementation
         id: apply
         shell: bash
@@ -46,6 +50,7 @@ jobs:
           fi
       - name: Commit final diff
         run: |
+          rm -f .github/pr23-error.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
