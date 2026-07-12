@@ -106,6 +106,9 @@ alerts:
   webhook:
     enabled: false
     url: ""
+  operational:
+    enabled: false
+    timeout_seconds: 10
   score_threshold: 90
   notify_new_candidates: true
   notify_sell_watch: true

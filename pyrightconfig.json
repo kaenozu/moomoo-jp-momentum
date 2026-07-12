@@ -47,7 +47,11 @@
     "tests/test_virtual_trade_reservations.py",
     "src/virtual_trade_integrity.py",
     "tests/test_virtual_fill_commission_integrity.py",
-    "tests/test_daily_cycle_integrity.py"
+    "tests/test_daily_cycle_integrity.py",
+    "src/operational_notifier.py",
+    "tests/test_daily_cycle_operational_guards.py",
+    "tests/test_operational_notifier.py",
+    "tests/test_alert_target_date.py"
   ],
   "exclude": [
     ".venv",

@@ -191,6 +191,10 @@ def test_dry_run_is_read_only(monkeypatch, tmp_path):
         "integrity_errors": 0,
         "integrity_warnings": 0,
         "integrity_exit_code": 0,
+        "calendar_checked": True,
+        "is_trading_day": True,
+        "cycle_skipped": False,
+        "skip_reason": "",
         "symbols": 2,
         "benchmarks": 1,
     }

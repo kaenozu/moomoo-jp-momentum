@@ -7,11 +7,14 @@ import signal
 import subprocess
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import load_config
+from src.market_calendar import JST
+from src.operational_notifier import OperationalNotifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,25 +63,68 @@ def _run_script(args: list[str], timeout: int, name: str) -> None:
     logger.info("%s完了", name)
 
 
+def _notify_scheduler_failure(
+    config_path: str,
+    event_type: str,
+    message: str,
+    context: dict[str, object] | None = None,
+) -> bool:
+    """Best-effort scheduler notification without hiding the job failure."""
+    try:
+        config = load_config(config_path)
+        return OperationalNotifier(config).send_failure(
+            event_type,
+            message,
+            target_date=datetime.now(JST).strftime("%Y-%m-%d"),
+            context=context,
+        )
+    except Exception as notify_error:
+        logger.error(
+            "scheduler運用異常通知に失敗しました: event=%s error=%s",
+            event_type,
+            notify_error,
+        )
+        return False
+
+
 def job_connection_check(config_path: str = "config.yaml") -> None:
     """Verify OpenD connectivity without running the data pipeline."""
     from src.connection import OpenDConnection
 
-    config = load_config(config_path)
-    with OpenDConnection(config) as connection:
-        status = connection.connect()
-        if not status.connected:
-            raise RuntimeError(f"OpenD接続失敗: {status.message}")
+    try:
+        config = load_config(config_path)
+        with OpenDConnection(config) as connection:
+            status = connection.connect()
+            if not status.connected:
+                raise RuntimeError(f"OpenD接続失敗: {status.message}")
+    except Exception as error:
+        _notify_scheduler_failure(
+            config_path,
+            "opend_connection_check_failure",
+            str(error),
+            {"job": "connection_check"},
+        )
+        raise
     logger.info("OpenD接続確認成功")
 
 
 def job_daily_cycle(config_path: str = "config.yaml") -> None:
     """Run update, indicators, screening, virtual fills, reports, and alerts sequentially."""
-    _run_script(
-        ["run_daily_cycle.py", "--config", config_path],
-        timeout=7200,
-        name="日次運用サイクル",
-    )
+    try:
+        _run_script(
+            ["run_daily_cycle.py", "--config", config_path],
+            timeout=7200,
+            name="日次運用サイクル",
+        )
+    except subprocess.TimeoutExpired as error:
+        message = f"日次運用サイクルがタイムアウトしました: timeout={error.timeout}"
+        _notify_scheduler_failure(
+            config_path,
+            "scheduler_timeout",
+            message,
+            {"job": "daily_cycle", "timeout_seconds": error.timeout},
+        )
+        raise RuntimeError(message) from error
 
 
 def parse_cron(cron_str: str) -> dict[str, str]:
