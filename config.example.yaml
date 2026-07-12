@@ -79,6 +79,12 @@ benchmark:
     name: MAXIS米国株式（S&P500）
 database:
   path: data/moomoo.db
+database_backup:
+  enabled: false
+  directory: backups
+  retain_daily: 7
+  retain_weekly: 4
+  verify_after_backup: true
 output:
   csv: true
   html: true
