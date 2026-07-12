@@ -12,7 +12,6 @@
     "src/models.py",
     "src/performance.py",
     "src/relative_strength.py",
-    "src/scorer.py",
     "src/scoring.py",
     "src/screener.py",
     "src/strategies/etf_rotation.py",
