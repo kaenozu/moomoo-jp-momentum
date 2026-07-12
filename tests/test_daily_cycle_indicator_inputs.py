@@ -2,10 +2,12 @@
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 
-from run_daily_cycle import _load_indicator_inputs
+from run_daily_cycle import DEFAULT_HISTORY_LIMIT, _load_indicator_inputs
 from src.config import Config
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch
@@ -165,3 +167,44 @@ def test_non_positive_history_limit_is_rejected(tmp_path: Path) -> None:
             target_date="2026-07-10",
             history_limit=0,
         )
+
+
+def test_normalizes_codes_and_preserves_first_seen_order() -> None:
+    store = MagicMock(spec=DataStore)
+    first_frame = pd.DataFrame({"date": ["2026-07-10"]})
+    second_frame = pd.DataFrame({"date": ["2026-07-10"]})
+    store.get_daily_bars_for_codes.return_value = {
+        "JP.1306": second_frame,
+        "JP.7203": first_frame,
+    }
+
+    inputs = _load_indicator_inputs(
+        store,
+        [" JP.7203 ", "JP.1306", "JP.7203", "   "],
+        target_date="2026-07-10",
+    )
+
+    store.get_daily_bars_for_codes.assert_called_once_with(
+        ["JP.7203", "JP.1306"],
+        end_date="2026-07-10",
+        limit_per_code=DEFAULT_HISTORY_LIMIT,
+    )
+    assert list(inputs) == ["JP.7203", "JP.1306"]
+    assert inputs["JP.7203"] is first_frame
+    assert inputs["JP.1306"] is second_frame
+
+
+def test_missing_symbol_error_lists_every_code() -> None:
+    store = MagicMock(spec=DataStore)
+    store.get_daily_bars_for_codes.return_value = {}
+    codes = [f"JP.{index:04d}" for index in range(25)]
+
+    with pytest.raises(SystemError) as error:
+        _load_indicator_inputs(
+            store,
+            codes,
+            target_date="2026-07-10",
+        )
+
+    message = str(error.value)
+    assert all(code in message for code in codes)
