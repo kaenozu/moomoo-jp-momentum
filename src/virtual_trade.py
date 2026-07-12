@@ -14,6 +14,7 @@ from typing import Optional
 
 from .config import Config
 from .migrations import (
+    migrate_virtual_fills_commission,
     migrate_virtual_orders_pending_index,
     migrate_virtual_orders_reserved_amount,
 )
@@ -75,6 +76,7 @@ class VirtualFill:
     price: float = 0.0
     filled_at: str = ""
     fill_mode: str = ""
+    commission: Optional[float] = None
 
 
 class VirtualTradeManager:
@@ -103,6 +105,7 @@ class VirtualTradeManager:
         with self._get_connection() as conn:
             migrate_virtual_orders_reserved_amount(conn)
             migrate_virtual_orders_pending_index(conn)
+            migrate_virtual_fills_commission(conn)
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -251,7 +254,7 @@ class VirtualTradeManager:
         if as_of_date:
             rows = conn.execute(
                 """
-                SELECT id, order_id, code, side, quantity, price, filled_at
+                SELECT id, order_id, code, side, quantity, price, filled_at, commission
                 FROM virtual_fills
                 WHERE strategy_name = ?
                   AND COALESCE(substr(filled_at, 1, 10), '') <= ?
@@ -268,7 +271,7 @@ class VirtualTradeManager:
         else:
             rows = conn.execute(
                 """
-                SELECT id, order_id, code, side, quantity, price, filled_at
+                SELECT id, order_id, code, side, quantity, price, filled_at, commission
                 FROM virtual_fills
                 WHERE strategy_name = ?
                   AND (? IS NULL OR order_id <> ?)
@@ -284,6 +287,10 @@ class VirtualTradeManager:
             side = str(row["side"])
             quantity = int(row["quantity"])
             price = float(row["price"])
+            commission, commission_valid = self._commission_from_fill_row(row)
+            if not commission_valid:
+                complete = False
+                continue
             state = states.setdefault(code, _PositionReplayState())
 
             if side == "BUY":
@@ -304,7 +311,7 @@ class VirtualTradeManager:
                     continue
                 state.quantity -= quantity
                 state.realized_pl += (
-                    (price - state.avg_cost) * quantity - self.commission
+                    (price - state.avg_cost) * quantity - commission
                 )
                 state.last_price = price
                 continue
@@ -723,7 +730,7 @@ class VirtualTradeManager:
         if as_of_date:
             rows = conn.execute(
                 """
-                SELECT order_id, side, quantity, price, filled_at
+                SELECT order_id, side, quantity, price, filled_at, commission
                 FROM virtual_fills
                 WHERE strategy_name = ?
                   AND COALESCE(substr(filled_at, 1, 10), '') <= ?
@@ -740,7 +747,7 @@ class VirtualTradeManager:
         else:
             rows = conn.execute(
                 """
-                SELECT order_id, side, quantity, price, filled_at
+                SELECT order_id, side, quantity, price, filled_at, commission
                 FROM virtual_fills
                 WHERE strategy_name = ?
                   AND (? IS NULL OR order_id <> ?)
@@ -759,6 +766,25 @@ class VirtualTradeManager:
             cash += delta
         return cash, complete
 
+    def _commission_from_fill_row(
+        self,
+        row: sqlite3.Row,
+    ) -> tuple[float, bool]:
+        raw_commission = (
+            row["commission"]
+            if "commission" in row.keys()
+            else None
+        )
+        if raw_commission is None:
+            return self.commission, True
+        try:
+            commission = float(raw_commission)
+        except (TypeError, ValueError):
+            return 0.0, False
+        if commission < 0:
+            return 0.0, False
+        return commission, True
+
     def _cash_delta_from_fill_row(
         self,
         row: sqlite3.Row,
@@ -776,13 +802,14 @@ class VirtualTradeManager:
             price = float(row["price"])
         except (TypeError, ValueError):
             return 0.0, False
-        if quantity <= 0 or price < 0:
+        commission, commission_valid = self._commission_from_fill_row(row)
+        if quantity <= 0 or price < 0 or not commission_valid:
             return 0.0, False
         gross = price * quantity
         if side == "BUY":
-            return -(gross + self.commission), True
+            return -(gross + commission), True
         if side == "SELL":
-            return gross - self.commission, True
+            return gross - commission, True
         return 0.0, False
 
     def _cash_history_matches_replay(
@@ -940,7 +967,7 @@ class VirtualTradeManager:
         dates = sorted({start_date, *(str(row["date"]) for row in rows)})
         fills = conn.execute(
             """
-            SELECT side, quantity, price, filled_at
+            SELECT side, quantity, price, filled_at, commission
             FROM virtual_fills
             WHERE strategy_name = ?
             ORDER BY COALESCE(filled_at, ''), id
@@ -1367,13 +1394,14 @@ class VirtualTradeManager:
                 price=fill_price,
                 filled_at=filled_at,
                 fill_mode=fill_mode,
+                commission=self.commission,
             )
             conn.execute(
                 """
                 INSERT INTO virtual_fills
                 (order_id, strategy_name, code, side, quantity, price,
-                 filled_at, fill_mode, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 filled_at, fill_mode, commission, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fill.order_id,
@@ -1384,6 +1412,7 @@ class VirtualTradeManager:
                     fill.price,
                     fill.filled_at,
                     fill.fill_mode,
+                    fill.commission,
                     now,
                 ),
             )
@@ -1455,6 +1484,11 @@ class VirtualTradeManager:
         fill: VirtualFill,
     ) -> None:
         gross = fill.price * fill.quantity
+        commission = (
+            fill.commission
+            if fill.commission is not None
+            else self.commission
+        )
         requires_rebuild = self._fill_requires_cache_rebuild(
             conn,
             order.strategy_name,
@@ -1481,9 +1515,9 @@ class VirtualTradeManager:
                     fill.filled_at,
                 )
                 delta = (
-                    -(gross + self.commission)
+                    -(gross + commission)
                     if order.side == "BUY"
-                    else gross - self.commission
+                    else gross - commission
                 )
                 self._apply_cash_delta(
                     conn,
@@ -1549,7 +1583,7 @@ class VirtualTradeManager:
                 conn,
                 order.strategy_name,
                 fill.filled_at,
-                -(gross + self.commission),
+                -(gross + commission),
             )
 
         elif order.side == "SELL" and pos:
@@ -1558,7 +1592,7 @@ class VirtualTradeManager:
             new_quantity = current_qty - sell_qty
             realized_pl = (
                 (fill.price - float(pos["avg_cost"])) * sell_qty
-                - self.commission
+                - commission
             )
             market_value = fill.price * new_quantity
             unrealized_pl = (
@@ -1587,7 +1621,7 @@ class VirtualTradeManager:
                 conn,
                 order.strategy_name,
                 fill.filled_at,
-                gross - self.commission,
+                gross - commission,
             )
 
     def get_strategy_performance(self, strategy_name: str = "default") -> dict:
@@ -1626,7 +1660,21 @@ class VirtualTradeManager:
                 """,
                 (strategy_name, limit),
             ).fetchall()
-        return [VirtualFill(id=r["id"], order_id=r["order_id"], strategy_name=r["strategy_name"], code=r["code"], side=r["side"], quantity=r["quantity"], price=r["price"], filled_at=r["filled_at"], fill_mode=r["fill_mode"]) for r in rows]
+        return [
+            VirtualFill(
+                id=row["id"],
+                order_id=row["order_id"],
+                strategy_name=row["strategy_name"],
+                code=row["code"],
+                side=row["side"],
+                quantity=row["quantity"],
+                price=row["price"],
+                filled_at=row["filled_at"],
+                fill_mode=row["fill_mode"],
+                commission=row["commission"],
+            )
+            for row in rows
+        ]
 
     def get_equity_curve(self, strategy_name: str = "default", limit: int = 200) -> list[dict]:
         with self._get_connection() as conn:
