@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -60,7 +60,7 @@ def _manager(tmp_path: Path) -> AlertManager:
             INSERT INTO trades_manual VALUES ('JP.7203', 'BUY', 1);
             """
         )
-    return AlertManager(_ConfigStub(database))
+    return AlertManager(cast(Any, _ConfigStub(database)))
 
 
 def test_candidate_alert_uses_target_date(tmp_path: Path) -> None:
