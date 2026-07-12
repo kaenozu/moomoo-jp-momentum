@@ -56,12 +56,17 @@ class RelativeStrengthCalculator:
         self.config = config
         self.db_path = Path(config.database_path)
 
-        # ベンチマークコード
-        rs_config = config.get("relative_strength", {})
+        # 現行設定を優先し、旧トップレベル設定も後方互換で受け入れる
+        legacy_config = config.get("relative_strength", {})
+        rs_config = config.get("signals.relative_strength", legacy_config)
         self.default_benchmark = rs_config.get(
-            "default_benchmark_for_screening", "JP.1306"
+            "benchmark_code",
+            rs_config.get("default_benchmark_for_screening", "JP.1306"),
         )
-        self.periods = rs_config.get("periods", [5, 20, 60])
+        self.periods = rs_config.get(
+            "periods",
+            legacy_config.get("periods", [5, 20, 60]),
+        )
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""
