@@ -101,6 +101,7 @@ def test_main_notifies_classified_failure(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(run_daily_cycle, "run_cycle", fail_cycle)
     monkeypatch.setattr(run_daily_cycle, "_notify_operational_failure", notify)
+    monkeypatch.setattr(run_daily_cycle, "configure_logging", lambda **_kwargs: None)
     monkeypatch.setattr(
         sys,
         "argv",
