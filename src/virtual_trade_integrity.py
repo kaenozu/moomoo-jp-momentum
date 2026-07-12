@@ -455,7 +455,20 @@ class VirtualTradeIntegrityChecker:
         ).fetchall()
         report.checked["position_rows"] = len(rows)
         if as_of_date is not None:
-            return
+            future_fill = connection.execute(
+                """
+                SELECT 1 FROM virtual_fills
+                WHERE strategy_name = ?
+                  AND COALESCE(substr(filled_at, 1, 10), '') > ?
+                LIMIT 1
+                """,
+                (strategy_name, as_of_date),
+            ).fetchone()
+            report.checked["position_comparison_skipped_future_fills"] = int(
+                future_fill is not None
+            )
+            if future_fill is not None:
+                return
         if not complete:
             self._add(
                 report,
