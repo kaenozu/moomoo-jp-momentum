@@ -98,7 +98,7 @@ def test_warning_range_is_reported_but_does_not_stop(tmp_path: Path) -> None:
     )
 
     assert statuses["JP.1306"].level == "warning"
-    assert statuses["JP.1306"].days_stale == 9
+    assert statuses["JP.1306"].days_stale == 7
 
 
 def test_empty_required_code_list_is_rejected(tmp_path: Path) -> None:
@@ -122,3 +122,34 @@ def test_daily_cycle_helper_checks_every_enabled_code(tmp_path: Path) -> None:
             ["JP.1306", "JP.7203"],
             "2026-07-10",
         )
+
+
+def test_holiday_gap_has_zero_missing_trading_days(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _insert_bar(config, "JP.1306", "2026-05-01")
+    guard = DataFreshnessGuard(config)
+
+    status = guard.check_freshness(
+        code="JP.1306",
+        reference_date="2026-05-06",
+        max_stale_days=0,
+    )
+
+    assert status.level == "ok"
+    assert status.days_stale == 0
+    assert "期待取引日2026-05-01" in status.message
+
+
+def test_missing_day_count_starts_after_golden_week(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _insert_bar(config, "JP.1306", "2026-05-01")
+    guard = DataFreshnessGuard(config)
+
+    status = guard.check_freshness(
+        code="JP.1306",
+        reference_date="2026-05-07",
+        max_stale_days=0,
+    )
+
+    assert status.level == "warning"
+    assert status.days_stale == 1

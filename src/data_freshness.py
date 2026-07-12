@@ -6,7 +6,7 @@
 なぜ存在するか: 古いデータで誤ったシグナル判定を行うことを防ぐため
 
 注意:
-    現在の鮮度判定は暦日ベースです。祝日・休場日を含む正確な営業日判定ではありません。
+    鮮度はチェックイン済みJPX営業日カレンダーの未取得取引日数で判定します。
 """
 
 import logging
@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
+from .market_calendar import (
+    JST,
+    count_missing_trading_days,
+    expected_trading_day_for_date,
+    latest_expected_trading_day,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,26 +115,45 @@ class DataFreshnessGuard:
         code: Optional[str],
         reference_date: Optional[str],
     ) -> FreshnessStatus:
-        """取得済みの最新日を鮮度ステータスへ変換する。"""
+        """Convert the latest stored date into a JPX-session freshness status."""
         code_label = f"{code}: " if code else ""
 
         try:
-            reference = (
-                datetime.strptime(reference_date, "%Y-%m-%d")
-                if reference_date
-                else datetime.now()
-            )
-        except ValueError:
+            if reference_date:
+                reference_calendar_date = datetime.strptime(
+                    reference_date,
+                    "%Y-%m-%d",
+                ).date()
+                reference_value: str | datetime = reference_date
+                expected_date = expected_trading_day_for_date(
+                    reference_calendar_date
+                )
+            else:
+                reference_now = datetime.now(JST)
+                reference_calendar_date = reference_now.date()
+                reference_value = reference_now
+                expected_date = latest_expected_trading_day(reference_now)
+        except ValueError as error:
             return FreshnessStatus(
                 is_fresh=False,
                 latest_date=latest_date,
                 days_stale=9999,
-                message=f"{code_label}基準日の日付形式エラー: {reference_date}",
+                message=f"{code_label}基準日または営業日カレンダーのエラー: {error}",
+                level="error",
+            )
+        except RuntimeError as error:
+            return FreshnessStatus(
+                is_fresh=False,
+                latest_date=latest_date,
+                days_stale=9999,
+                message=f"{code_label}営業日カレンダーの読み込みエラー: {error}",
                 level="error",
             )
 
         if latest_date is None:
-            reference_label = f"（基準日 {reference_date} 以前）" if reference_date else ""
+            reference_label = (
+                f"（基準日 {reference_date} 以前）" if reference_date else ""
+            )
             return FreshnessStatus(
                 is_fresh=False,
                 latest_date=None,
@@ -138,7 +163,7 @@ class DataFreshnessGuard:
             )
 
         try:
-            latest = datetime.strptime(latest_date, "%Y-%m-%d")
+            latest = datetime.strptime(latest_date, "%Y-%m-%d").date()
         except ValueError:
             return FreshnessStatus(
                 is_fresh=False,
@@ -148,19 +173,31 @@ class DataFreshnessGuard:
                 level="error",
             )
 
-        days_stale = (reference - latest).days
-        if days_stale < 0:
+        if latest > expected_date:
             return FreshnessStatus(
                 is_fresh=False,
                 latest_date=latest_date,
-                days_stale=days_stale,
+                days_stale=-1,
                 message=(
-                    f"{code_label}基準日より未来のデータです"
-                    f"（latest={latest_date}, reference={reference_date or 'now'}）"
+                    f"{code_label}期待取引日より未来のデータです"
+                    f"（latest={latest_date}, expected={expected_date.isoformat()}, "
+                    f"reference={reference_date or reference_calendar_date.isoformat()}）"
                 ),
                 level="error",
             )
 
+        try:
+            days_stale = count_missing_trading_days(latest, reference_value)
+        except (ValueError, RuntimeError) as error:
+            return FreshnessStatus(
+                is_fresh=False,
+                latest_date=latest_date,
+                days_stale=9999,
+                message=f"{code_label}営業日差を計算できません: {error}",
+                level="error",
+            )
+
+        expected_label = expected_date.isoformat()
         if days_stale <= max_stale_days:
             return FreshnessStatus(
                 is_fresh=True,
@@ -168,7 +205,8 @@ class DataFreshnessGuard:
                 days_stale=days_stale,
                 message=(
                     f"{code_label}データは最新です"
-                    f"（{latest_date}、暦日差{days_stale}日）"
+                    f"（{latest_date}、未取得営業日{days_stale}日、"
+                    f"期待取引日{expected_label}）"
                 ),
                 level="ok",
             )
@@ -179,8 +217,8 @@ class DataFreshnessGuard:
                 latest_date=latest_date,
                 days_stale=days_stale,
                 message=(
-                    f"{code_label}データが暦日で{days_stale}日分古いです"
-                    f"（{latest_date}）"
+                    f"{code_label}データが営業日で{days_stale}日分古いです"
+                    f"（{latest_date}、期待取引日{expected_label}）"
                 ),
                 level="warning",
             )
@@ -191,7 +229,7 @@ class DataFreshnessGuard:
                 latest_date=latest_date,
                 days_stale=days_stale,
                 message=(
-                    f"{code_label}データが暦日で{days_stale}日分古いです"
+                    f"{code_label}データが営業日で{days_stale}日分古いです"
                     f"（{latest_date}）。シグナル判定を停止します。"
                 ),
                 level="error",
@@ -202,8 +240,8 @@ class DataFreshnessGuard:
             latest_date=latest_date,
             days_stale=days_stale,
             message=(
-                f"{code_label}データが暦日で{days_stale}日分古いです"
-                f"（{latest_date}）。半年以上前のデータです。"
+                f"{code_label}データが営業日で{days_stale}日分古いです"
+                f"（{latest_date}）。180営業日以上前のデータです。"
             ),
             level="error",
         )
@@ -215,7 +253,7 @@ class DataFreshnessGuard:
         code: Optional[str] = None,
         reference_date: Optional[str] = None,
     ) -> FreshnessStatus:
-        """基準日以前のデータについて鮮度をチェックする（暦日ベース）。"""
+        """基準日以前のデータについてJPX営業日ベースで鮮度をチェックする。"""
         latest_date = self.get_latest_data_date(
             table_name,
             code,
@@ -325,7 +363,7 @@ class DataFreshnessGuard:
                 raise SystemError(
                     f"データが古すぎるため処理を停止します: {status.message}\n"
                     f"最新日付: {status.latest_date}\n"
-                    f"古い日数: {status.days_stale}日\n"
+                    f"未取得営業日: {status.days_stale}日\n"
                     f"強制実行する場合は --allow-stale オプションを使用してください"
                 )
             logger.warning("古いデータでも処理を続行します（--allow-stale）")

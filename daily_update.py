@@ -10,8 +10,8 @@ benchmark銘柄もデータ取得対象に含め、通常スクリーニング�
   auto    - 銘柄数に応じて自動選択（100超→history）
 
 注意:
-  - 土日は簡易判定するが、日本の祝日・休場日は考慮しない。
-  - 時刻比較はローカルタイム（JST前提）で行う。
+  - JPX公式休業日を含む固定カレンダーで取得要否を判定する。
+  - 対応年外は処理を止め、カレンダー更新を要求する。
 """
 
 import argparse
@@ -30,6 +30,7 @@ from src.config import load_config
 from src.connection import OpenDConnection
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe, add_relative_strength
+from src.market_calendar import JST, latest_expected_trading_day
 from src.quote_service import QuoteService, BATCH_SLEEP_SECONDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -45,22 +46,42 @@ def get_latest_bar_date(data_store: DataStore, code: str) -> str | None:
         return result[0] if result and result[0] else None
 
 
-def should_skip_fetch(data_store: DataStore, code: str, today: str) -> bool:
-    """Return True when the latest bar already covers today or the weekend.
+def should_skip_fetch(
+    data_store: DataStore,
+    code: str,
+    today: str,
+    reference_datetime: datetime | None = None,
+) -> bool:
+    """Return True when the latest bar covers the expected JPX session.
 
-    土日はdatetime.weekday()で判定するが、日本の祝日・休場日は非対応。
+    When ``reference_datetime`` is omitted, ``today`` is treated as end-of-day
+    JST. This keeps direct and test callers deterministic while the production
+    fetch path passes the actual current JST time.
     """
     latest_date = get_latest_bar_date(data_store, code)
     if latest_date is None:
         return False
-    if latest_date >= today:
-        return True
-    today_dt = datetime.strptime(today, "%Y-%m-%d")
-    if today_dt.weekday() == 5:
-        return latest_date >= (today_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-    if today_dt.weekday() == 6:
-        return latest_date >= (today_dt - timedelta(days=2)).strftime("%Y-%m-%d")
-    return False
+
+    if reference_datetime is None:
+        reference_datetime = datetime.strptime(today, "%Y-%m-%d").replace(
+            hour=23,
+            minute=59,
+            second=59,
+            tzinfo=JST,
+        )
+    normalized_reference = (
+        reference_datetime.replace(tzinfo=JST)
+        if reference_datetime.tzinfo is None
+        else reference_datetime.astimezone(JST)
+    )
+    if normalized_reference.strftime("%Y-%m-%d") != today:
+        raise ValueError(
+            "todayとreference_datetimeの日付が一致しません: "
+            f"today={today}, reference={normalized_reference.isoformat()}"
+        )
+
+    expected_date = latest_expected_trading_day(normalized_reference).isoformat()
+    return latest_date >= expected_date
 
 
 def fetch_and_save_daily_klines(
@@ -84,7 +105,8 @@ def fetch_and_save_daily_klines(
       latest  -> get_cur_kline + subscribe/unsubscribe
       auto    -> 100銘柄超でhistory、以下でlatest
     """
-    today = datetime.now().strftime("%Y-%m-%d")
+    reference_now = datetime.now(JST)
+    today = reference_now.strftime("%Y-%m-%d")
     effective_mode = mode
     if effective_mode == "auto":
         effective_mode = "history" if len(codes) > 100 else "latest"
@@ -101,7 +123,12 @@ def fetch_and_save_daily_klines(
     skip_codes: list[str] = []
     fetch_codes: list[str] = []
     for code in codes:
-        if not force and should_skip_fetch(data_store, code, today):
+        if not force and should_skip_fetch(
+            data_store,
+            code,
+            today,
+            reference_datetime=reference_now,
+        ):
             skip_codes.append(code)
         else:
             fetch_codes.append(code)
