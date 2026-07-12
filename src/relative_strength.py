@@ -99,10 +99,10 @@ class RelativeStrengthCalculator:
             )
             rows = cursor.fetchall()
 
-        if len(rows) < 2:
+        if len(rows) < days + 1:
             return None
 
-        # 最新の終値とdays前の終値を比較
+        # 最新の終値と正確にdays営業日前の終値を比較
         latest_close = rows[0]["close"]
         past_close = rows[-1]["close"]
 

@@ -79,11 +79,11 @@ class MomentumStrategy(BaseStrategy):
                 benchmark_returns.get("return_5d"),
             )
             result.return_20d_vs_benchmark = self._calc_vs_benchmark(
-                None,  # 20日リターンは別途計算が必要
+                indicators.return_20d,
                 benchmark_returns.get("return_20d"),
             )
             result.return_60d_vs_benchmark = self._calc_vs_benchmark(
-                None,
+                indicators.return_60d,
                 benchmark_returns.get("return_60d"),
             )
 

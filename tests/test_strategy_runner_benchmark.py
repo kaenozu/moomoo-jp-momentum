@@ -165,3 +165,48 @@ def test_empty_run_removes_stale_signals_for_target_date(tmp_path: Path) -> None
         ).fetchall()
 
     assert dates == [("2026-01-07",)]
+
+def test_benchmark_returns_require_full_period_history(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+
+    with sqlite3.connect(config.database_path) as connection:
+        connection.executemany(
+            "INSERT INTO daily_bars (code, date, close) VALUES (?, ?, ?)",
+            [
+                ("JP.1306", "2026-01-01", 100.0),
+                ("JP.1306", "2026-01-02", 102.0),
+                ("JP.1306", "2026-01-05", 104.0),
+                ("JP.1306", "2026-01-06", 106.0),
+                ("JP.1306", "2026-01-07", 108.0),
+                ("JP.1306", "2026-01-08", 110.0),
+            ],
+        )
+
+    returns = StrategyRunner(config)._benchmark_returns("2026-01-08")
+
+    assert returns["return_5d"] == pytest.approx(10.0)
+    assert returns["return_20d"] is None
+    assert returns["return_60d"] is None
+
+
+def test_momentum_uses_20d_and_60d_benchmark_returns(tmp_path: Path) -> None:
+    from src.strategies.momentum import MomentumStrategy
+
+    config = _config(tmp_path)
+    indicators = _indicator("JP.0001", return_5d=8.0)
+    indicators.return_20d = 15.0
+    indicators.return_60d = 30.0
+
+    result = MomentumStrategy(config).evaluate(
+        indicators,
+        {
+            "return_5d": 2.0,
+            "return_20d": 5.0,
+            "return_60d": 12.0,
+        },
+    )
+
+    assert result.return_5d_vs_benchmark == pytest.approx(6.0)
+    assert result.return_20d_vs_benchmark == pytest.approx(10.0)
+    assert result.return_60d_vs_benchmark == pytest.approx(18.0)
+

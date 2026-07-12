@@ -99,9 +99,9 @@ class ETFRotationStrategy(BaseStrategy):
         else:
             is_buy_candidate = False
 
-        # 条件4: ベンチマークを上回るリターン（2559比）
+        # 条件4: 設定ベンチマークを上回るリターン
         if result.return_5d_vs_benchmark is not None and result.return_5d_vs_benchmark > 0:
-            buy_reasons.append(f"2559比+{result.return_5d_vs_benchmark:.1f}%")
+            buy_reasons.append(f"ベンチマーク比+{result.return_5d_vs_benchmark:.1f}%")
         else:
             # ベンチマーク比が劣後しても、絶対リターンが良ければ候補にする
             pass

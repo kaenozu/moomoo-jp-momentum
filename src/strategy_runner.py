@@ -9,6 +9,7 @@
 
 import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -50,7 +51,7 @@ class StrategyRunner:
                 target_date,
                 period,
             )
-            for period in (5, 20, 60)
+            for period in self.relative_strength.periods
         }
 
     def run_all(
@@ -106,7 +107,7 @@ class StrategyRunner:
         """Replace one strategy's signals for the requested target date."""
         now = datetime.now().isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 "DELETE FROM signals WHERE strategy_name = ? AND date = ?",
                 (strategy_name, target_date),
