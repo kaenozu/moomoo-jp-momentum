@@ -15,6 +15,7 @@
 
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -91,7 +92,7 @@ class RelativeStrengthCalculator:
         Returns:
             float: リターン（%）
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             # 基準日より前のデータを取得
             cursor = conn.execute(
                 """
@@ -239,7 +240,7 @@ class RelativeStrengthCalculator:
         count = 0
         now = datetime.now().isoformat()
 
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             for code, rs in rs_data.items():
                 try:
                     conn.execute(
