@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
-from .migrations import migrate_virtual_orders_reserved_amount
+from .migrations import (
+    migrate_virtual_orders_pending_index,
+    migrate_virtual_orders_reserved_amount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,7 @@ class VirtualTradeManager:
 
         with self._get_connection() as conn:
             migrate_virtual_orders_reserved_amount(conn)
+            migrate_virtual_orders_pending_index(conn)
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)

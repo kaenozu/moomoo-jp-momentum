@@ -35,3 +35,40 @@ def migrate_virtual_orders_reserved_amount(conn: sqlite3.Connection) -> None:
           AND reserved_amount = 0
         """
     )
+
+
+def migrate_virtual_orders_pending_index(conn: sqlite3.Connection) -> None:
+    """Allow one pending order per strategy, symbol, side, and submission date.
+
+    Earlier schemas allowed only one pending order for a symbol and side across
+    the entire database. That made historical replay fail when a future-dated
+    pending order already existed, even though validation correctly ignored it.
+    """
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'virtual_orders'"
+    ).fetchone()
+    if table_exists is None:
+        return
+
+    index_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' "
+        "AND name = 'idx_virtual_orders_pending'"
+    ).fetchone()
+    index_sql = str(index_row[0] or "") if index_row else ""
+    if "substr(submitted_at, 1, 10)" in index_sql:
+        return
+
+    conn.execute("DROP INDEX IF EXISTS idx_virtual_orders_pending")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX idx_virtual_orders_pending
+        ON virtual_orders(
+            strategy_name,
+            code,
+            side,
+            substr(submitted_at, 1, 10)
+        )
+        WHERE status = 'PENDING'
+        """
+    )
+    logger.info("migration: scoped pending virtual-order uniqueness by date")

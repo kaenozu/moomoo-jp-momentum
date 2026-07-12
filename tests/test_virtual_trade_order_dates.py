@@ -226,3 +226,32 @@ def test_future_pending_sell_does_not_block_historical_fill(tmp_path: Path) -> N
 
     assert len(fills) == 1
     assert fills[0].order_id == order.id
+
+
+def test_manager_migrates_legacy_pending_index(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy_pending_index.db"
+    config = Config("tests/fixtures/config.test.yaml")
+    config._config["database"] = {"path": str(db_path)}
+    DataStore(config)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX idx_virtual_orders_pending")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX idx_virtual_orders_pending
+            ON virtual_orders(strategy_name, code, side)
+            WHERE status = 'PENDING'
+            """
+        )
+
+    VirtualTradeManager(config)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_virtual_orders_pending'"
+        ).fetchone()
+
+    assert row is not None
+    assert "substr(submitted_at, 1, 10)" in str(row[0])
+
