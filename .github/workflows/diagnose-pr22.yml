@@ -1,0 +1,33 @@
+name: diagnose-pr22
+
+on:
+  push:
+    branches:
+      - fix/daily-cycle-integrity-gate
+    paths:
+      - .github/workflows/diagnose-pr22.yml
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run focused tests
+        run: |
+          set +e
+          python -m pytest tests/test_daily_cycle_integrity.py tests/test_virtual_fill_commission_integrity.py -vv > "$RUNNER_TEMP/pytest.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/pytest.log"
+          exit $status
+      - name: Upload focused log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr22-focused-pytest
+          path: ${{ runner.temp }}/pytest.log
+          retention-days: 1
