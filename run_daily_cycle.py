@@ -34,6 +34,8 @@ from src.virtual_trade import VirtualTradeManager
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_HISTORY_LIMIT = 120
+
 
 def configure_logging(
     log_to_file: bool = True,
@@ -108,7 +110,7 @@ def _load_indicator_inputs(
     data_store: DataStore,
     codes: list[str],
     target_date: str,
-    history_limit: int = 120,
+    history_limit: int = DEFAULT_HISTORY_LIMIT,
 ) -> dict[str, pd.DataFrame]:
     """全対象銘柄の指標入力をDBから対象日以前に限定して読み込む。
 
@@ -190,7 +192,7 @@ def run_cycle(
                 logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
                 dataframe = quote_service.get_daily_klines_with_fallback(
                     code,
-                    num=120,
+                    num=DEFAULT_HISTORY_LIMIT,
                     start="2025-01-01",
                 )
                 if not dataframe.empty:
@@ -215,7 +217,7 @@ def run_cycle(
             data_store,
             codes,
             target_date,
-            history_limit=120,
+            history_limit=DEFAULT_HISTORY_LIMIT,
         )
         results["indicator_input_symbols"] = len(data_dict)
 
