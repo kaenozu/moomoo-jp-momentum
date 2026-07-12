@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,8 @@ class BackupSettings:
     directory: Path = Path("backups")
     retain_daily: int = 7
     retain_weekly: int = 4
+    retain_pre_cycle: int = 7
+    retain_post_cycle: int = 7
     verify_after_backup: bool = True
 
     @classmethod
@@ -51,6 +54,14 @@ class BackupSettings:
             raise BackupError("database_backup.directoryは空でない文字列で指定してください")
         retain_daily = _non_negative_int(raw.get("retain_daily", 7), "retain_daily")
         retain_weekly = _non_negative_int(raw.get("retain_weekly", 4), "retain_weekly")
+        retain_pre_cycle = _non_negative_int(
+            raw.get("retain_pre_cycle", retain_daily),
+            "retain_pre_cycle",
+        )
+        retain_post_cycle = _non_negative_int(
+            raw.get("retain_post_cycle", retain_daily),
+            "retain_post_cycle",
+        )
         enabled = raw.get("enabled", False)
         verify = raw.get("verify_after_backup", True)
         if not isinstance(enabled, bool):
@@ -62,6 +73,8 @@ class BackupSettings:
             directory=Path(directory),
             retain_daily=retain_daily,
             retain_weekly=retain_weekly,
+            retain_pre_cycle=retain_pre_cycle,
+            retain_post_cycle=retain_post_cycle,
             verify_after_backup=verify,
         )
 
@@ -122,11 +135,11 @@ def _read_only_uri(path: Path) -> str:
 
 
 def quick_check(path: Path) -> str:
-    """Run SQLite quick_check through a read-only connection."""
+    """Run SQLite quick_check through a read-only, explicitly closed connection."""
     if not path.is_file():
         raise BackupVerificationError(f"SQLiteファイルが見つかりません: {path}")
     try:
-        with sqlite3.connect(_read_only_uri(path), uri=True) as connection:
+        with closing(sqlite3.connect(_read_only_uri(path), uri=True)) as connection:
             rows = [
                 str(row[0])
                 for row in connection.execute("PRAGMA quick_check").fetchall()
@@ -165,7 +178,7 @@ def _latest_value(
 
 
 def _read_snapshot_metadata(path: Path) -> tuple[int, str | None, str | None]:
-    with sqlite3.connect(_read_only_uri(path), uri=True) as connection:
+    with closing(sqlite3.connect(_read_only_uri(path), uri=True)) as connection:
         schema_row = connection.execute("PRAGMA user_version").fetchone()
         schema_version = int(schema_row[0]) if schema_row else 0
         latest_fill = _latest_value(
@@ -225,8 +238,10 @@ class DatabaseBackupManager:
         )
         published_backup = False
         try:
-            with sqlite3.connect(_read_only_uri(self.source_path), uri=True) as source:
-                with sqlite3.connect(temp_backup) as destination:
+            with closing(
+                sqlite3.connect(_read_only_uri(self.source_path), uri=True)
+            ) as source:
+                with closing(sqlite3.connect(temp_backup)) as destination:
                     source.backup(destination, pages=256, sleep=0.05)
             if self.settings.verify_after_backup:
                 quick_check(temp_backup)
@@ -305,6 +320,8 @@ class DatabaseBackupManager:
         limits = {
             "daily": self.settings.retain_daily,
             "weekly": self.settings.retain_weekly,
+            "pre_cycle": self.settings.retain_pre_cycle,
+            "post_cycle": self.settings.retain_post_cycle,
         }
         for kind, limit in limits.items():
             candidates = sorted(
@@ -340,7 +357,11 @@ class DatabaseBackupManager:
         if destination_path.exists():
             raise BackupError(f"復元先が既に存在します: {destination_path}")
 
-        self.verify_backup(backup_path)
+        metadata = self.verify_backup(backup_path)
+        if metadata is None:
+            raise BackupVerificationError(
+                "復元にはSHA-256を含むバックアップメタデータが必要です"
+            )
 
         def run_integrity(candidate: Path) -> Any:
             from .virtual_trade_integrity import VirtualTradeIntegrityChecker
@@ -371,8 +392,10 @@ class DatabaseBackupManager:
             f".{destination_path.name}.{uuid.uuid4().hex}.tmp"
         )
         try:
-            with sqlite3.connect(_read_only_uri(backup_path), uri=True) as source:
-                with sqlite3.connect(temp_path) as destination:
+            with closing(
+                sqlite3.connect(_read_only_uri(backup_path), uri=True)
+            ) as source:
+                with closing(sqlite3.connect(temp_path)) as destination:
                     source.backup(destination, pages=256, sleep=0.05)
             check_result = quick_check(temp_path)
 
