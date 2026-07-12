@@ -20,6 +20,37 @@ from .models import CREATE_TABLES_SQL, DailyBar, Quote, Symbol
 
 logger = logging.getLogger(__name__)
 
+SymbolParams = tuple[
+    str,
+    str,
+    str,
+    str,
+    str,
+    int,
+    str | None,
+    str | None,
+    str | None,
+    int,
+]
+
+_SYMBOL_UPSERT_SQL = """
+    INSERT INTO symbols
+    (code, name, market, type, role, tradable, sector,
+     benchmark_group, notes, enabled, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(code) DO UPDATE SET
+        name = excluded.name,
+        market = excluded.market,
+        type = excluded.type,
+        role = excluded.role,
+        tradable = excluded.tradable,
+        sector = excluded.sector,
+        benchmark_group = excluded.benchmark_group,
+        notes = excluded.notes,
+        enabled = excluded.enabled,
+        updated_at = datetime('now', 'localtime')
+"""
+
 
 class DataStore:
     """SQLiteデータベース操作クラス"""
@@ -88,53 +119,122 @@ class DataStore:
 
     # === 銘柄リスト関連 ===
 
-    def load_symbols_from_json(self, json_path: str) -> int:
-        """
-        JSONファイルから銘柄リストを読み込んで保存する。
+    @staticmethod
+    def _read_symbol_params(json_path: str) -> list[SymbolParams]:
+        """watchlist全体を検証してからSQLパラメータへ変換する。"""
+        with open(json_path, encoding="utf-8") as file:
+            symbols_data = json.load(file)
 
-        benchmark銘柄も日足取得・相対強度計算に必要なため enabled=1 で保存する。
-        通常スクリーニングでは role=benchmark を別途除外する。
-        """
-        with open(json_path, encoding="utf-8") as f:
-            symbols_data = json.load(f)
+        if not isinstance(symbols_data, list):
+            raise ValueError("watchlist JSONのトップレベルはlistである必要があります")
+        if not symbols_data:
+            raise ValueError("watchlist JSONが空です。既存銘柄は変更しません")
 
-        params = []
-        for item in symbols_data:
+        params: list[SymbolParams] = []
+        seen_codes: set[str] = set()
+        for index, item in enumerate(symbols_data):
+            if not isinstance(item, dict):
+                raise ValueError(f"watchlist[{index}]はobjectである必要があります")
+
+            def required_text(field: str, default: str | None = None) -> str:
+                value = item.get(field, default)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"watchlist[{index}].{field}が不正です")
+                return value.strip()
+
+            def optional_text(field: str) -> str | None:
+                value = item.get(field)
+                if value is None:
+                    return None
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"watchlist[{index}].{field}は文字列またはnullで指定してください"
+                    )
+                return value
+
+            def boolean_flag(field: str, default: bool) -> int:
+                value = item.get(field, default)
+                if not isinstance(value, bool):
+                    raise ValueError(
+                        f"watchlist[{index}].{field}はbooleanで指定してください"
+                    )
+                return 1 if value else 0
+
+            code = required_text("code")
+            if code in seen_codes:
+                raise ValueError(f"watchlistに重複したcodeがあります: {code}")
+            seen_codes.add(code)
+
             params.append((
-                item["code"],
-                item["name"],
-                item.get("market", "JP"),
-                item.get("type", "stock"),
-                item.get("role", "trade_candidate"),
-                1 if item.get("tradable", True) else 0,
-                item.get("sector"),
-                item.get("benchmark_group"),
-                item.get("notes"),
-                1 if item.get("enabled", True) else 0,
+                code,
+                required_text("name"),
+                required_text("market", "JP"),
+                required_text("type", "stock"),
+                required_text("role", "trade_candidate"),
+                boolean_flag("tradable", True),
+                optional_text("sector"),
+                optional_text("benchmark_group"),
+                optional_text("notes"),
+                boolean_flag("enabled", True),
             ))
 
+        return params
+
+    @staticmethod
+    def _upsert_symbols(
+        conn: sqlite3.Connection,
+        params: list[SymbolParams],
+    ) -> None:
+        conn.executemany(_SYMBOL_UPSERT_SQL, params)
+
+    def load_symbols_from_json(self, json_path: str) -> int:
+        """JSONの銘柄を追加・更新し、未記載の既存銘柄は変更しない。"""
+        params = self._read_symbol_params(json_path)
         with self._get_connection() as conn:
-            conn.executemany(
-                """
-                INSERT OR REPLACE INTO symbols
-                (code, name, market, type, role, tradable, sector,
-                 benchmark_group, notes, enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-                """,
-                params,
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            self._upsert_symbols(conn, params)
 
         logger.info("銘柄リストを読み込みました: %s件", len(params))
         return len(params)
 
     def sync_symbols_from_json(self, json_path: str | None = None) -> int:
-        """
-        毎回実行用の同期処理。load_symbols_from_json と同じ。
-        日次更新・日次サイクル起動時に毎回呼び出して symbols.json の変更をDBに反映する。
+        """watchlistを権威データとしてsymbolsテーブルへ原子的に同期する。
+
+        JSONから削除された銘柄は履歴を残したままenabled=0にする。再追加時は
+        JSONのenabled値で更新する。入力検証に失敗した場合はDBを変更しない。
         """
         if json_path is None:
             json_path = self.config.watchlist_file
-        return self.load_symbols_from_json(json_path)
+        params = self._read_symbol_params(json_path)
+
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "CREATE TEMP TABLE watchlist_sync_codes "
+                "(code TEXT PRIMARY KEY)"
+            )
+            conn.executemany(
+                "INSERT INTO watchlist_sync_codes(code) VALUES (?)",
+                [(row[0],) for row in params],
+            )
+            cursor = conn.execute(
+                """
+                UPDATE symbols
+                SET enabled = 0,
+                    updated_at = datetime('now', 'localtime')
+                WHERE enabled != 0
+                  AND code NOT IN (SELECT code FROM watchlist_sync_codes)
+                """
+            )
+            disabled_count = max(cursor.rowcount, 0)
+            self._upsert_symbols(conn, params)
+
+        logger.info(
+            "銘柄リストを同期しました: input=%d, disabled_missing=%d",
+            len(params),
+            disabled_count,
+        )
+        return len(params)
 
     def get_enabled_symbols(self, include_benchmarks: bool = False) -> list[Symbol]:
         """有効な銘柄リストを取得する。"""

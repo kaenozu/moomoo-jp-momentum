@@ -8,6 +8,7 @@
     "src/benchmark.py",
     "src/connection.py",
     "src/data_freshness.py",
+    "src/data_store.py",
     "src/migrations.py",
     "src/models.py",
     "src/performance.py",
@@ -33,6 +34,7 @@
     "tests/test_scoring_weights.py",
     "tests/test_strategy_compare.py",
     "tests/test_strategy_runner_benchmark.py",
+    "tests/test_symbol_sync.py",
     "tests/test_virtual_integration.py",
     "tests/test_virtual_report.py",
     "tests/test_virtual_trade_reservations.py"
