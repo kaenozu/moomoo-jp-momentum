@@ -685,16 +685,16 @@ class VirtualTradeManager:
         with self._get_connection() as conn:
             return self._get_cash_with_conn(conn, strategy_name, as_of_date)
 
-    def _get_cash_with_conn(
+    def _snapshot_cash_with_conn(
         self,
         conn: sqlite3.Connection,
         strategy_name: str,
         as_of_date: str | None = None,
-    ) -> float:
+    ) -> tuple[float, str | None]:
         if as_of_date:
             row = conn.execute(
                 """
-                SELECT cash FROM virtual_equity_curve
+                SELECT date, cash FROM virtual_equity_curve
                 WHERE strategy_name = ? AND date <= ?
                 ORDER BY date DESC LIMIT 1
                 """,
@@ -703,15 +703,306 @@ class VirtualTradeManager:
         else:
             row = conn.execute(
                 """
-                SELECT cash FROM virtual_equity_curve
+                SELECT date, cash FROM virtual_equity_curve
                 WHERE strategy_name = ?
                 ORDER BY date DESC LIMIT 1
                 """,
                 (strategy_name,),
             ).fetchone()
         if row and row["cash"] is not None:
-            return float(row["cash"])
-        return self.initial_cash
+            return float(row["cash"]), str(row["date"])
+        return self.initial_cash, None
+
+    def _replay_cash_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+        exclude_order_id: int | None = None,
+    ) -> tuple[float, bool]:
+        if as_of_date:
+            rows = conn.execute(
+                """
+                SELECT order_id, side, quantity, price, filled_at
+                FROM virtual_fills
+                WHERE strategy_name = ?
+                  AND COALESCE(substr(filled_at, 1, 10), '') <= ?
+                  AND (? IS NULL OR order_id <> ?)
+                ORDER BY COALESCE(filled_at, ''), id
+                """,
+                (
+                    strategy_name,
+                    as_of_date,
+                    exclude_order_id,
+                    exclude_order_id,
+                ),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT order_id, side, quantity, price, filled_at
+                FROM virtual_fills
+                WHERE strategy_name = ?
+                  AND (? IS NULL OR order_id <> ?)
+                ORDER BY COALESCE(filled_at, ''), id
+                """,
+                (strategy_name, exclude_order_id, exclude_order_id),
+            ).fetchall()
+
+        cash = self.initial_cash
+        complete = True
+        for row in rows:
+            delta, valid = self._cash_delta_from_fill_row(row)
+            if not valid:
+                complete = False
+                continue
+            cash += delta
+        return cash, complete
+
+    def _cash_delta_from_fill_row(
+        self,
+        row: sqlite3.Row,
+    ) -> tuple[float, bool]:
+        if (
+            row["side"] is None
+            or row["quantity"] is None
+            or row["price"] is None
+            or not row["filled_at"]
+        ):
+            return 0.0, False
+        try:
+            side = str(row["side"])
+            quantity = int(row["quantity"])
+            price = float(row["price"])
+        except (TypeError, ValueError):
+            return 0.0, False
+        if quantity <= 0 or price < 0:
+            return 0.0, False
+        gross = price * quantity
+        if side == "BUY":
+            return -(gross + self.commission), True
+        if side == "SELL":
+            return gross - self.commission, True
+        return 0.0, False
+
+    def _cash_history_matches_replay(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        replayed_cash: float,
+        exclude_order_id: int | None = None,
+    ) -> bool:
+        latest_fill = conn.execute(
+            """
+            SELECT MAX(substr(filled_at, 1, 10)) AS latest_date
+            FROM virtual_fills
+            WHERE strategy_name = ?
+              AND (? IS NULL OR order_id <> ?)
+            """,
+            (strategy_name, exclude_order_id, exclude_order_id),
+        ).fetchone()
+        latest_fill_date = (
+            str(latest_fill["latest_date"])
+            if latest_fill and latest_fill["latest_date"]
+            else None
+        )
+        snapshot_cash, snapshot_date = self._snapshot_cash_with_conn(
+            conn,
+            strategy_name,
+        )
+        if snapshot_date is None or latest_fill_date is None:
+            return True
+        expected_cash = replayed_cash
+        if snapshot_date < latest_fill_date:
+            expected_cash, snapshot_complete = self._replay_cash_with_conn(
+                conn,
+                strategy_name,
+                snapshot_date,
+                exclude_order_id,
+            )
+            if not snapshot_complete:
+                return False
+        return abs(snapshot_cash - expected_cash) <= 0.01
+
+    def _get_cash_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+    ) -> float:
+        if self._has_fill_history_with_conn(conn, strategy_name):
+            current_cash, current_complete = self._replay_cash_with_conn(
+                conn,
+                strategy_name,
+            )
+            if current_complete and self._cash_history_matches_replay(
+                conn,
+                strategy_name,
+                current_cash,
+            ):
+                replayed_cash, replay_complete = self._replay_cash_with_conn(
+                    conn,
+                    strategy_name,
+                    as_of_date,
+                )
+                if replay_complete:
+                    return replayed_cash
+            logger.warning(
+                "仮想cash履歴とequityスナップショットの整合性を確認できないため"
+                "保存済みcashへフォールバックします: strategy=%s, date=%s",
+                strategy_name,
+                as_of_date,
+            )
+        snapshot_cash, _ = self._snapshot_cash_with_conn(
+            conn,
+            strategy_name,
+            as_of_date,
+        )
+        return snapshot_cash
+
+    def _recalculate_equity_returns_from_date(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        start_date: str,
+    ) -> None:
+        rows = conn.execute(
+            """
+            SELECT date, total_equity, benchmark_return
+            FROM virtual_equity_curve
+            WHERE strategy_name = ?
+            ORDER BY date
+            """,
+            (strategy_name,),
+        ).fetchall()
+        previous_equity: float | None = None
+        updates: list[tuple[float, float | None, str, str]] = []
+        for row in rows:
+            total_equity = float(row["total_equity"] or 0.0)
+            if str(row["date"]) >= start_date:
+                daily_return = (
+                    (total_equity - previous_equity) / previous_equity * 100
+                    if previous_equity
+                    else 0.0
+                )
+                benchmark_return = (
+                    float(row["benchmark_return"])
+                    if row["benchmark_return"] is not None
+                    else None
+                )
+                excess_return = (
+                    daily_return - benchmark_return
+                    if benchmark_return is not None
+                    else None
+                )
+                updates.append(
+                    (daily_return, excess_return, strategy_name, str(row["date"]))
+                )
+            previous_equity = total_equity
+        if updates:
+            conn.executemany(
+                """
+                UPDATE virtual_equity_curve
+                SET daily_return = ?, excess_return = ?
+                WHERE strategy_name = ? AND date = ?
+                """,
+                updates,
+            )
+
+    def _rebuild_equity_curve_from_fills(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        start_date: str,
+        exclude_order_id: int | None = None,
+    ) -> bool:
+        previous_cash, previous_complete = self._replay_cash_with_conn(
+            conn,
+            strategy_name,
+            exclude_order_id=exclude_order_id,
+        )
+        if not previous_complete or not self._cash_history_matches_replay(
+            conn,
+            strategy_name,
+            previous_cash,
+            exclude_order_id,
+        ):
+            return False
+
+        rows = conn.execute(
+            """
+            SELECT date FROM virtual_equity_curve
+            WHERE strategy_name = ? AND date >= ?
+            ORDER BY date
+            """,
+            (strategy_name, start_date),
+        ).fetchall()
+        dates = sorted({start_date, *(str(row["date"]) for row in rows)})
+        fills = conn.execute(
+            """
+            SELECT side, quantity, price, filled_at
+            FROM virtual_fills
+            WHERE strategy_name = ?
+            ORDER BY COALESCE(filled_at, ''), id
+            """,
+            (strategy_name,),
+        ).fetchall()
+
+        rebuilt: list[tuple[str, float]] = []
+        cash = self.initial_cash
+        fill_index = 0
+        for target_date in dates:
+            while fill_index < len(fills):
+                fill_row = fills[fill_index]
+                filled_at = fill_row["filled_at"]
+                if not filled_at:
+                    return False
+                fill_date = str(filled_at)[:10]
+                if fill_date > target_date:
+                    break
+                delta, valid = self._cash_delta_from_fill_row(fill_row)
+                if not valid:
+                    return False
+                cash += delta
+                fill_index += 1
+            rebuilt.append((target_date, cash))
+
+        now = datetime.now().isoformat()
+        for target_date, cash in rebuilt:
+            position_value = self._position_value_with_conn(
+                conn,
+                strategy_name,
+                target_date,
+            )
+            total_equity = cash + position_value
+            conn.execute(
+                """
+                INSERT INTO virtual_equity_curve
+                (strategy_name, date, cash, position_value, total_equity,
+                 benchmark_code, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(strategy_name, date) DO UPDATE SET
+                    cash = excluded.cash,
+                    position_value = excluded.position_value,
+                    total_equity = excluded.total_equity,
+                    created_at = excluded.created_at
+                """,
+                (
+                    strategy_name,
+                    target_date,
+                    cash,
+                    position_value,
+                    total_equity,
+                    self.default_benchmark,
+                    now,
+                ),
+            )
+        self._recalculate_equity_returns_from_date(
+            conn,
+            strategy_name,
+            start_date,
+        )
+        return True
 
     def _position_value_with_conn(
         self,
@@ -756,8 +1047,18 @@ class VirtualTradeManager:
             (strategy_name, target_date, new_cash, position_value, total_equity, self.default_benchmark, now),
         )
 
-    def _apply_cash_delta(self, conn: sqlite3.Connection, strategy_name: str, target_date: str, delta: float) -> None:
-        current_cash = self._get_cash_with_conn(conn, strategy_name, target_date)
+    def _apply_cash_delta(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        target_date: str,
+        delta: float,
+    ) -> None:
+        current_cash, _ = self._snapshot_cash_with_conn(
+            conn,
+            strategy_name,
+            target_date,
+        )
         self._set_cash(conn, strategy_name, target_date, current_cash + delta)
 
     def get_positions(
@@ -1154,30 +1455,43 @@ class VirtualTradeManager:
         fill: VirtualFill,
     ) -> None:
         gross = fill.price * fill.quantity
-        if (
-            self._fill_requires_cache_rebuild(
-                conn,
-                order.strategy_name,
-                fill,
-            )
-            and self._rebuild_position_cache_from_fills(
+        requires_rebuild = self._fill_requires_cache_rebuild(
+            conn,
+            order.strategy_name,
+            fill,
+        )
+        if requires_rebuild:
+            positions_rebuilt = self._rebuild_position_cache_from_fills(
                 conn,
                 order.strategy_name,
                 exclude_order_id=order.id,
             )
-        ):
-            delta = (
-                -(gross + self.commission)
-                if order.side == "BUY"
-                else gross - self.commission
-            )
-            self._apply_cash_delta(
+            if positions_rebuilt and self._rebuild_equity_curve_from_fills(
                 conn,
                 order.strategy_name,
-                fill.filled_at,
-                delta,
-            )
-            return
+                fill.filled_at[:10],
+                exclude_order_id=order.id,
+            ):
+                return
+            if positions_rebuilt:
+                logger.warning(
+                    "過去日fillのcash履歴を安全に再構築できないため"
+                    "対象日の増分更新へフォールバックします: strategy=%s, date=%s",
+                    order.strategy_name,
+                    fill.filled_at,
+                )
+                delta = (
+                    -(gross + self.commission)
+                    if order.side == "BUY"
+                    else gross - self.commission
+                )
+                self._apply_cash_delta(
+                    conn,
+                    order.strategy_name,
+                    fill.filled_at,
+                    delta,
+                )
+                return
 
         # Legacy/imported opening positions may not have matching BUY fills.
         # Preserve the existing incremental behavior for those databases.
