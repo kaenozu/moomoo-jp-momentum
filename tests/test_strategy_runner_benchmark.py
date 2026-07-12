@@ -106,14 +106,16 @@ def test_run_all_does_not_infer_benchmark_from_first_candidate(
 ) -> None:
     config = _config(tmp_path)
     runner = StrategyRunner(config)
-    expected = {
+    expected: dict[str, Optional[float]] = {
         "return_5d": 2.5,
         "return_20d": 4.0,
         "return_60d": 8.0,
     }
     requested_dates: list[str] = []
 
-    def fake_benchmark_returns(target_date: str) -> dict[str, Optional[float]]:
+    def fake_benchmark_returns(
+        target_date: str,
+    ) -> dict[str, Optional[float]]:
         requested_dates.append(target_date)
         return expected
 
