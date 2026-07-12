@@ -56,6 +56,14 @@ class VirtualPosition:
 
 
 @dataclass
+class _PositionReplayState:
+    quantity: int = 0
+    avg_cost: float = 0.0
+    realized_pl: float = 0.0
+    last_price: float = 0.0
+
+
+@dataclass
 class VirtualFill:
     """仮想約定"""
     id: Optional[int] = None
@@ -124,6 +132,322 @@ class VirtualTradeManager:
                 (code,),
             ).fetchone()
         return float(row["close"]) if row and row["close"] is not None else None
+
+
+    def _latest_closes_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        target_date: str | None = None,
+    ) -> dict[str, float]:
+        if target_date:
+            rows = conn.execute(
+                """
+                SELECT code, close
+                FROM (
+                    SELECT code, close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY code ORDER BY date DESC
+                           ) AS row_number
+                    FROM daily_bars
+                    WHERE date <= ?
+                )
+                WHERE row_number = 1
+                  AND close IS NOT NULL
+                """,
+                (target_date,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT code, close
+                FROM (
+                    SELECT code, close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY code ORDER BY date DESC
+                           ) AS row_number
+                    FROM daily_bars
+                )
+                WHERE row_number = 1
+                  AND close IS NOT NULL
+                """
+            ).fetchall()
+        return {str(row["code"]): float(row["close"]) for row in rows}
+
+
+    def _snapshot_position_cache_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+    ) -> dict[str, VirtualPosition]:
+        rows = conn.execute(
+            """
+            SELECT * FROM virtual_positions
+            WHERE strategy_name = ?
+            ORDER BY code
+            """,
+            (strategy_name,),
+        ).fetchall()
+        return {str(row["code"]): self._row_to_position(row) for row in rows}
+
+    def _snapshot_positions_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+    ) -> dict[str, VirtualPosition]:
+        return {
+            code: position
+            for code, position in self._snapshot_position_cache_with_conn(
+                conn,
+                strategy_name,
+            ).items()
+            if position.quantity > 0
+        }
+
+    def _position_cache_matches_replay(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        replayed: dict[str, VirtualPosition],
+    ) -> bool:
+        cached = self._snapshot_position_cache_with_conn(conn, strategy_name)
+        if not cached:
+            return True
+        if set(cached) != set(replayed):
+            return False
+        for code, cached_position in cached.items():
+            replayed_position = replayed[code]
+            if cached_position.quantity != replayed_position.quantity:
+                return False
+            if abs(cached_position.avg_cost - replayed_position.avg_cost) > 1e-6:
+                return False
+            if abs(cached_position.realized_pl - replayed_position.realized_pl) > 1e-6:
+                return False
+        return True
+
+    def _has_fill_history_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+    ) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM virtual_fills WHERE strategy_name = ? LIMIT 1",
+            (strategy_name,),
+        ).fetchone()
+        return row is not None
+
+    def _replay_positions_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+        exclude_order_id: int | None = None,
+    ) -> tuple[dict[str, VirtualPosition], bool]:
+        """Replay fills in chronological order and return positions plus completeness.
+
+        ``complete`` is false when a SELL exceeds the quantity reconstructed from
+        earlier fills. That indicates a legacy/imported opening position which
+        cannot be dated from fill history alone.
+        """
+        if as_of_date:
+            rows = conn.execute(
+                """
+                SELECT id, order_id, code, side, quantity, price, filled_at
+                FROM virtual_fills
+                WHERE strategy_name = ?
+                  AND COALESCE(substr(filled_at, 1, 10), '') <= ?
+                  AND (? IS NULL OR order_id <> ?)
+                ORDER BY COALESCE(filled_at, ''), id
+                """,
+                (
+                    strategy_name,
+                    as_of_date,
+                    exclude_order_id,
+                    exclude_order_id,
+                ),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, order_id, code, side, quantity, price, filled_at
+                FROM virtual_fills
+                WHERE strategy_name = ?
+                  AND (? IS NULL OR order_id <> ?)
+                ORDER BY COALESCE(filled_at, ''), id
+                """,
+                (strategy_name, exclude_order_id, exclude_order_id),
+            ).fetchall()
+
+        states: dict[str, _PositionReplayState] = {}
+        complete = True
+        for row in rows:
+            code = str(row["code"])
+            side = str(row["side"])
+            quantity = int(row["quantity"])
+            price = float(row["price"])
+            state = states.setdefault(code, _PositionReplayState())
+
+            if side == "BUY":
+                new_quantity = state.quantity + quantity
+                if new_quantity <= 0:
+                    complete = False
+                    continue
+                state.avg_cost = (
+                    state.avg_cost * state.quantity + price * quantity
+                ) / new_quantity
+                state.quantity = new_quantity
+                state.last_price = price
+                continue
+
+            if side == "SELL":
+                if quantity > state.quantity:
+                    complete = False
+                    continue
+                state.quantity -= quantity
+                state.realized_pl += (
+                    (price - state.avg_cost) * quantity - self.commission
+                )
+                state.last_price = price
+                continue
+
+            complete = False
+
+        latest_closes = self._latest_closes_with_conn(conn, as_of_date)
+        positions: dict[str, VirtualPosition] = {}
+        for code, state in states.items():
+            market_price = (
+                latest_closes.get(code)
+                or state.last_price
+                or state.avg_cost
+            )
+            market_value = market_price * state.quantity
+            unrealized_pl = (
+                (market_price - state.avg_cost) * state.quantity
+                if state.quantity > 0
+                else 0.0
+            )
+            positions[code] = VirtualPosition(
+                strategy_name=strategy_name,
+                code=code,
+                quantity=state.quantity,
+                avg_cost=state.avg_cost,
+                market_price=market_price,
+                market_value=market_value,
+                unrealized_pl=unrealized_pl,
+                realized_pl=state.realized_pl,
+            )
+        return positions, complete
+
+    def _positions_for_reference_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        reference_date: str | None,
+    ) -> dict[str, VirtualPosition]:
+        if reference_date and self._has_fill_history_with_conn(conn, strategy_name):
+            current_replayed, current_complete = self._replay_positions_with_conn(
+                conn,
+                strategy_name,
+            )
+            cache_complete = (
+                current_complete
+                and self._position_cache_matches_replay(
+                    conn,
+                    strategy_name,
+                    current_replayed,
+                )
+            )
+            if cache_complete:
+                replayed, complete = self._replay_positions_with_conn(
+                    conn,
+                    strategy_name,
+                    reference_date,
+                )
+                if complete:
+                    return {
+                        code: position
+                        for code, position in replayed.items()
+                        if position.quantity > 0
+                    }
+            logger.warning(
+                "仮想ポジション履歴と現在キャッシュの整合性を確認できないため"
+                "現在スナップショットへフォールバックします: strategy=%s, date=%s",
+                strategy_name,
+                reference_date,
+            )
+        return self._snapshot_positions_with_conn(conn, strategy_name)
+
+    def _fill_requires_cache_rebuild(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        fill: VirtualFill,
+    ) -> bool:
+        row = conn.execute(
+            """
+            SELECT MAX(COALESCE(filled_at, ''))
+            FROM virtual_fills
+            WHERE strategy_name = ?
+              AND (? IS NULL OR order_id <> ?)
+            """,
+            (strategy_name, fill.order_id, fill.order_id),
+        ).fetchone()
+        previous_latest = str(row[0]) if row and row[0] else None
+        return previous_latest is not None and fill.filled_at < previous_latest
+
+    def _rebuild_position_cache_from_fills(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        exclude_order_id: int | None = None,
+    ) -> bool:
+        """Rebuild the cache only when existing state is fully fill-derived."""
+        if not self._has_fill_history_with_conn(conn, strategy_name):
+            return False
+        previous_replayed, previous_complete = self._replay_positions_with_conn(
+            conn,
+            strategy_name,
+            exclude_order_id=exclude_order_id,
+        )
+        if not previous_complete or not self._position_cache_matches_replay(
+            conn,
+            strategy_name,
+            previous_replayed,
+        ):
+            return False
+
+        replayed, complete = self._replay_positions_with_conn(conn, strategy_name)
+        if not complete:
+            return False
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "DELETE FROM virtual_positions WHERE strategy_name = ?",
+            (strategy_name,),
+        )
+        if replayed:
+            conn.executemany(
+                """
+                INSERT INTO virtual_positions
+                (strategy_name, code, quantity, avg_cost, market_price,
+                 market_value, unrealized_pl, realized_pl, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        strategy_name,
+                        position.code,
+                        position.quantity,
+                        position.avg_cost,
+                        position.market_price,
+                        position.market_value,
+                        position.unrealized_pl,
+                        position.realized_pl,
+                        now,
+                    )
+                    for position in replayed.values()
+                ],
+            )
+        return True
 
     def _symbol_universe_status(self, conn: sqlite3.Connection, code: str) -> tuple[bool, str]:
         row = conn.execute(
@@ -274,19 +598,13 @@ class VirtualTradeManager:
         if required_reservation > available_cash:
             return False, "仮想cashが不足しています（予約バッファ・pending BUYを控除済み）"
 
-        position_rows = conn.execute(
-            """
-            SELECT code, quantity
-            FROM virtual_positions
-            WHERE strategy_name = ? AND quantity > 0
-            """,
-            (strategy_name,),
-        ).fetchall()
-        position_codes = {row["code"] for row in position_rows}
-        current_quantity = next(
-            (int(row["quantity"]) for row in position_rows if row["code"] == code),
-            0,
+        positions = self._positions_for_reference_with_conn(
+            conn,
+            strategy_name,
+            reference_date,
         )
+        position_codes = set(positions)
+        current_quantity = positions.get(code, VirtualPosition()).quantity
         if current_quantity >= self.max_position_per_symbol:
             return False, "同一銘柄の保有上限に達しています"
 
@@ -326,14 +644,13 @@ class VirtualTradeManager:
         reference_date: str | None = None,
         exclude_order_id: int | None = None,
     ) -> tuple[bool, str]:
-        position = conn.execute(
-            """
-            SELECT quantity FROM virtual_positions
-            WHERE strategy_name = ? AND code = ?
-            """,
-            (strategy_name, code),
-        ).fetchone()
-        if not position or int(position["quantity"]) < quantity:
+        positions = self._positions_for_reference_with_conn(
+            conn,
+            strategy_name,
+            reference_date,
+        )
+        position = positions.get(code)
+        if position is None or position.quantity < quantity:
             return False, "売却可能な仮想ポジションが不足しています"
 
         pending = conn.execute(
@@ -396,16 +713,21 @@ class VirtualTradeManager:
             return float(row["cash"])
         return self.initial_cash
 
-    def _position_value_with_conn(self, conn: sqlite3.Connection, strategy_name: str) -> float:
-        rows = conn.execute(
-            """
-            SELECT quantity, avg_cost, market_price
-            FROM virtual_positions
-            WHERE strategy_name = ? AND quantity > 0
-            """,
-            (strategy_name,),
-        ).fetchall()
-        return sum((float(r["market_price"] or r["avg_cost"]) * int(r["quantity"])) for r in rows)
+    def _position_value_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        target_date: str | None = None,
+    ) -> float:
+        positions = self._positions_for_reference_with_conn(
+            conn,
+            strategy_name,
+            target_date,
+        )
+        return sum(
+            float(position.market_value or 0.0)
+            for position in positions.values()
+        )
 
     def _set_cash(
         self,
@@ -414,7 +736,9 @@ class VirtualTradeManager:
         target_date: str,
         new_cash: float,
     ) -> None:
-        position_value = self._position_value_with_conn(conn, strategy_name)
+        position_value = self._position_value_with_conn(
+            conn, strategy_name, target_date
+        )
         total_equity = new_cash + position_value
         now = datetime.now().isoformat()
         conn.execute(
@@ -436,17 +760,18 @@ class VirtualTradeManager:
         current_cash = self._get_cash_with_conn(conn, strategy_name, target_date)
         self._set_cash(conn, strategy_name, target_date, current_cash + delta)
 
-    def get_positions(self, strategy_name: str = "default") -> list[VirtualPosition]:
+    def get_positions(
+        self,
+        strategy_name: str = "default",
+        as_of_date: str | None = None,
+    ) -> list[VirtualPosition]:
         with self._get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM virtual_positions
-                WHERE strategy_name = ? AND quantity > 0
-                ORDER BY code
-                """,
-                (strategy_name,),
-            ).fetchall()
-        return [self._row_to_position(row) for row in rows]
+            positions = self._positions_for_reference_with_conn(
+                conn,
+                strategy_name,
+                as_of_date,
+            )
+        return [positions[code] for code in sorted(positions)]
 
     def _row_to_position(self, row: sqlite3.Row) -> VirtualPosition:
         return VirtualPosition(
@@ -822,7 +1147,40 @@ class VirtualTradeManager:
                 return float(order.limit_price), bar["date"], "limit_high_touch"
         return None, "", ""
 
-    def _update_position_and_cash(self, conn: sqlite3.Connection, order: VirtualOrder, fill: VirtualFill) -> None:
+    def _update_position_and_cash(
+        self,
+        conn: sqlite3.Connection,
+        order: VirtualOrder,
+        fill: VirtualFill,
+    ) -> None:
+        gross = fill.price * fill.quantity
+        if (
+            self._fill_requires_cache_rebuild(
+                conn,
+                order.strategy_name,
+                fill,
+            )
+            and self._rebuild_position_cache_from_fills(
+                conn,
+                order.strategy_name,
+                exclude_order_id=order.id,
+            )
+        ):
+            delta = (
+                -(gross + self.commission)
+                if order.side == "BUY"
+                else gross - self.commission
+            )
+            self._apply_cash_delta(
+                conn,
+                order.strategy_name,
+                fill.filled_at,
+                delta,
+            )
+            return
+
+        # Legacy/imported opening positions may not have matching BUY fills.
+        # Preserve the existing incremental behavior for those databases.
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pos = conn.execute(
             """
@@ -832,11 +1190,12 @@ class VirtualTradeManager:
             (order.strategy_name, order.code),
         ).fetchone()
 
-        gross = fill.price * fill.quantity
         if order.side == "BUY":
             if pos:
                 new_quantity = int(pos["quantity"]) + fill.quantity
-                new_avg_cost = (float(pos["avg_cost"]) * int(pos["quantity"]) + gross) / new_quantity
+                new_avg_cost = (
+                    float(pos["avg_cost"]) * int(pos["quantity"]) + gross
+                ) / new_quantity
                 conn.execute(
                     """
                     UPDATE virtual_positions
@@ -844,7 +1203,15 @@ class VirtualTradeManager:
                         unrealized_pl = ?, updated_at = ?
                     WHERE id = ?
                     """,
-                    (new_quantity, new_avg_cost, fill.price, fill.price * new_quantity, (fill.price - new_avg_cost) * new_quantity, now, pos["id"]),
+                    (
+                        new_quantity,
+                        new_avg_cost,
+                        fill.price,
+                        fill.price * new_quantity,
+                        (fill.price - new_avg_cost) * new_quantity,
+                        now,
+                        pos["id"],
+                    ),
                 )
             else:
                 conn.execute(
@@ -854,17 +1221,37 @@ class VirtualTradeManager:
                      unrealized_pl, realized_pl, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
                     """,
-                    (order.strategy_name, order.code, fill.quantity, fill.price, fill.price, gross, now),
+                    (
+                        order.strategy_name,
+                        order.code,
+                        fill.quantity,
+                        fill.price,
+                        fill.price,
+                        gross,
+                        now,
+                    ),
                 )
-            self._apply_cash_delta(conn, order.strategy_name, fill.filled_at, -(gross + self.commission))
+            self._apply_cash_delta(
+                conn,
+                order.strategy_name,
+                fill.filled_at,
+                -(gross + self.commission),
+            )
 
         elif order.side == "SELL" and pos:
             current_qty = int(pos["quantity"])
             sell_qty = min(fill.quantity, current_qty)
             new_quantity = current_qty - sell_qty
-            realized_pl = (fill.price - float(pos["avg_cost"])) * sell_qty - self.commission
+            realized_pl = (
+                (fill.price - float(pos["avg_cost"])) * sell_qty
+                - self.commission
+            )
             market_value = fill.price * new_quantity
-            unrealized_pl = (fill.price - float(pos["avg_cost"])) * new_quantity if new_quantity > 0 else 0
+            unrealized_pl = (
+                (fill.price - float(pos["avg_cost"])) * new_quantity
+                if new_quantity > 0
+                else 0
+            )
             conn.execute(
                 """
                 UPDATE virtual_positions
@@ -872,9 +1259,22 @@ class VirtualTradeManager:
                     realized_pl = COALESCE(realized_pl, 0) + ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (new_quantity, fill.price, market_value, unrealized_pl, realized_pl, now, pos["id"]),
+                (
+                    new_quantity,
+                    fill.price,
+                    market_value,
+                    unrealized_pl,
+                    realized_pl,
+                    now,
+                    pos["id"],
+                ),
             )
-            self._apply_cash_delta(conn, order.strategy_name, fill.filled_at, gross - self.commission)
+            self._apply_cash_delta(
+                conn,
+                order.strategy_name,
+                fill.filled_at,
+                gross - self.commission,
+            )
 
     def get_strategy_performance(self, strategy_name: str = "default") -> dict:
         cash = self.get_cash(strategy_name)
@@ -936,7 +1336,7 @@ class VirtualTradeManager:
         if target_date is None:
             target_date = datetime.now().strftime("%Y-%m-%d")
         exit_orders: list[VirtualOrder] = []
-        for pos in self.get_positions(strategy_name):
+        for pos in self.get_positions(strategy_name, as_of_date=target_date):
             with self._get_connection() as conn:
                 current_price = self._latest_close(conn, pos.code, target_date)
                 if current_price is None:
@@ -987,7 +1387,9 @@ class VirtualTradeManager:
 
         with self._get_connection() as conn:
             cash = self._get_cash_with_conn(conn, strategy_name, target_date)
-            position_value = self._position_value_with_conn(conn, strategy_name)
+            position_value = self._position_value_with_conn(
+                conn, strategy_name, target_date
+            )
             total_equity = cash + position_value
             prev = conn.execute(
                 """
