@@ -15,6 +15,7 @@
 
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -56,12 +57,17 @@ class RelativeStrengthCalculator:
         self.config = config
         self.db_path = Path(config.database_path)
 
-        # ベンチマークコード
-        rs_config = config.get("relative_strength", {})
+        # 現行設定を優先し、旧トップレベル設定も後方互換で受け入れる
+        legacy_config = config.get("relative_strength", {})
+        rs_config = config.get("signals.relative_strength", legacy_config)
         self.default_benchmark = rs_config.get(
-            "default_benchmark_for_screening", "JP.1306"
+            "benchmark_code",
+            rs_config.get("default_benchmark_for_screening", "JP.1306"),
         )
-        self.periods = rs_config.get("periods", [5, 20, 60])
+        self.periods = rs_config.get(
+            "periods",
+            legacy_config.get("periods", [5, 20, 60]),
+        )
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""
@@ -86,7 +92,7 @@ class RelativeStrengthCalculator:
         Returns:
             float: リターン（%）
         """
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn:
             # 基準日より前のデータを取得
             cursor = conn.execute(
                 """
@@ -99,10 +105,10 @@ class RelativeStrengthCalculator:
             )
             rows = cursor.fetchall()
 
-        if len(rows) < 2:
+        if len(rows) < days + 1:
             return None
 
-        # 最新の終値とdays前の終値を比較
+        # 最新の終値と正確にdays営業日前の終値を比較
         latest_close = rows[0]["close"]
         past_close = rows[-1]["close"]
 
@@ -234,7 +240,7 @@ class RelativeStrengthCalculator:
         count = 0
         now = datetime.now().isoformat()
 
-        with self._get_connection() as conn:
+        with closing(self._get_connection()) as conn, conn:
             for code, rs in rs_data.items():
                 try:
                     conn.execute(
