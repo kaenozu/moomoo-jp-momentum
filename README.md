@@ -179,7 +179,6 @@ python virtual_order.py --performance
 streamlit run app.py
 ```
 
-
 ## 運用上の安全策
 
 - `run_daily_cycle.py` はJPX休場日にはOpenDやSQLiteへ接続せず正常スキップします。
@@ -197,3 +196,38 @@ alerts:
 ```
 
 運用異常通知はSQLiteへ依存せず、OpenD接続失敗、データ鮮度停止、仮想取引整合性停止、想定外例外、scheduler timeoutを通知対象にします。
+
+## SQLiteバックアップと復元検証
+
+バックアップはDBファイルの単純コピーではなく、SQLite Online Backup APIで一貫したスナップショットを作成します。作成前の元DBと作成後のスナップショットに `PRAGMA quick_check` を実行し、SHA-256、スキーマバージョン、最新仮想約定日、最新equity日をJSONメタデータへ保存します。
+
+```yaml
+database_backup:
+  enabled: false
+  directory: backups
+  retain_daily: 7
+  retain_weekly: 4
+  verify_after_backup: true
+```
+
+明示的なバックアップ、検証、世代整理は次のCLIで実行します。
+
+```bash
+python database_backup.py --config config.yaml backup --kind daily
+python database_backup.py --config config.yaml backup --kind weekly
+python database_backup.py --config config.yaml verify backups/<backup>.sqlite3
+python database_backup.py --config config.yaml prune --dry-run
+python database_backup.py --config config.yaml prune
+```
+
+復元は自動実行しません。稼働中DBと異なる未使用パスを指定し、`quick_check`と仮想取引integrity checkerに成功した場合だけ復元ファイルを公開します。検証後の本番DB切り替えは人間が行います。
+
+```bash
+python database_backup.py --config config.yaml restore \
+  backups/<backup>.sqlite3 data/recovery/moomoo-restored.db \
+  --strategy momentum --dry-run
+
+python database_backup.py --config config.yaml restore \
+  backups/<backup>.sqlite3 data/recovery/moomoo-restored.db \
+  --strategy momentum
+```

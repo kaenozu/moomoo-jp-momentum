@@ -4,12 +4,14 @@
     "daily_update.py",
     "screen_candidates.py",
     "scheduler.py",
+    "database_backup.py",
     "src/backtest_runner.py",
     "src/benchmark.py",
     "src/connection.py",
     "src/data_freshness.py",
     "src/market_calendar.py",
     "src/data_store.py",
+    "src/database_backup.py",
     "src/migrations.py",
     "src/models.py",
     "src/performance.py",
@@ -51,7 +53,8 @@
     "src/operational_notifier.py",
     "tests/test_daily_cycle_operational_guards.py",
     "tests/test_operational_notifier.py",
-    "tests/test_alert_target_date.py"
+    "tests/test_alert_target_date.py",
+    "tests/test_database_backup.py"
   ],
   "exclude": [
     ".venv",

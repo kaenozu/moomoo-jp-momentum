@@ -33,7 +33,7 @@ jobs:
         run: >-
           ruff check src/ tests/ run_daily_cycle.py daily_update.py
           historical_backtest.py screen_candidates.py scheduler.py
-          performance_report.py --output-format=github
+          performance_report.py database_backup.py --output-format=github
 
       - name: Run pyright
         run: |
