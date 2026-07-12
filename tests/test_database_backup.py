@@ -115,6 +115,16 @@ def test_corrupt_backup_detected(tmp_path: Path) -> None:
         manager.verify_backup(corrupt)
 
 
+def test_zero_retention_is_rejected(tmp_path: Path) -> None:
+    database_path = tmp_path / "source.db"
+    create_db(database_path).close()
+
+    with pytest.raises(BackupError, match="1以上"):
+        DatabaseBackupManager(
+            StubConfig(database_path, tmp_path / "backups", daily=0)
+        )
+
+
 def test_prune_only_managed_generations(tmp_path: Path) -> None:
     database_path = tmp_path / "source.db"
     create_db(database_path).close()
