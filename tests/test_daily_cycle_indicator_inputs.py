@@ -76,6 +76,34 @@ def test_loads_every_required_symbol_from_database(tmp_path: Path) -> None:
     }
 
 
+def test_loads_all_symbols_with_one_sqlite_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store(tmp_path)
+    dates = [f"2026-07-{day:02d}" for day in range(1, 6)]
+    _insert_bars(store, "JP.1306", dates, 100.0)
+    _insert_bars(store, "JP.7203", dates, 200.0)
+    original_get_connection = store._get_connection
+    connection_calls = 0
+
+    def counted_get_connection() -> sqlite3.Connection:
+        nonlocal connection_calls
+        connection_calls += 1
+        return original_get_connection()
+
+    monkeypatch.setattr(store, "_get_connection", counted_get_connection)
+
+    inputs = _load_indicator_inputs(
+        store,
+        ["JP.1306", "JP.7203"],
+        target_date="2026-07-05",
+    )
+
+    assert set(inputs) == {"JP.1306", "JP.7203"}
+    assert connection_calls == 1
+
+
 def test_excludes_rows_after_target_date(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _insert_bars(
