@@ -38,8 +38,8 @@ class StubConfig:
             "virtual_trade": {"initial_cash": 100000, "commission": 0},
         }
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._values.get(key, default)
+    def get(self, key_path: str, default: Any = None) -> Any:
+        return self._values.get(key_path, default)
 
 
 def create_db(path: Path, *, wal: bool = False) -> sqlite3.Connection:
