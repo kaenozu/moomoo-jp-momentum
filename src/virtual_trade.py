@@ -293,9 +293,16 @@ class VirtualTradeManager:
             WHERE strategy_name = ?
               AND side = 'BUY'
               AND status = 'PENDING'
+              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
               AND (? IS NULL OR id <> ?)
             """,
-            (strategy_name, exclude_order_id, exclude_order_id),
+            (
+                strategy_name,
+                reference_date,
+                reference_date,
+                exclude_order_id,
+                exclude_order_id,
+            ),
         ).fetchall()
         pending_codes = {row["code"] for row in pending_rows}
         if code in pending_codes:
@@ -312,6 +319,7 @@ class VirtualTradeManager:
         strategy_name: str,
         code: str,
         quantity: int,
+        reference_date: str | None = None,
         exclude_order_id: int | None = None,
     ) -> tuple[bool, str]:
         position = conn.execute(
@@ -331,10 +339,18 @@ class VirtualTradeManager:
               AND code = ?
               AND side = 'SELL'
               AND status = 'PENDING'
+              AND (? IS NULL OR substr(submitted_at, 1, 10) <= ?)
               AND (? IS NULL OR id <> ?)
             LIMIT 1
             """,
-            (strategy_name, code, exclude_order_id, exclude_order_id),
+            (
+                strategy_name,
+                code,
+                reference_date,
+                reference_date,
+                exclude_order_id,
+                exclude_order_id,
+            ),
         ).fetchone()
         if pending:
             return False, "同一銘柄の未約定SELL注文が既に存在します"
@@ -525,6 +541,7 @@ class VirtualTradeManager:
                     strategy_name,
                     code,
                     quantity,
+                    reference_date=reference_date,
                 )
             if not ok:
                 logger.warning("仮想注文拒否: %s %s - %s", code, side, reason)
@@ -643,6 +660,7 @@ class VirtualTradeManager:
                     order.strategy_name,
                     order.code,
                     order.quantity,
+                    reference_date=target_date,
                     exclude_order_id=order.id,
                 )
                 if not ok:
@@ -923,9 +941,10 @@ class VirtualTradeManager:
                     """
                     SELECT 1 FROM virtual_orders
                     WHERE strategy_name = ? AND code = ? AND side = 'SELL' AND status = 'PENDING'
+                      AND substr(submitted_at, 1, 10) <= ?
                     LIMIT 1
                     """,
-                    (strategy_name, pos.code),
+                    (strategy_name, pos.code, target_date),
                 ).fetchone()
                 if already_pending:
                     continue

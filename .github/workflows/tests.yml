@@ -5,36 +5,6 @@ on:
   pull_request:
 
 jobs:
-  apply-order-date-patch:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.head_ref == 'fix/virtual-orders-as-of-date' &&
-      github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: fix/virtual-orders-as-of-date
-          fetch-depth: 0
-
-      - name: Apply focused changes
-        run: python scripts/apply_order_date_patch.py
-
-      - name: Restore workflow and commit patch
-        run: |
-          git fetch origin master
-          git checkout origin/master -- .github/workflows/tests.yml
-          rm -f .agent-tree-probe
-          rm -f .github/workflows/agent-apply-order-date-patch.yml
-          rm -f scripts/apply_order_date_patch.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix: isolate virtual order validation by date"
-          git push origin HEAD:fix/virtual-orders-as-of-date
-
   test:
     runs-on: ubuntu-latest
     steps:
