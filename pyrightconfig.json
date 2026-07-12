@@ -40,6 +40,7 @@
     "tests/test_virtual_integration.py",
     "tests/test_virtual_report.py",
     "tests/test_virtual_trade_order_dates.py",
+    "tests/test_virtual_trade_position_history.py",
     "tests/test_virtual_trade_reservations.py"
   ],
   "exclude": [
