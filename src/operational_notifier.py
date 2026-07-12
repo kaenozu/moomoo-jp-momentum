@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 import requests
-
-from .config import Config
 
 logger = logging.getLogger(__name__)
 
 
-def _read_bool(config: Config, key: str, default: bool) -> bool:
+class ConfigLike(Protocol):
+    """Minimum configuration interface required by the notifier."""
+
+    def get(self, key: str, default: Any = None) -> Any: ...
+
+
+def _read_bool(config: ConfigLike, key: str, default: bool) -> bool:
     value = config.get(key, default)
     if not isinstance(value, bool):
         raise ValueError(f"{key}はtrue/falseで指定してください: {value!r}")
@@ -28,7 +32,7 @@ def _read_bool(config: Config, key: str, default: bool) -> bool:
 class OperationalNotifier:
     """Send operational failures through the existing webhook endpoint."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: ConfigLike):
         self.enabled = _read_bool(config, "alerts.operational.enabled", False)
         self.webhook_enabled = _read_bool(config, "alerts.webhook.enabled", False)
         self.webhook_url = str(config.get("alerts.webhook.url", "") or "").strip()
@@ -68,16 +72,16 @@ class OperationalNotifier:
             sort_keys=True,
             default=str,
         )
+        text = "\n".join(
+            (
+                f"[OPERATIONAL_FAILURE] {event_type}",
+                f"対象日: {target_date or 'N/A'}",
+                f"メッセージ: {message}",
+                f"コンテキスト: {context_text}",
+            )
+        )
         payload = {
-            "text": (
-                f"[OPERATIONAL_FAILURE] {event_type}
-"
-                f"対象日: {target_date or 'N/A'}
-"
-                f"メッセージ: {message}
-"
-                f"コンテキスト: {context_text}"
-            ),
+            "text": text,
             "event_type": event_type,
             "target_date": target_date,
             "message": message,
