@@ -79,6 +79,16 @@ def test_operational_notifier_transport_error_is_best_effort(
     assert OperationalNotifier(_enabled_config()).send_failure("x", "y") is False
 
 
+def test_operational_notifier_request_setup_error_is_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_args: Any, **_kwargs: Any) -> None:
+        raise ValueError("invalid URL")
+
+    monkeypatch.setattr("src.operational_notifier.requests.post", fail)
+    assert OperationalNotifier(_enabled_config()).send_failure("x", "y") is False
+
+
 def test_scheduler_timeout_notifies_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
 
