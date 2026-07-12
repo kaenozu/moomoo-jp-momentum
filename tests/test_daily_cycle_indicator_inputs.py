@@ -1,5 +1,6 @@
 """Regression coverage for canonical DB-backed daily-cycle indicator inputs."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -8,19 +9,17 @@ from run_daily_cycle import _load_indicator_inputs
 from src.config import Config
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch
-from src.models import DailyBar, Symbol
+from src.models import DailyBar
 
 
 def _store(tmp_path: Path) -> DataStore:
     config = Config("tests/fixtures/config.test.yaml")
     config._config["database"] = {"path": str(tmp_path / "cycle.db")}
-    store = DataStore(config)
-    store.save_symbol = None  # type: ignore[attr-defined]
-    return store
+    return DataStore(config)
 
 
 def _insert_symbol(store: DataStore, code: str) -> None:
-    with store._get_connection() as connection:
+    with sqlite3.connect(store.db_path) as connection:
         connection.execute(
             """
             INSERT INTO symbols
