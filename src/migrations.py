@@ -73,3 +73,23 @@ def migrate_virtual_orders_pending_index(conn: sqlite3.Connection) -> None:
         """
     )
     logger.info("migration: scoped pending virtual-order uniqueness by date")
+
+
+def migrate_virtual_fills_commission(conn: sqlite3.Connection) -> None:
+    """Add per-fill commission without guessing values for legacy rows.
+
+    Existing rows remain NULL because their actual historical commission cannot
+    be derived safely from the current configuration.
+    """
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'virtual_fills'"
+    ).fetchone()
+    if table_exists is None:
+        return
+
+    columns = conn.execute("PRAGMA table_info(virtual_fills)").fetchall()
+    if any(column[1] == "commission" for column in columns):
+        return
+
+    conn.execute("ALTER TABLE virtual_fills ADD COLUMN commission REAL")
+    logger.info("migration: added nullable virtual_fills.commission")

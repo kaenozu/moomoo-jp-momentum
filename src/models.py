@@ -263,6 +263,7 @@ CREATE TABLE IF NOT EXISTS virtual_fills (
     price REAL NOT NULL,
     filled_at TEXT NOT NULL,
     fill_mode TEXT,
+    commission REAL,
     created_at TEXT
 );
 
