@@ -8,6 +8,8 @@
 """
 
 import logging
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional
 
@@ -17,10 +19,20 @@ from .signals import SignalResult
 
 logger = logging.getLogger(__name__)
 
+_BASE_COMPONENT_MAXIMA = {
+    "trend": 30.0,
+    "volume": 20.0,
+    "relative_strength": 25.0,
+    "liquidity": 15.0,
+    "high_20d": 10.0,
+    "risk_warning": -30.0,
+}
+
 
 @dataclass
 class ScoreBreakdown:
-    """スコア内訳"""
+    """スコア内訳。各値は設定済み最大配点へ換算済み。"""
+
     trend: float = 0.0
     volume: float = 0.0
     relative_strength: float = 0.0
@@ -31,41 +43,113 @@ class ScoreBreakdown:
 
 
 class Scorer:
-    """スコアリングクラス"""
+    """スコアリングクラス。判定ロジックと最大配点を分離する。"""
 
     def __init__(self, config: Config):
         self.config = config
         scoring_config = config.get("scoring", {})
-        self.enable_risk_penalty = scoring_config.get("enable_risk_penalty", True)
+        if not isinstance(scoring_config, Mapping):
+            raise ValueError("scoring はmappingで指定してください")
+
+        self.enable_risk_penalty = bool(
+            scoring_config.get("enable_risk_penalty", True)
+        )
+        configured_weights = scoring_config.get("weights", {})
+        if configured_weights is None:
+            configured_weights = {}
+        if not isinstance(configured_weights, Mapping):
+            raise ValueError("scoring.weights はmappingで指定してください")
+
+        self.weights = {
+            "trend": self._read_weight(configured_weights, "trend"),
+            "volume": self._read_weight(configured_weights, "volume"),
+            "relative_strength": self._read_weight(
+                configured_weights,
+                "relative_strength",
+            ),
+            "liquidity": self._read_weight(configured_weights, "liquidity"),
+            "high_20d": self._read_weight(configured_weights, "high_20d"),
+            "risk_warning": self._read_weight(
+                configured_weights,
+                "risk_warning",
+                penalty=True,
+            ),
+        }
 
         screening_config = config.get("screening", {})
         self.min_turnover = screening_config.get("min_turnover", 1_000_000_000)
         self.risk_daily_return_threshold = screening_config.get(
-            "risk_daily_return_threshold", 8.0
+            "risk_daily_return_threshold",
+            8.0,
         )
         self.risk_return_5d_threshold = screening_config.get(
-            "risk_return_5d_threshold", 15.0
+            "risk_return_5d_threshold",
+            15.0,
         )
         self.risk_volume_ratio_threshold = screening_config.get(
-            "risk_volume_ratio_threshold", 5.0
+            "risk_volume_ratio_threshold",
+            5.0,
         )
 
+    @staticmethod
+    def _read_weight(
+        configured_weights: Mapping,
+        key: str,
+        penalty: bool = False,
+    ) -> float:
+        """設定値を検証する。加点は0以上、減点は0以下のみ許可する。"""
+        default = _BASE_COMPONENT_MAXIMA[key]
+        value = configured_weights.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"scoring.weights.{key} は数値で指定してください")
+
+        weight = float(value)
+        if not math.isfinite(weight):
+            raise ValueError(f"scoring.weights.{key} は有限値で指定してください")
+        if penalty and weight > 0:
+            raise ValueError(f"scoring.weights.{key} は0以下で指定してください")
+        if not penalty and weight < 0:
+            raise ValueError(f"scoring.weights.{key} は0以上で指定してください")
+        return weight
+
+    @staticmethod
+    def _scale_component(raw_score: float, key: str, configured_weight: float) -> float:
+        """従来の生点を設定済み最大配点へ比例変換する。"""
+        base_maximum = _BASE_COMPONENT_MAXIMA[key]
+        if base_maximum == 0:
+            return 0.0
+        return raw_score / base_maximum * configured_weight
+
     def score_trend(self, indicators: StockIndicators) -> float:
-        """トレンドスコア（最大30点）"""
+        """トレンド生点（最大30点）。"""
         score = 0.0
 
-        if indicators.ma5 is not None and indicators.close is not None and indicators.close > indicators.ma5:
+        if (
+            indicators.ma5 is not None
+            and indicators.close is not None
+            and indicators.close > indicators.ma5
+        ):
             score += 10.0
-        if indicators.ma25 is not None and indicators.close is not None and indicators.close > indicators.ma25:
+        if (
+            indicators.ma25 is not None
+            and indicators.close is not None
+            and indicators.close > indicators.ma25
+        ):
             score += 10.0
-        if indicators.ma5 is not None and indicators.ma25 is not None and indicators.ma5 > indicators.ma25:
+        if (
+            indicators.ma5 is not None
+            and indicators.ma25 is not None
+            and indicators.ma5 > indicators.ma25
+        ):
             score += 10.0
 
         return score
 
     def score_volume(self, indicators: StockIndicators) -> float:
-        """出来高スコア（最大20点）
-        クロスセクションのパーセンタイル加点と絶対値加点のハイブリッド。"""
+        """出来高生点（最大20点）。
+
+        クロスセクションのパーセンタイル加点と絶対値加点のハイブリッド。
+        """
         score = 0.0
         ratio = indicators.volume_ratio
         pct = indicators.volume_ratio_percentile
@@ -73,7 +157,6 @@ class Scorer:
         if ratio is None:
             return score
 
-        # 絶対値加点（従来）
         if ratio >= 1.2:
             score += 4.0
         if ratio >= 1.5:
@@ -81,7 +164,6 @@ class Scorer:
         if ratio >= 2.0:
             score += 3.0
 
-        # クロスセクション相対加点
         if pct is not None:
             if pct >= 80:
                 score += 10.0
@@ -93,10 +175,13 @@ class Scorer:
         return max(0.0, min(20.0, score))
 
     def score_relative_strength(self, indicators: StockIndicators) -> float:
-        """相対強度スコア（最大25点）。ベンチマーク比較ベース。"""
+        """相対強度生点（最大25点）。ベンチマーク比較ベース。"""
         score = 0.0
-        # 相対強度を優先、なければ5日リターンで代替
-        ret = indicators.return_5d_vs_benchmark if indicators.return_5d_vs_benchmark is not None else indicators.return_5d
+        ret = (
+            indicators.return_5d_vs_benchmark
+            if indicators.return_5d_vs_benchmark is not None
+            else indicators.return_5d
+        )
 
         if ret is None:
             return score
@@ -111,7 +196,7 @@ class Scorer:
         return min(score, 25.0)
 
     def score_liquidity(self, indicators: StockIndicators) -> float:
-        """流動性スコア（最大15点）"""
+        """流動性生点（最大15点）。"""
         score = 0.0
         turnover = indicators.turnover
 
@@ -129,7 +214,7 @@ class Scorer:
         return min(score, 15.0)
 
     def score_high_20d(self, indicators: StockIndicators) -> float:
-        """20日高値圏スコア（最大10点）"""
+        """20日高値圏生点（最大10点）。"""
         score = 0.0
         distance = indicators.high_20d_distance
 
@@ -144,17 +229,26 @@ class Scorer:
         return min(score, 10.0)
 
     def calculate_risk_penalty(self, indicators: StockIndicators) -> float:
-        """リスク減点を計算する（最大-30点）"""
+        """リスク減点の生点を計算する（最大-30点）。"""
         if not self.enable_risk_penalty:
             return 0.0
 
         penalty = 0.0
 
-        if indicators.daily_return is not None and indicators.daily_return >= self.risk_daily_return_threshold:
+        if (
+            indicators.daily_return is not None
+            and indicators.daily_return >= self.risk_daily_return_threshold
+        ):
             penalty -= 10.0
-        if indicators.return_5d is not None and indicators.return_5d >= self.risk_return_5d_threshold:
+        if (
+            indicators.return_5d is not None
+            and indicators.return_5d >= self.risk_return_5d_threshold
+        ):
             penalty -= 10.0
-        if indicators.volume_ratio is not None and indicators.volume_ratio >= self.risk_volume_ratio_threshold:
+        if (
+            indicators.volume_ratio is not None
+            and indicators.volume_ratio >= self.risk_volume_ratio_threshold
+        ):
             penalty -= 10.0
 
         return max(penalty, -30.0)
@@ -164,16 +258,40 @@ class Scorer:
         indicators: StockIndicators,
         signal: Optional[SignalResult] = None,
     ) -> ScoreBreakdown:
-        """スコアを計算する"""
+        """生点を計算し、設定済み最大配点へ換算する。"""
         if indicators.ma25 is None or indicators.close is None:
             return ScoreBreakdown(total=0.0)
 
-        trend = self.score_trend(indicators)
-        volume = self.score_volume(indicators)
-        relative_strength = self.score_relative_strength(indicators)
-        liquidity = self.score_liquidity(indicators)
-        high_20d = self.score_high_20d(indicators)
-        risk_penalty = self.calculate_risk_penalty(indicators)
+        trend = self._scale_component(
+            self.score_trend(indicators),
+            "trend",
+            self.weights["trend"],
+        )
+        volume = self._scale_component(
+            self.score_volume(indicators),
+            "volume",
+            self.weights["volume"],
+        )
+        relative_strength = self._scale_component(
+            self.score_relative_strength(indicators),
+            "relative_strength",
+            self.weights["relative_strength"],
+        )
+        liquidity = self._scale_component(
+            self.score_liquidity(indicators),
+            "liquidity",
+            self.weights["liquidity"],
+        )
+        high_20d = self._scale_component(
+            self.score_high_20d(indicators),
+            "high_20d",
+            self.weights["high_20d"],
+        )
+        risk_penalty = self._scale_component(
+            self.calculate_risk_penalty(indicators),
+            "risk_warning",
+            self.weights["risk_warning"],
+        )
 
         total = trend + volume + relative_strength + liquidity + high_20d + risk_penalty
         total = max(0.0, min(100.0, total))
@@ -194,10 +312,11 @@ def score_batch(
     signal_results: list[SignalResult],
     config: Config,
 ) -> list[tuple[StockIndicators, SignalResult, ScoreBreakdown]]:
-    """複数銘柄のスコアを一括計算する"""
+    """複数銘柄のスコアを一括計算する。"""
     if len(indicators_list) != len(signal_results):
         raise ValueError(
-            f"indicators_list ({len(indicators_list)}) と signal_results ({len(signal_results)}) の長さが一致しません"
+            f"indicators_list ({len(indicators_list)}) と "
+            f"signal_results ({len(signal_results)}) の長さが一致しません"
         )
 
     scorer = Scorer(config)
@@ -208,8 +327,12 @@ def score_batch(
         results.append((indicators, signal, score_breakdown))
 
     if results:
-        avg_score = sum(r[2].total for r in results) / len(results)
-        logger.info("スコアリング完了: %s銘柄 (平均スコア: %.1f)", len(results), avg_score)
+        avg_score = sum(result[2].total for result in results) / len(results)
+        logger.info(
+            "スコアリング完了: %s銘柄 (平均スコア: %.1f)",
+            len(results),
+            avg_score,
+        )
     else:
         logger.info("スコアリング完了: 0銘柄")
 
