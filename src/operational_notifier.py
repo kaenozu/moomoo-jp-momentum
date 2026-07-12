@@ -60,7 +60,7 @@ class OperationalNotifier:
         target_date: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> bool:
-        """Send a failure without raising on transport errors."""
+        """Send a failure without raising on transport or request setup errors."""
         if not self.active:
             logger.info("運用異常通知は無効です: event=%s", event_type)
             return False
@@ -94,7 +94,7 @@ class OperationalNotifier:
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
-        except requests.RequestException as error:
+        except Exception as error:
             logger.error(
                 "運用異常Webhook送信エラー: event=%s error=%s",
                 event_type,
