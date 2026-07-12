@@ -134,6 +134,46 @@ class VirtualTradeManager:
         return float(row["close"]) if row and row["close"] is not None else None
 
 
+    def _latest_closes_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        target_date: str | None = None,
+    ) -> dict[str, float]:
+        if target_date:
+            rows = conn.execute(
+                """
+                SELECT code, close
+                FROM (
+                    SELECT code, close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY code ORDER BY date DESC
+                           ) AS row_number
+                    FROM daily_bars
+                    WHERE date <= ?
+                )
+                WHERE row_number = 1
+                  AND close IS NOT NULL
+                """,
+                (target_date,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT code, close
+                FROM (
+                    SELECT code, close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY code ORDER BY date DESC
+                           ) AS row_number
+                    FROM daily_bars
+                )
+                WHERE row_number = 1
+                  AND close IS NOT NULL
+                """
+            ).fetchall()
+        return {str(row["code"]): float(row["close"]) for row in rows}
+
+
     def _snapshot_position_cache_with_conn(
         self,
         conn: sqlite3.Connection,
@@ -170,6 +210,8 @@ class VirtualTradeManager:
         replayed: dict[str, VirtualPosition],
     ) -> bool:
         cached = self._snapshot_position_cache_with_conn(conn, strategy_name)
+        if not cached:
+            return True
         if set(cached) != set(replayed):
             return False
         for code, cached_position in cached.items():
@@ -269,10 +311,11 @@ class VirtualTradeManager:
 
             complete = False
 
+        latest_closes = self._latest_closes_with_conn(conn, as_of_date)
         positions: dict[str, VirtualPosition] = {}
         for code, state in states.items():
             market_price = (
-                self._latest_close(conn, code, as_of_date)
+                latest_closes.get(code)
                 or state.last_price
                 or state.avg_cost
             )
@@ -333,6 +376,24 @@ class VirtualTradeManager:
             )
         return self._snapshot_positions_with_conn(conn, strategy_name)
 
+    def _fill_requires_cache_rebuild(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        fill: VirtualFill,
+    ) -> bool:
+        row = conn.execute(
+            """
+            SELECT MAX(COALESCE(filled_at, ''))
+            FROM virtual_fills
+            WHERE strategy_name = ?
+              AND (? IS NULL OR order_id <> ?)
+            """,
+            (strategy_name, fill.order_id, fill.order_id),
+        ).fetchone()
+        previous_latest = str(row[0]) if row and row[0] else None
+        return previous_latest is not None and fill.filled_at < previous_latest
+
     def _rebuild_position_cache_from_fills(
         self,
         conn: sqlite3.Connection,
@@ -363,25 +424,28 @@ class VirtualTradeManager:
             "DELETE FROM virtual_positions WHERE strategy_name = ?",
             (strategy_name,),
         )
-        for position in replayed.values():
-            conn.execute(
+        if replayed:
+            conn.executemany(
                 """
                 INSERT INTO virtual_positions
                 (strategy_name, code, quantity, avg_cost, market_price,
                  market_value, unrealized_pl, realized_pl, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    strategy_name,
-                    position.code,
-                    position.quantity,
-                    position.avg_cost,
-                    position.market_price,
-                    position.market_value,
-                    position.unrealized_pl,
-                    position.realized_pl,
-                    now,
-                ),
+                [
+                    (
+                        strategy_name,
+                        position.code,
+                        position.quantity,
+                        position.avg_cost,
+                        position.market_price,
+                        position.market_value,
+                        position.unrealized_pl,
+                        position.realized_pl,
+                        now,
+                    )
+                    for position in replayed.values()
+                ],
             )
         return True
 
@@ -1090,10 +1154,17 @@ class VirtualTradeManager:
         fill: VirtualFill,
     ) -> None:
         gross = fill.price * fill.quantity
-        if self._rebuild_position_cache_from_fills(
-            conn,
-            order.strategy_name,
-            exclude_order_id=order.id,
+        if (
+            self._fill_requires_cache_rebuild(
+                conn,
+                order.strategy_name,
+                fill,
+            )
+            and self._rebuild_position_cache_from_fills(
+                conn,
+                order.strategy_name,
+                exclude_order_id=order.id,
+            )
         ):
             delta = (
                 -(gross + self.commission)

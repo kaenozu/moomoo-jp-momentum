@@ -420,3 +420,35 @@ def test_mixed_snapshot_only_position_blocks_destructive_cache_rebuild(
     assert [(position.code, position.quantity) for position in historical_positions] == [
         ("JP.0002", 2)
     ]
+
+
+def test_chronological_fill_uses_incremental_cache_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _make_manager(tmp_path)
+    order = manager.place_order(
+        "default",
+        "JP.0001",
+        "BUY",
+        1,
+        submitted_at="2026-01-05",
+    )
+    assert order is not None
+
+    def fail_rebuild(*_args: object, **_kwargs: object) -> bool:
+        pytest.fail("chronological fills must not rebuild the full cache")
+
+    monkeypatch.setattr(
+        manager,
+        "_rebuild_position_cache_from_fills",
+        fail_rebuild,
+    )
+
+    fills = manager.process_fills("default", "2026-01-06")
+
+    assert len(fills) == 1
+    positions = manager.get_positions("default")
+    assert len(positions) == 1
+    assert positions[0].code == "JP.0001"
+    assert positions[0].quantity == 1
