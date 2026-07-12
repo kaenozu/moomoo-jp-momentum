@@ -423,10 +423,20 @@ def test_equity_rebuild_replays_cash_only_once(
     original = manager._replay_cash_with_conn
     calls = 0
 
-    def counted_replay(*args: object, **kwargs: object) -> tuple[float, bool]:
+    def counted_replay(
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+        exclude_order_id: int | None = None,
+    ) -> tuple[float, bool]:
         nonlocal calls
         calls += 1
-        return original(*args, **kwargs)
+        return original(
+            conn,
+            strategy_name,
+            as_of_date,
+            exclude_order_id,
+        )
 
     monkeypatch.setattr(manager, "_replay_cash_with_conn", counted_replay)
     with manager._get_connection() as conn:
