@@ -132,112 +132,113 @@ def run_cycle(
         return results
     quote_ctx = status.quote_context
 
-    results["database_write_attempted"] = True
-    data_store = DataStore(config)
-    data_store.sync_symbols_from_json(config.watchlist_file)
-    symbols = data_store.get_enabled_symbols(include_benchmarks=True)
-    codes = [symbol.code for symbol in symbols]
-    symbols_info = {symbol.code: symbol.name for symbol in symbols}
-    benchmark_codes = {
-        symbol.code for symbol in symbols if symbol.role == "benchmark"
-    }
-    results["symbols"] = len(codes)
+    try:
+        results["database_write_attempted"] = True
+        data_store = DataStore(config)
+        data_store.sync_symbols_from_json(config.watchlist_file)
+        symbols = data_store.get_enabled_symbols(include_benchmarks=True)
+        codes = [symbol.code for symbol in symbols]
+        symbols_info = {symbol.code: symbol.name for symbol in symbols}
+        benchmark_codes = {
+            symbol.code for symbol in symbols if symbol.role == "benchmark"
+        }
+        results["symbols"] = len(codes)
 
-    if quote_ctx:
-        quote_service = QuoteService(config, quote_ctx)
-        data_dict = {}
-        for index, code in enumerate(codes, 1):
-            logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
-            dataframe = quote_service.get_daily_klines_with_fallback(
-                code,
-                num=120,
-                start="2025-01-01",
+        if quote_ctx:
+            quote_service = QuoteService(config, quote_ctx)
+            data_dict = {}
+            for index, code in enumerate(codes, 1):
+                logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
+                dataframe = quote_service.get_daily_klines_with_fallback(
+                    code,
+                    num=120,
+                    start="2025-01-01",
+                )
+                if not dataframe.empty:
+                    data_store.save_dataframe_to_daily_bars(dataframe, code)
+                    data_dict[code] = dataframe
+            results["daily_bars"] = len(data_dict)
+        else:
+            data_dict = {}
+            results["daily_bars"] = 0
+
+        freshness_by_code = _assert_cycle_data_freshness(
+            config,
+            codes,
+            target_date,
+        )
+        results["fresh_symbols"] = sum(
+            1 for status in freshness_by_code.values() if status.is_fresh
+        )
+        results["freshness_warnings"] = sum(
+            1 for status in freshness_by_code.values() if status.level == "warning"
+        )
+
+        if data_dict:
+            indicators = calculate_indicators_batch(data_dict, symbols_info)
+            indicators_df = indicators_to_dataframe(indicators)
+            benchmark_code = config.get(
+                "signals.relative_strength.benchmark_code",
+                "JP.1306",
             )
-            if not dataframe.empty:
-                data_store.save_dataframe_to_daily_bars(dataframe, code)
-                data_dict[code] = dataframe
-        results["daily_bars"] = len(data_dict)
-    else:
-        data_dict = {}
-        results["daily_bars"] = 0
+            indicators_df = add_relative_strength(indicators_df, benchmark_code)
+            results["indicators"] = save_indicators_to_db(
+                data_store,
+                indicators_df,
+            )
+            results["benchmark_prices"] = save_benchmark_prices_from_indicators(
+                data_store,
+                indicators_df,
+                benchmark_codes,
+            )
+        else:
+            results["indicators"] = 0
+            results["benchmark_prices"] = 0
 
-    freshness_by_code = _assert_cycle_data_freshness(
-        config,
-        codes,
-        target_date,
-    )
-    results["fresh_symbols"] = sum(
-        status.is_fresh for status in freshness_by_code.values()
-    )
-    results["freshness_warnings"] = sum(
-        status.level == "warning" for status in freshness_by_code.values()
-    )
+        screener = Screener(config)
+        candidates = screener.screen_candidates(date=target_date)
+        results["signals"] = screener.save_signals_to_db(candidates)
 
-    if data_dict:
-        indicators = calculate_indicators_batch(data_dict, symbols_info)
-        indicators_df = indicators_to_dataframe(indicators)
-        benchmark_code = config.get(
-            "signals.relative_strength.benchmark_code",
-            "JP.1306",
+        manager = VirtualTradeManager(config)
+        virtual_trade_config = config.get("virtual_trade", {})
+        score_threshold = virtual_trade_config.get("score_threshold_for_order", 70)
+        created = 0
+        for candidate in candidates:
+            if candidate.signal_type != "BUY_CANDIDATE":
+                continue
+            if candidate.role != "trade_candidate" or not candidate.tradable:
+                continue
+            if candidate.score < score_threshold:
+                continue
+            order = manager.place_order(
+                strategy_name="default",
+                code=candidate.code,
+                side="BUY",
+                quantity=1,
+                order_type="MARKET_SIM",
+                submitted_at=candidate.date,
+            )
+            if order:
+                created += 1
+        results["virtual_orders"] = created
+
+        manager = VirtualTradeManager(config)
+        fills = manager.process_fills("default", target_date)
+        results["fills"] = len(fills)
+        exits = manager.generate_exits("default", target_date)
+        results["exits"] = len(exits)
+        results["price_updates"] = manager.update_market_prices(
+            "default",
+            target_date,
         )
-        indicators_df = add_relative_strength(indicators_df, benchmark_code)
-        results["indicators"] = save_indicators_to_db(
-            data_store,
-            indicators_df,
-        )
-        results["benchmark_prices"] = save_benchmark_prices_from_indicators(
-            data_store,
-            indicators_df,
-            benchmark_codes,
-        )
-    else:
-        results["indicators"] = 0
-        results["benchmark_prices"] = 0
+        manager.save_equity_curve("default", target_date)
 
-    screener = Screener(config)
-    candidates = screener.screen_candidates(date=target_date)
-    results["signals"] = screener.save_signals_to_db(candidates)
-
-    manager = VirtualTradeManager(config)
-    virtual_trade_config = config.get("virtual_trade", {})
-    score_threshold = virtual_trade_config.get("score_threshold_for_order", 70)
-    created = 0
-    for candidate in candidates:
-        if candidate.signal_type != "BUY_CANDIDATE":
-            continue
-        if candidate.role != "trade_candidate" or not candidate.tradable:
-            continue
-        if candidate.score < score_threshold:
-            continue
-        order = manager.place_order(
-            strategy_name="default",
-            code=candidate.code,
-            side="BUY",
-            quantity=1,
-            order_type="MARKET_SIM",
-            submitted_at=candidate.date,
-        )
-        if order:
-            created += 1
-    results["virtual_orders"] = created
-
-    manager = VirtualTradeManager(config)
-    fills = manager.process_fills("default", target_date)
-    results["fills"] = len(fills)
-    exits = manager.generate_exits("default", target_date)
-    results["exits"] = len(exits)
-    results["price_updates"] = manager.update_market_prices(
-        "default",
-        target_date,
-    )
-    manager.save_equity_curve("default", target_date)
-
-    alert_manager = AlertManager(config)
-    alerts = alert_manager.run_all_checks()
-    results["alerts"] = len(alerts)
-
-    opend_conn.disconnect()
-    return results
+        alert_manager = AlertManager(config)
+        alerts = alert_manager.run_all_checks()
+        results["alerts"] = len(alerts)
+        return results
+    finally:
+        opend_conn.disconnect()
 
 
 def main() -> int:
