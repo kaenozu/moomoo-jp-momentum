@@ -1,0 +1,33 @@
+name: apply-pr23
+
+on:
+  push:
+    branches:
+      - fix/daily-cycle-operational-guards
+    paths:
+      - .github/scripts/apply_pr23.py
+      - .github/workflows/apply-pr23.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/daily-cycle-operational-guards
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply implementation
+        run: python .github/scripts/apply_pr23.py
+      - name: Commit final diff
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: harden daily operational boundaries"
+          git push
