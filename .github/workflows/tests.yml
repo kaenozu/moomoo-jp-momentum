@@ -5,6 +5,40 @@ on:
   pull_request:
 
 jobs:
+  diagnose-fast-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies quietly
+        run: |
+          pip install -q -r requirements.txt >/dev/null
+          pip install -q -r requirements-dev.txt >/dev/null
+      - name: Run tests and report failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python -m pytest tests/ -m "not slow" -q > /tmp/pytest.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "Temporary CI diagnosis for head $GITHUB_SHA:"
+              echo
+              echo '```text'
+              tail -n 120 /tmp/pytest.log
+              echo '```'
+            } > /tmp/comment.md
+            gh pr comment 17 --body-file /tmp/comment.md
+          fi
+          exit "$status"
+
   test:
     runs-on: ubuntu-latest
     steps:
