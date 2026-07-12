@@ -29,6 +29,7 @@
     "tests/test_quote_history_pagination.py",
     "tests/test_regressions.py",
     "tests/test_relative_strength_connections.py",
+    "tests/test_scoring_weight_limits.py",
     "tests/test_scoring_weights.py",
     "tests/test_strategy_compare.py",
     "tests/test_strategy_runner_benchmark.py",
