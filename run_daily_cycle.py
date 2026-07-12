@@ -116,6 +116,9 @@ def _load_indicator_inputs(
     データソースにする。これにより一時的なAPI取得失敗で銘柄がクロス
     セクション計算から脱落せず、過去日実行で未来データも混入しない。
     """
+    if history_limit <= 0:
+        raise ValueError("history_limitは1以上で指定してください")
+
     inputs = data_store.get_daily_bars_for_codes(
         codes,
         end_date=target_date,
