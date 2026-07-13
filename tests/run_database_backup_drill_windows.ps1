@@ -17,9 +17,15 @@ function Invoke-DrillProcess {
         [string[]]$Arguments
     )
 
-    $raw = & $ShellExecutable -NoProfile -NonInteractive `
-        -ExecutionPolicy Bypass @Arguments 2>&1
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $raw = & $ShellExecutable -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     return [pscustomobject]@{
         ExitCode = $exitCode
         Text = ($raw -join "`n")
