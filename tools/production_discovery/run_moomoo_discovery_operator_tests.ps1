@@ -105,7 +105,7 @@ foreach ($Path in $PowerShellFiles) {
         errors = @($ErrorRows | ForEach-Object { $_.Message })
     }
     if ($ErrorRows.Count -gt 0) {
-        throw "PowerShell parser errors in $Path: $($ErrorRows.Message -join '; ')"
+        throw "PowerShell parser errors in ${Path}: $($ErrorRows.Message -join '; ')"
     }
 }
 Write-DiagnosticText -Name "powershell-parser.json" -Text (
