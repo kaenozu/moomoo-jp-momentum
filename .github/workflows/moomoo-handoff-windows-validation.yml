@@ -80,7 +80,7 @@ jobs:
       - name: Build handoff twice and compare
         shell: cmd
         run: |
-          set OPERATOR=%RUNNER_TEMP%\ps5-operator\moomoo_production_discovery_operator_v4_v1.2.1.zip
+          set OPERATOR=%RUNNER_TEMP%\ps5-operator\moomoo_production_discovery_operator_v4_v1.2.2.zip
           python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps5-handoff-a" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.log" 2>&1
           if errorlevel 1 (
             type "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.log"
@@ -183,7 +183,7 @@ jobs:
       - name: Build handoff twice and compare
         shell: cmd
         run: |
-          set OPERATOR=%RUNNER_TEMP%\ps7-operator\moomoo_production_discovery_operator_v4_v1.2.1.zip
+          set OPERATOR=%RUNNER_TEMP%\ps7-operator\moomoo_production_discovery_operator_v4_v1.2.2.zip
           python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps7-handoff-a" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.log" 2>&1
           if errorlevel 1 (
             type "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.log"
