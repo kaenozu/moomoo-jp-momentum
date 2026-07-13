@@ -3,7 +3,7 @@ param(
     [string]$DiscoveryScriptPath = (
         Join-Path $PSScriptRoot "moomoo_production_readonly_discovery_v4.ps1"
     ),
-    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedDiscoverySha256,
+    [Parameter(Mandatory = $true)][string]$ExpectedFileHashesJson,
     [switch]$RunDiscovery,
     [Parameter(Mandatory = $true)][string]$RepoPath,
     [Parameter(Mandatory = $true)][string]$ProtectedCheckoutPath,
@@ -28,6 +28,7 @@ function Convert-ParserError {
     }
 }
 
+$ExpectedFileHashes = $ExpectedFileHashesJson | ConvertFrom-Json
 $ConfigSearchRoots = @($ConfigSearchRootsJson | ConvertFrom-Json)
 $ProductionWorkingDirectoryCandidates = @(
     $ProductionWorkingDirectoryCandidatesJson | ConvertFrom-Json
@@ -36,40 +37,69 @@ if ($ConfigSearchRoots.Count -eq 0) {
     throw "ConfigSearchRootsJson must contain at least one path"
 }
 
-$tokens = $null
-$parseErrors = $null
-$ast = $null
-$actualSha256 = $null
+$fileChecks = @()
 $gateError = $null
-$discovery = $null
-$discoveryError = $null
-
 try {
-    if (-not (Test-Path -LiteralPath $DiscoveryScriptPath -PathType Leaf)) {
-        throw "Discovery script does not exist: $DiscoveryScriptPath"
+    foreach ($Property in $ExpectedFileHashes.PSObject.Properties) {
+        $Name = [string]$Property.Name
+        $ExpectedHash = ([string]$Property.Value).ToUpperInvariant()
+        $Path = Join-Path $PSScriptRoot $Name
+        $tokens = $null
+        $parseErrors = $null
+        $ast = $null
+        $actualHash = $null
+        $fileError = $null
+        try {
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+                throw "Required discovery file does not exist: $Path"
+            }
+            $actualHash = (
+                Get-FileHash -LiteralPath $Path -Algorithm SHA256
+            ).Hash
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $Path,
+                [ref]$tokens,
+                [ref]$parseErrors
+            )
+        } catch {
+            $fileError = $_.Exception.Message
+        }
+        $parseRows = @(
+            $parseErrors | ForEach-Object { Convert-ParserError $_ }
+        )
+        $fileChecks += [pscustomobject]@{
+            name = $Name
+            path = [IO.Path]::GetFullPath($Path)
+            expected_sha256 = $ExpectedHash
+            actual_sha256 = $actualHash
+            hash_matches = (
+                $actualHash -and
+                $actualHash.ToUpperInvariant() -eq $ExpectedHash
+            )
+            parser_passed = ($null -ne $ast -and $parseRows.Count -eq 0)
+            parser_error_count = $parseRows.Count
+            parser_errors = $parseRows
+            error = $fileError
+        }
     }
-    $actualSha256 = (
-        Get-FileHash -LiteralPath $DiscoveryScriptPath -Algorithm SHA256
-    ).Hash
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
-        $DiscoveryScriptPath,
-        [ref]$tokens,
-        [ref]$parseErrors
-    )
 } catch {
     $gateError = $_.Exception.Message
 }
 
-$parseErrorRows = @(
-    $parseErrors | ForEach-Object { Convert-ParserError $_ }
+$wrapperName = [IO.Path]::GetFileName($DiscoveryScriptPath)
+$wrapperCheck = @($fileChecks | Where-Object { $_.name -eq $wrapperName } | Select-Object -First 1)
+$allHashesMatch = (
+    $fileChecks.Count -gt 0 -and
+    @($fileChecks | Where-Object { -not $_.hash_matches }).Count -eq 0
 )
-$hashMatches = (
-    $actualSha256 -and
-    $actualSha256.ToUpperInvariant() -eq $ExpectedDiscoverySha256.ToUpperInvariant()
+$allParsersPassed = (
+    $fileChecks.Count -gt 0 -and
+    @($fileChecks | Where-Object { -not $_.parser_passed }).Count -eq 0
 )
-$parserPassed = ($null -ne $ast -and $parseErrorRows.Count -eq 0)
-$gatePassed = (-not $gateError -and $hashMatches -and $parserPassed)
+$gatePassed = (-not $gateError -and $allHashesMatch -and $allParsersPassed)
 
+$discovery = $null
+$discoveryError = $null
 if ($RunDiscovery -and $gatePassed) {
     try {
         $raw = & $DiscoveryScriptPath `
@@ -95,14 +125,13 @@ $result = [pscustomobject]@{
             edition = if ($PSVersionTable.PSObject.Properties.Name -contains "PSEdition") { [string]$PSVersionTable.PSEdition } else { "Desktop" }
             is_64_bit_process = [Environment]::Is64BitProcess
         }
-        script_path = [IO.Path]::GetFullPath($DiscoveryScriptPath)
-        expected_sha256 = $ExpectedDiscoverySha256
-        actual_sha256 = $actualSha256
-        hash_matches = $hashMatches
-        parser_type = "System.Management.Automation.Language.Parser"
-        parser_passed = $parserPassed
-        parser_error_count = $parseErrorRows.Count
-        parser_errors = $parseErrorRows
+        file_checks = $fileChecks
+        expected_file_count = @($ExpectedFileHashes.PSObject.Properties).Count
+        checked_file_count = $fileChecks.Count
+        hash_matches = $allHashesMatch
+        parser_passed = $allParsersPassed
+        parser_error_count = @($fileChecks | ForEach-Object { $_.parser_error_count } | Measure-Object -Sum).Sum
+        actual_sha256 = if ($wrapperCheck.Count -eq 1) { $wrapperCheck[0].actual_sha256 } else { $null }
         gate_error = $gateError
         gate_passed = $gatePassed
         discovery_requested = [bool]$RunDiscovery
@@ -118,7 +147,7 @@ $result = [pscustomobject]@{
     }
 }
 
-$result | ConvertTo-Json -Depth 16
+$result | ConvertTo-Json -Depth 18
 if (-not $gatePassed -or ($RunDiscovery -and ($discoveryError -or $null -eq $discovery))) {
     exit 1
 }
