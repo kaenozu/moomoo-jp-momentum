@@ -70,6 +70,25 @@ jobs:
               )
           '''
           text = text[:validation_start] + validation + text[validation_end:]
+
+          comparer_end = '''    path.write_text(text, encoding="utf-8", newline="\\n")
+
+
+def safe_extract_function'''
+          comparer_replacement = '''    text = replace_once(
+                  text,
+                  "except (OSError, zipfile.BadZipFile) as exc:",
+                  "except (OSError, ValueError, zipfile.BadZipFile) as exc:",
+                  "comparer unsafe ZIP error handling",
+              )
+              path.write_text(text, encoding="utf-8", newline="\\n")
+
+
+def safe_extract_function'''
+          if comparer_end not in text:
+              raise RuntimeError('Could not locate comparer function end')
+          text = text.replace(comparer_end, comparer_replacement, 1)
+
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
           python -m py_compile scripts/_apply_verified_handoff_split.py
