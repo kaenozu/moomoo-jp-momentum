@@ -1,0 +1,56 @@
+name: apply PR32 review fixes
+
+on:
+  push:
+    branches:
+      - agent/master-bound-discovery-release
+    paths:
+      - scripts/apply_pr32_review_fixes.py
+      - .github/workflows/apply-pr32-review-fixes.yml
+
+permissions:
+  contents: write
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  apply-review-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/master-bound-discovery-release
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused test dependencies
+        run: python -m pip install PyYAML pytest
+      - name: Apply exact replacements
+        run: python scripts/apply_pr32_review_fixes.py
+      - name: Compile modified files
+        run: >-
+          python -m py_compile
+          tools/production_discovery/validate_moomoo_human_validation.py
+          tests/test_moomoo_human_validation.py
+          tests/test_moomoo_discovery_release.py
+      - name: Run focused review regression tests
+        run: >-
+          python -m pytest
+          tests/test_moomoo_human_validation.py
+          tests/test_moomoo_discovery_release.py
+          -q
+      - name: Commit exact review fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/production_discovery/validate_moomoo_human_validation.py tests/test_moomoo_human_validation.py tests/test_moomoo_discovery_release.py
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "Review fixes already applied"
+            exit 0
+          fi
+          git commit -m "fix: address remaining discovery release review feedback"
+          git push origin HEAD:agent/master-bound-discovery-release
