@@ -28,16 +28,48 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+
           path = Path('scripts/_apply_verified_handoff_split.py')
           text = path.read_text(encoding='utf-8')
-          text = text.replace(
-              'text += (\\n                ',
-              'text += (' + chr(10) + '                ',
+
+          docs_start = text.index('def patch_docs() -> None:')
+          docs_end = text.index('\ndef main() -> None:', docs_start)
+          docs = '''def patch_docs() -> None:
+              for relative in [
+                  "tools/production_discovery/handoff/README_FIRST.md",
+                  "tools/production_discovery/handoff/LOCAL_AGENT_PROMPT.md",
+              ]:
+                  path = ROOT / relative
+                  text = path.read_text(encoding="utf-8-sig").replace("\\r\\n", "\\n")
+                  marker = "handoff version"
+                  if marker not in text.lower():
+                      text += (
+                          "\\n## Version contract\\n\\n"
+                          "- operator version: `1.2.2`\\n"
+                          "- handoff package version: `1.2.2`\\n"
+                          "- handoff format version: `1`\\n"
+                          "\\nこれらは別々のversion軸です。機械検証PASSでもpreflightは承認されません。\\n"
+                      )
+                  path.write_text(text, encoding="utf-8", newline="\\n")
+          '''
+          text = text[:docs_start] + docs + text[docs_end:]
+
+          validation_start = text.index('    run(\\n        sys.executable,')
+          validation_end = text.index(
+              '    run(sys.executable, "scripts/test_moomoo_readonly_discovery_handoff_builder.py", "-v")',
+              validation_start,
           )
-          text = text.replace(
-              '    run(\\n        sys.executable,',
-              '    run(' + chr(10) + '        sys.executable,',
-          )
+          validation = '''    run(
+                  sys.executable,
+                  "-m",
+                  "py_compile",
+                  "scripts/build_moomoo_readonly_discovery_handoff.py",
+                  "scripts/compare_moomoo_readonly_discovery_handoffs.py",
+                  "scripts/test_moomoo_readonly_discovery_handoff_builder.py",
+                  "tools/production_discovery/handoff_test_python_shim.py",
+              )
+          '''
+          text = text[:validation_start] + validation + text[validation_end:]
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
           python -m py_compile scripts/_apply_verified_handoff_split.py
