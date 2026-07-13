@@ -192,3 +192,112 @@ jobs:
           test ! -d logs || { echo "ERROR: logs/ was created"; exit 1; }
           test ! -d reports || { echo "ERROR: reports/ was created"; exit 1; }
           echo "OK: No artifacts created"
+
+  windows-recovery-drill:
+    name: Windows recovery drill (${{ matrix.display_name }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display_name: Windows PowerShell 5.1
+            shell: powershell
+            executable: powershell
+            case_name: windows-powershell-5
+          - display_name: PowerShell 7
+            shell: pwsh
+            executable: pwsh
+            case_name: powershell-7
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install production dependencies
+        shell: ${{ matrix.shell }}
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify selected PowerShell
+        shell: ${{ matrix.shell }}
+        run: |
+          $Version = $PSVersionTable.PSVersion
+          Write-Host "PSEdition=$($PSVersionTable.PSEdition) Version=$Version"
+          if ("${{ matrix.executable }}" -eq "powershell" -and $Version.Major -ne 5) {
+              throw "Expected Windows PowerShell 5.x, got $Version"
+          }
+          if ("${{ matrix.executable }}" -eq "pwsh" -and $Version.Major -lt 7) {
+              throw "Expected PowerShell 7+, got $Version"
+          }
+
+      - name: Parse production drill script
+        shell: ${{ matrix.shell }}
+        run: |
+          $Tokens = $null
+          $ParseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              "scripts/sqlite_backup_recovery_drill.ps1",
+              [ref]$Tokens,
+              [ref]$ParseErrors
+          ) | Out-Null
+          if ($ParseErrors.Count -gt 0) {
+              $ParseErrors | ForEach-Object { Write-Error $_.Message }
+              throw "Production recovery drill contains parse errors"
+          }
+
+          $HarnessTokens = $null
+          $HarnessErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              "tests/run_database_backup_drill_windows.ps1",
+              [ref]$HarnessTokens,
+              [ref]$HarnessErrors
+          ) | Out-Null
+          if ($HarnessErrors.Count -gt 0) {
+              $HarnessErrors | ForEach-Object { Write-Error $_.Message }
+              throw "Windows recovery test harness contains parse errors"
+          }
+
+      - name: Run Windows recovery drill guards and full simulation
+        shell: ${{ matrix.shell }}
+        run: |
+          $LogPath = Join-Path $env:RUNNER_TEMP (
+              "windows-recovery-${{ matrix.case_name }}.log"
+          )
+          $Raw = & "${{ matrix.executable }}" -NoProfile -NonInteractive `
+              -ExecutionPolicy Bypass `
+              -File tests/run_database_backup_drill_windows.ps1 `
+              -ShellExecutable "${{ matrix.executable }}" `
+              -CaseName "${{ matrix.case_name }}" 2>&1
+          $ExitCode = $LASTEXITCODE
+          $Raw | Set-Content -Encoding utf8 -LiteralPath $LogPath
+          $Raw | ForEach-Object { Write-Host $_ }
+          if ($ExitCode -ne 0) {
+              throw "Windows recovery drill failed with exit code $ExitCode"
+          }
+
+      - name: Verify no repository artifacts
+        if: always()
+        shell: ${{ matrix.shell }}
+        run: |
+          $Status = & git status --porcelain
+          if ($LASTEXITCODE -ne 0) {
+              throw "Could not read git status"
+          }
+          if ($Status) {
+              $Status | ForEach-Object { Write-Error $_ }
+              throw "Windows recovery drill created repository artifacts"
+          }
+
+      - name: Upload Windows drill diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-recovery-${{ matrix.case_name }}
+          path: |
+            ${{ runner.temp }}/windows-recovery-${{ matrix.case_name }}.log
+            ${{ runner.temp }}/sqlite recovery drill *
+          if-no-files-found: warn
+          retention-days: 3
