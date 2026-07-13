@@ -51,28 +51,14 @@ jobs:
           & git ls-files --eol -- tools/production_discovery scripts/*.py 2>&1 |
             Tee-Object ci-diagnostics\git-eol.txt
       - name: Run parser, static, regression, and synthetic validation
-        id: validate
-        continue-on-error: true
         shell: powershell
         run: |
-          try {
-            & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
-              -PythonExecutable python `
-              -PowerShellExecutable powershell.exe `
-              -DiagnosticsDir "ci-diagnostics" *>&1 |
-                Tee-Object -FilePath ci-diagnostics\validation.log
-            $code = 0
-          } catch {
-            $_ | Format-List * -Force | Out-String |
-              Tee-Object -FilePath ci-diagnostics\validation.log -Append
-            $code = 1
-          }
-          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($code -ne 0) { exit $code }
+          & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
+            -PythonExecutable python `
+            -PowerShellExecutable powershell.exe `
+            -DiagnosticsDir "ci-diagnostics" *>&1 |
+              Tee-Object -FilePath ci-diagnostics\validation.log
       - name: Build twice and compare on Windows PowerShell 5.1 runner
-        id: build
-        if: steps.validate.outcome == 'success'
-        continue-on-error: true
         shell: cmd
         run: |
           python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps5-build-a" --json-output "ci-diagnostics\build-a.json" > "ci-diagnostics\build-a.log" 2>&1
@@ -84,9 +70,6 @@ jobs:
           copy /Y "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps5-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
           if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
-        id: clean
-        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
-        continue-on-error: true
         shell: powershell
         run: |
           & git diff --exit-code
@@ -102,20 +85,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 5.1 bundle
-        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell5
           path: ${{ runner.temp }}/ps5-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 14
-      - name: Enforce PowerShell 5.1 result
-        if: always()
-        shell: powershell
-        run: |
-          if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
-          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build or same-shell comparison failed" }
-          if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
 
   powershell-7:
     name: PowerShell 7
@@ -141,28 +116,14 @@ jobs:
           & git ls-files --eol -- tools/production_discovery scripts/*.py 2>&1 |
             Tee-Object ci-diagnostics/git-eol.txt
       - name: Run parser, static, regression, and synthetic validation
-        id: validate
-        continue-on-error: true
         shell: pwsh
         run: |
-          try {
-            & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
-              -PythonExecutable python `
-              -PowerShellExecutable pwsh.exe `
-              -DiagnosticsDir "ci-diagnostics" *>&1 |
-                Tee-Object -FilePath ci-diagnostics/validation.log
-            $code = 0
-          } catch {
-            $_ | Format-List * -Force | Out-String |
-              Tee-Object -FilePath ci-diagnostics/validation.log -Append
-            $code = 1
-          }
-          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($code -ne 0) { exit $code }
+          & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
+            -PythonExecutable python `
+            -PowerShellExecutable pwsh.exe `
+            -DiagnosticsDir "ci-diagnostics" *>&1 |
+              Tee-Object -FilePath ci-diagnostics/validation.log
       - name: Build twice and compare on PowerShell 7 runner
-        id: build
-        if: steps.validate.outcome == 'success'
-        continue-on-error: true
         shell: cmd
         run: |
           python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps7-build-a" --json-output "ci-diagnostics\build-a.json" > "ci-diagnostics\build-a.log" 2>&1
@@ -174,9 +135,6 @@ jobs:
           copy /Y "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps7-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
           if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
-        id: clean
-        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
-        continue-on-error: true
         shell: pwsh
         run: |
           & git diff --exit-code
@@ -192,20 +150,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 7 bundle
-        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell7
           path: ${{ runner.temp }}/ps7-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 14
-      - name: Enforce PowerShell 7 result
-        if: always()
-        shell: pwsh
-        run: |
-          if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
-          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build or same-shell comparison failed" }
-          if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
 
   compare-bundles:
     name: Compare PowerShell 5.1 and PowerShell 7 bundles
