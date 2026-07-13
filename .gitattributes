@@ -1,0 +1,7 @@
+# Keep recovery-discovery source bytes stable across Windows and Unix checkouts.
+tools/production_discovery/*.ps1 text eol=lf
+tools/production_discovery/*.py text eol=lf
+tools/production_discovery/*.md text eol=lf
+scripts/build_moomoo_discovery_operator_bundle.py text eol=lf
+scripts/compare_moomoo_discovery_operator_bundles.py text eol=lf
+.github/workflows/moomoo-operator-windows-validation.yml text eol=lf
