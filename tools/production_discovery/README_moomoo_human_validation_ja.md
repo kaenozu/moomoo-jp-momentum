@@ -39,6 +39,10 @@ cutover_authorized          = false
 
 `CONFIRMED`には空でない`value`と1件以上の`evidence_refs`が必要です。推測は`CONFIRMED`にしないでください。
 
+## Release packageの確認
+
+実行前に外側ZIPのSHA-256、`SHA256SUMS.txt`、`release-manifest.json`を確認してください。`release_candidate=true`、`source_ref=refs/heads/master`、`source_event=push`の組み合わせだけがmaster由来候補です。nested operator ZIPのSHA-256もrelease manifestと一致する必要があります。
+
 ## 実行
 
 ```powershell
