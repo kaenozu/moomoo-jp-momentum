@@ -12,7 +12,6 @@ TARGETS = (
     "scripts/compare_moomoo_discovery_releases.py",
     "tests/test_moomoo_discovery_release.py",
     "tests/test_moomoo_human_validation.py",
-    ".github/workflows/moomoo-operator-release.yml",
     "tools/production_discovery/README_moomoo_human_validation_ja.md",
     "tools/production_discovery/validate_moomoo_human_validation.py",
 )
@@ -27,6 +26,18 @@ def run_without_github_event_identity(*args: str) -> None:
     for name in ("GITHUB_SHA", "GITHUB_REF", "GITHUB_EVENT_NAME"):
         env.pop(name, None)
     subprocess.run(args, cwd=ROOT, check=True, env=env)
+
+
+def restore_master_file(relative: str) -> None:
+    path = ROOT / relative
+    path.write_bytes(
+        subprocess.run(
+            ["git", "show", f"origin/master:{relative}"],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+        ).stdout
+    )
 
 
 def main() -> None:
@@ -55,7 +66,6 @@ def main() -> None:
         "scripts/build_moomoo_discovery_release.py",
         "scripts/compare_moomoo_discovery_releases.py",
         "tests/test_moomoo_discovery_release.py",
-        ".github/workflows/moomoo-operator-release.yml",
         "tools/production_discovery/README_moomoo_human_validation_ja.md",
         "tools/production_discovery/validate_moomoo_human_validation.py",
     }
@@ -75,14 +85,8 @@ def main() -> None:
         raise RuntimeError("Release verifier lacks operator v1.2.2 member")
 
     (ROOT / "scripts/_apply_release_v1_2_2.py").unlink()
-    (ROOT / ".github/workflows/tests.yml").write_bytes(
-        subprocess.run(
-            ["git", "show", "origin/master:.github/workflows/tests.yml"],
-            cwd=ROOT,
-            check=True,
-            stdout=subprocess.PIPE,
-        ).stdout
-    )
+    restore_master_file(".github/workflows/tests.yml")
+    restore_master_file(".github/workflows/moomoo-operator-release.yml")
 
     run("git", "config", "user.name", "github-actions[bot]")
     run(
