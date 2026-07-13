@@ -181,17 +181,32 @@ virtual_trade:
             Get-FileHash -LiteralPath (Join-Path $Root $Name) -Algorithm SHA256
         ).Hash
     }
+
+    $Utf8 = New-Object System.Text.UTF8Encoding($false)
+    $ExpectedFileHashesJson = ConvertTo-Json -Compress -InputObject $ExpectedFileHashes
+    $ConfigSearchRootsJson = ConvertTo-Json -Compress -InputObject @($Runtime)
+    $RuntimeCandidatesJson = ConvertTo-Json -Compress -InputObject @($Runtime)
+    $ExpectedFileHashesBase64 = [Convert]::ToBase64String(
+        $Utf8.GetBytes($ExpectedFileHashesJson)
+    )
+    $ConfigSearchRootsBase64 = [Convert]::ToBase64String(
+        $Utf8.GetBytes($ConfigSearchRootsJson)
+    )
+    $RuntimeCandidatesBase64 = [Convert]::ToBase64String(
+        $Utf8.GetBytes($RuntimeCandidatesJson)
+    )
+
     $GateArguments = @(
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", $Gate,
-        "-ExpectedFileHashesJson", (ConvertTo-Json -Compress -InputObject $ExpectedFileHashes),
+        "-ExpectedFileHashesBase64", $ExpectedFileHashesBase64,
         "-RunDiscovery",
         "-RepoPath", $RepoRoot,
         "-ProtectedCheckoutPath", $RepoRoot,
         "-ExpectedHead", $ExpectedHead,
         "-ExpectedRemote", $ExpectedRemote,
-        "-ConfigSearchRootsJson", (ConvertTo-Json -Compress -InputObject @($Runtime)),
-        "-ProductionWorkingDirectoryCandidatesJson", (ConvertTo-Json -Compress -InputObject @($Runtime))
+        "-ConfigSearchRootsBase64", $ConfigSearchRootsBase64,
+        "-ProductionWorkingDirectoryCandidatesBase64", $RuntimeCandidatesBase64
     )
     $GateResult = Invoke-NativeCapture -Name "synthetic-gated-discovery" `
         -FilePath $PowerShellExecutable `
@@ -251,6 +266,7 @@ virtual_trade:
             nested_powershell_executable = $PowerShellExecutable
             repository_root = $RepoRoot
             tested_head = $ExpectedHead
+            native_json_transport = "utf8_base64"
         } | ConvertTo-Json -Depth 6
     )
 } finally {
