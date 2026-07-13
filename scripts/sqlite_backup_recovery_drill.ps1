@@ -82,17 +82,38 @@ function Invoke-PythonJson {
     return (($raw -join "`n") | ConvertFrom-Json)
 }
 
-$RepoRoot = Get-NormalizedPath (Get-Location).Path
-$ProductionConfig = (Resolve-Path $ProductionConfig).Path
+$InvocationDirectory = Get-NormalizedPath (Get-Location).Path
+$repoRootRaw = & git -C $PSScriptRoot rev-parse --show-toplevel 2>&1
+$repoRootExit = $LASTEXITCODE
+if ($repoRootExit -ne 0) { throw ($repoRootRaw -join "`n") }
+$RepoRoot = Get-NormalizedPath (($repoRootRaw -join "").Trim())
+
+if ([IO.Path]::IsPathRooted($ProductionConfig)) {
+    $ProductionConfig = (Resolve-Path $ProductionConfig).Path
+} else {
+    $ProductionConfig = (
+        Resolve-Path (Join-Path $RepoRoot $ProductionConfig)
+    ).Path
+}
+if (-not [IO.Path]::IsPathRooted($EvidenceDir)) {
+    $EvidenceDir = Join-Path $InvocationDirectory $EvidenceDir
+}
+if (-not [IO.Path]::IsPathRooted($SecondaryDir)) {
+    $SecondaryDir = Join-Path $InvocationDirectory $SecondaryDir
+}
+if (-not [IO.Path]::IsPathRooted($RestorePath)) {
+    $RestorePath = Join-Path $InvocationDirectory $RestorePath
+}
 $EvidenceDir = Get-NormalizedPath $EvidenceDir
 $SecondaryDir = Get-NormalizedPath $SecondaryDir
 $RestorePath = Get-NormalizedPath $RestorePath
+Set-Location -LiteralPath $RepoRoot
 
 if ($ExpectedHead -like "<*") {
     throw "replace ExpectedHead with the explicitly approved Git SHA"
 }
 
-$headRaw = & git rev-parse HEAD 2>&1
+$headRaw = & git -C $RepoRoot rev-parse HEAD 2>&1
 $headExit = $LASTEXITCODE
 if ($headExit -ne 0) { throw ($headRaw -join "`n") }
 $HeadSha = ($headRaw -join "").Trim()
@@ -100,7 +121,7 @@ if ($HeadSha -ne $ExpectedHead) {
     throw "HEAD differs from approved SHA: expected=$ExpectedHead actual=$HeadSha"
 }
 
-$statusRaw = & git status --porcelain 2>&1
+$statusRaw = & git -C $RepoRoot status --porcelain 2>&1
 $statusExit = $LASTEXITCODE
 if ($statusExit -ne 0) { throw ($statusRaw -join "`n") }
 if ($statusRaw) { throw "working tree is not clean" }

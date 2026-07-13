@@ -14,17 +14,28 @@ $ErrorActionPreference = "Stop"
 function Invoke-DrillProcess {
     param(
         [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string]$WorkingDirectory
     )
 
     $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
+    $locationPushed = $false
+    $raw = @()
+    $exitCode = $null
     try {
+        if ($WorkingDirectory) {
+            Push-Location -LiteralPath $WorkingDirectory
+            $locationPushed = $true
+        }
+        $ErrorActionPreference = "Continue"
         $raw = & $ShellExecutable -NoProfile -NonInteractive `
             -ExecutionPolicy Bypass @Arguments 2>&1
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
+        if ($locationPushed) {
+            Pop-Location
+        }
     }
     return [pscustomobject]@{
         ExitCode = $exitCode
@@ -132,6 +143,7 @@ $BaseArguments = @(
     "-ProductionConfig", $Config,
     "-Strategy", "momentum"
 )
+$RepoSubdirectory = Join-Path $RepoRoot "tests"
 
 # Wrong SHA must fail before any drill path is created.
 $WrongShaEvidence = Join-Path $Root "wrong sha evidence"
@@ -171,6 +183,21 @@ if (Test-Path -LiteralPath $RepoEvidence) {
     throw "repository-path guard created evidence inside the repository"
 }
 
+# Repository containment must still be enforced when invoked from a subdirectory.
+$SubdirRepoEvidence = Join-Path $RepoRoot "temporary subdir recovery evidence"
+$subdirRepoPathResult = Invoke-DrillProcess -Arguments @(
+    $BaseArguments + @(
+        "-EvidenceDir", $SubdirRepoEvidence,
+        "-SecondaryDir", (Join-Path $Root "subdir repo guard secondary"),
+        "-RestorePath", (Join-Path $Root "subdir repo guard restore\restored.db"),
+        "-PreflightOnly"
+    )
+) -WorkingDirectory $RepoSubdirectory
+Assert-Failure $subdirRepoPathResult "subdirectory repository-path guard"
+if (Test-Path -LiteralPath $SubdirRepoEvidence) {
+    throw "subdirectory repository-path guard created evidence inside the repository"
+}
+
 # Preflight must be read-only and create no requested output paths.
 $PreflightEvidence = Join-Path $Root "preflight evidence"
 $PreflightSecondary = Join-Path $Root "preflight secondary"
@@ -182,7 +209,7 @@ $preflightResult = Invoke-DrillProcess -Arguments @(
         "-RestorePath", $PreflightRestore,
         "-PreflightOnly"
     )
-)
+) -WorkingDirectory $RepoSubdirectory
 Assert-Success $preflightResult "read-only preflight"
 $preflight = $preflightResult.Text | ConvertFrom-Json
 if ($preflight.status -ne "preflight_only") {
@@ -294,6 +321,7 @@ if ($gitStatus) {
     preflight_read_only = $true
     wrong_sha_rejected = $true
     repository_path_rejected = $true
+    subdirectory_invocation_validated = $true
     existing_restore_rejected = $true
     full_drill_completed = $true
     production_backup_directory_unused = $true

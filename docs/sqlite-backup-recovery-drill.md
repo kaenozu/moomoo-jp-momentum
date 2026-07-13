@@ -43,7 +43,7 @@ The script has two explicit modes:
 1. `-PreflightOnly` performs read-only inspection and prints JSON. It does not create an evidence directory, backup, secondary copy, or restored DB.
 2. `-ConfirmProductionExecution` performs the drill. It is rejected unless explicitly supplied.
 
-The script requires an exact approved Git SHA and rejects a dirty working tree. It also rejects evidence, secondary, and restore paths inside the repository.
+The script requires an exact approved Git SHA and rejects a dirty working tree. It resolves the real checkout root from its own script location with `git rev-parse --show-toplevel`, so repository-containment checks do not depend on the operator's current directory. Relative production-config paths are resolved from that checkout root; relative evidence, secondary, and restore paths are resolved from the invocation directory. It rejects evidence, secondary, and restore paths anywhere inside the repository.
 
 ## Isolated backup configuration
 
