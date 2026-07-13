@@ -15,10 +15,16 @@ from pathlib import Path
 from typing import Any, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-OPERATOR_BUILDER_PATH = ROOT / "scripts" / "build_moomoo_discovery_operator_bundle.py"
+OPERATOR_BUILDER_PATH = (
+    ROOT / "scripts" / "build_moomoo_discovery_operator_bundle.py"
+)
+RELEASE_VERIFIER_PATH = (
+    ROOT / "scripts" / "compare_moomoo_discovery_releases.py"
+)
 HUMAN_SOURCE = ROOT / "tools" / "production_discovery"
 OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.1.zip"
 RELEASE_ZIP = "moomoo_production_discovery_release_v1.2.1.zip"
+RELEASE_VERIFIER = "compare_moomoo_discovery_releases.py"
 HUMAN_FILES = (
     "human-validation.schema.json",
     "human-validation.template.json",
@@ -43,7 +49,9 @@ def load_module(name: str, path: Path):
     return module
 
 
-operator_builder = load_module("moomoo_operator_bundle_builder", OPERATOR_BUILDER_PATH)
+operator_builder = load_module(
+    "moomoo_operator_bundle_builder", OPERATOR_BUILDER_PATH
+)
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -103,7 +111,9 @@ def write_deterministic_zip(stage: Path, target: Path) -> None:
         "w",
         compression=zipfile.ZIP_DEFLATED,
     ) as archive:
-        for path in sorted(stage.iterdir(), key=lambda item: item.name.lower()):
+        for path in sorted(
+            stage.iterdir(), key=lambda item: item.name.lower()
+        ):
             if not path.is_file():
                 continue
             info = zipfile.ZipInfo(path.name, date_time=fixed_time)
@@ -120,7 +130,9 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     operator_result = operator_builder.build_bundle(operator_output)
     operator_zip = Path(str(operator_result["zip"]))
     if operator_zip.name != OPERATOR_ZIP:
-        raise RuntimeError(f"Unexpected operator ZIP name: {operator_zip.name}")
+        raise RuntimeError(
+            f"Unexpected operator ZIP name: {operator_zip.name}"
+        )
 
     source_commit, source_ref, source_event, head = source_identity()
     release_candidate = classify_release_candidate(
@@ -142,7 +154,9 @@ def build_release(output_dir: Path) -> dict[str, Any]:
             "Operator bundle source_ref does not match release source_ref"
         )
     if operator_manifest.get("authorization") != EXPECTED_AUTHORIZATION:
-        raise RuntimeError("Operator bundle authorization is not fail-closed")
+        raise RuntimeError(
+            "Operator bundle authorization is not fail-closed"
+        )
 
     stage = output_dir / "moomoo_production_discovery_release_v1.2.1"
     if stage.exists():
@@ -154,6 +168,9 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         (stage / name).write_bytes(
             operator_builder.verified_tracked_bytes(source)
         )
+    (stage / RELEASE_VERIFIER).write_bytes(
+        operator_builder.verified_tracked_bytes(RELEASE_VERIFIER_PATH)
+    )
 
     manifest = {
         "report_type": "moomoo_discovery_release_manifest",
@@ -169,14 +186,19 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         "operator_bundle": {
             "filename": OPERATOR_ZIP,
             "sha256": sha256_file(stage / OPERATOR_ZIP),
-            "manifest_source_commit": operator_manifest.get("source_commit"),
-            "manifest_source_ref": operator_manifest.get("source_ref"),
+            "manifest_source_commit": operator_manifest.get(
+                "source_commit"
+            ),
+            "manifest_source_ref": operator_manifest.get(
+                "source_ref"
+            ),
         },
         "human_validation": {
             "schema": "human-validation.schema.json",
             "template": "human-validation.template.json",
             "validator": "validate_moomoo_human_validation.py",
             "readme": "README_moomoo_human_validation_ja.md",
+            "release_verifier": RELEASE_VERIFIER,
             "outputs": [
                 "06-human-validation.json",
                 "07-preflight-eligibility.json",
@@ -193,7 +215,9 @@ def build_release(output_dir: Path) -> dict[str, Any]:
 
     sums = [
         f"{sha256_file(path)}  {path.name}"
-        for path in sorted(stage.iterdir(), key=lambda item: item.name.lower())
+        for path in sorted(
+            stage.iterdir(), key=lambda item: item.name.lower()
+        )
         if path.is_file()
     ]
     (stage / "SHA256SUMS.txt").write_text(
@@ -232,11 +256,15 @@ def make_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     result = build_release(Path(args.output_dir).resolve())
-    rendered = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    rendered = json.dumps(
+        result, ensure_ascii=False, indent=2
+    ) + "\n"
     if args.json_output:
         output = Path(args.json_output).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(rendered, encoding="utf-8", newline="\n")
+        output.write_text(
+            rendered, encoding="utf-8", newline="\n"
+        )
     print(rendered, end="")
     return 0
 
