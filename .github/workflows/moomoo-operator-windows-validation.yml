@@ -5,6 +5,7 @@ on:
     paths:
       - "tools/production_discovery/**"
       - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - ".gitattributes"
       - ".github/workflows/moomoo-operator-windows-validation.yml"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - "tools/production_discovery/**"
       - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - ".gitattributes"
       - ".github/workflows/moomoo-operator-windows-validation.yml"
   workflow_dispatch:
 
@@ -33,6 +35,11 @@ jobs:
           python-version: "3.11"
       - name: Install YAML parser
         run: python -m pip install PyYAML
+      - name: Record checkout line-ending state
+        shell: powershell
+        run: |
+          & git check-attr text eol -- tools/production_discovery/*.ps1
+          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py
       - name: Run static and regression validation
         shell: powershell
         run: >-
@@ -50,8 +57,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
       - uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.0-powershell5
-          path: dist/moomoo_production_discovery_operator_v4_v1.2.0.zip
+          name: moomoo-discovery-operator-v1.2.1-powershell5
+          path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -66,6 +73,11 @@ jobs:
           python-version: "3.11"
       - name: Install YAML parser
         run: python -m pip install PyYAML
+      - name: Record checkout line-ending state
+        shell: pwsh
+        run: |
+          & git check-attr text eol -- tools/production_discovery/*.ps1
+          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py
       - name: Run static and regression validation
         shell: pwsh
         run: >-
@@ -74,9 +86,16 @@ jobs:
           -PowerShellExecutable pwsh.exe
       - name: Build operator bundle
         run: python .\scripts\build_moomoo_discovery_operator_bundle.py
+      - name: Verify tracked repository unchanged
+        shell: pwsh
+        run: |
+          & git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
+          & git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
       - uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.0-powershell7
-          path: dist/moomoo_production_discovery_operator_v4_v1.2.0.zip
+          name: moomoo-discovery-operator-v1.2.1-powershell7
+          path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 7
