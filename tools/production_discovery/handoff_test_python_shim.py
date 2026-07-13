@@ -27,7 +27,7 @@ def fake_operator(arguments: list[str], mode: str) -> int:
     evidence.mkdir(parents=False, exist_ok=False)
     result = {
         "report_type": "moomoo_discovery_operator_result",
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "status": "completed_readonly_discovery",
         "operator_exit_code": 1 if mode == "exit_mismatch" else 0,
         "powershell_exit_code": 0,
