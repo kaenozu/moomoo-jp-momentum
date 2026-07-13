@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This package inventories a candidate production Windows PC without modifying the runtime. It is a delivery wrapper for discovery operator v1.2.1 and does not complete Issue #27.
+This package inventories a candidate production Windows PC without modifying the runtime. It is a delivery wrapper for discovery operator v1.2.2 and does not complete Issue #27.
+
+Operator v1.2.2 corrects review-row classification so successful gate records containing `error: null` remain valid evidence rather than being discarded as errors.
 
 The package never authorizes or performs:
 
