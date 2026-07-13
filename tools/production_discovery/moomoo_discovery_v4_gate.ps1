@@ -1,8 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$DiscoveryScriptPath = (
-        Join-Path $PSScriptRoot "moomoo_production_readonly_discovery_v4.ps1"
-    ),
+    [string]$DiscoveryScriptPath,
     [Parameter(Mandatory = $true)][string]$ExpectedFileHashesJson,
     [switch]$RunDiscovery,
     [Parameter(Mandatory = $true)][string]$RepoPath,
@@ -15,6 +13,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($DiscoveryScriptPath)) {
+    $DiscoveryScriptPath = Join-Path $PSScriptRoot "moomoo_production_readonly_discovery_v4.ps1"
+}
 
 function Convert-ParserError {
     param([Parameter(Mandatory = $true)]$ErrorRecord)
