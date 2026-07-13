@@ -122,19 +122,12 @@ class BundleBuilderTests(unittest.TestCase):
             hashlib.sha256(blob).hexdigest(), expected
         )
 
-    def test_frozen_wrapper_hash_uses_git_blob(self) -> None:
-        self.assert_frozen_blob_hash(
-            operator_common.DISCOVERY_FILENAME,
-            operator_common.EXPECTED_DISCOVERY_SHA256,
-        )
-
-    def test_frozen_runtime_hash_uses_git_blob(self) -> None:
-        self.assert_frozen_blob_hash(
-            "moomoo_discovery_v4_runtime.ps1",
-            operator_common.EXPECTED_BUNDLE_FILE_SHA256[
-                "moomoo_discovery_v4_runtime.ps1"
-            ],
-        )
+    def test_all_frozen_discovery_hashes_use_git_blobs(self) -> None:
+        for filename, expected in (
+            operator_common.EXPECTED_BUNDLE_FILE_SHA256.items()
+        ):
+            with self.subTest(filename=filename):
+                self.assert_frozen_blob_hash(filename, expected)
 
     def test_gate_hash_uses_git_blob(self) -> None:
         self.assert_frozen_blob_hash(
