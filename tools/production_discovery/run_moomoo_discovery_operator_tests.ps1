@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$PythonExecutable = "python",
-    [string]$PowerShellExecutable = "powershell.exe"
+    [string]$PowerShellExecutable = "powershell.exe",
+    [string]$DiagnosticsDir
 )
 
 Set-StrictMode -Version Latest
@@ -12,6 +13,7 @@ $Discovery = Join-Path $Root "moomoo_production_readonly_discovery_v4.ps1"
 $Gate = Join-Path $Root "moomoo_discovery_v4_gate.ps1"
 $Operator = Join-Path $Root "moomoo_discovery_operator.py"
 $Tests = Join-Path $Root "test_moomoo_discovery_operator.py"
+$Validator = Join-Path $Root "validate_moomoo_discovery_operator.py"
 
 $RequestedEngine = [IO.Path]::GetFileName($PowerShellExecutable).ToLowerInvariant()
 if ($RequestedEngine -eq "powershell.exe" -and $PSVersionTable.PSVersion.Major -ne 5) {
@@ -21,6 +23,65 @@ if ($RequestedEngine -eq "pwsh.exe" -and $PSVersionTable.PSVersion.Major -lt 7) 
     throw "pwsh.exe validation must run inside PowerShell 7 or newer"
 }
 
+if ($DiagnosticsDir) {
+    $DiagnosticsDir = [IO.Path]::GetFullPath($DiagnosticsDir)
+    [IO.Directory]::CreateDirectory($DiagnosticsDir) | Out-Null
+}
+
+function Write-DiagnosticText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Text
+    )
+    if (-not $DiagnosticsDir) { return }
+    $Encoding = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText(
+        (Join-Path $DiagnosticsDir $Name),
+        [string]$Text,
+        $Encoding
+    )
+}
+
+function Invoke-NativeCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = $Root
+    )
+    $PreviousPreference = $ErrorActionPreference
+    $Raw = @()
+    $ExitCode = $null
+    Push-Location $WorkingDirectory
+    try {
+        $ErrorActionPreference = "Continue"
+        $Raw = @(& $FilePath @Arguments 2>&1)
+        $ExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $PreviousPreference
+        Pop-Location
+    }
+    $Lines = @(
+        $Raw | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $_.ToString()
+            } else {
+                [string]$_
+            }
+        }
+    )
+    $Text = $Lines -join [Environment]::NewLine
+    Write-DiagnosticText -Name ($Name + ".log") -Text $Text
+    if ($ExitCode -ne 0) {
+        throw "$Name failed with exit code $ExitCode. Output: $Text"
+    }
+    [pscustomobject]@{
+        exit_code = $ExitCode
+        lines = $Lines
+        text = $Text
+    }
+}
+
 $PowerShellFiles = @(
     $Discovery,
     (Join-Path $Root "moomoo_discovery_v4_common.ps1"),
@@ -28,6 +89,7 @@ $PowerShellFiles = @(
     (Join-Path $Root "moomoo_discovery_v4_storage.ps1"),
     $Gate
 )
+$ParserRows = @()
 foreach ($Path in $PowerShellFiles) {
     $Tokens = $null
     $Errors = $null
@@ -36,11 +98,19 @@ foreach ($Path in $PowerShellFiles) {
         [ref]$Tokens,
         [ref]$Errors
     ) | Out-Null
-    if ($Errors.Count -gt 0) {
-        $Errors | ForEach-Object { Write-Error $_.Message }
-        throw "PowerShell parser errors in $Path"
+    $ErrorRows = @($Errors)
+    $ParserRows += [pscustomobject]@{
+        path = $Path
+        error_count = $ErrorRows.Count
+        errors = @($ErrorRows | ForEach-Object { $_.Message })
+    }
+    if ($ErrorRows.Count -gt 0) {
+        throw "PowerShell parser errors in $Path: $($ErrorRows.Message -join '; ')"
     }
 }
+Write-DiagnosticText -Name "powershell-parser.json" -Text (
+    $ParserRows | ConvertTo-Json -Depth 8
+)
 
 $PythonFiles = @(
     $Operator,
@@ -49,29 +119,33 @@ $PythonFiles = @(
     (Join-Path $Root "moomoo_operator_cli.py"),
     $Tests,
     (Join-Path $Root "test_bundle_builder.py"),
-    (Join-Path $Root "validate_moomoo_discovery_operator.py")
+    $Validator
 )
-& $PythonExecutable -m py_compile $PythonFiles
-if ($LASTEXITCODE -ne 0) {
-    throw "Python compile validation failed"
-}
+Invoke-NativeCapture -Name "python-compile" `
+    -FilePath $PythonExecutable `
+    -Arguments (@("-m", "py_compile") + $PythonFiles) | Out-Null
+Invoke-NativeCapture -Name "static-validation" `
+    -FilePath $PythonExecutable `
+    -Arguments @($Validator) | Out-Null
+Invoke-NativeCapture -Name "python-tests" `
+    -FilePath $PythonExecutable `
+    -Arguments @("-m", "unittest", "-v") | Out-Null
 
-Push-Location $Root
-try {
-    & $PythonExecutable -m unittest -v
-    if ($LASTEXITCODE -ne 0) {
-        throw "Python regression tests failed"
-    }
-} finally {
-    Pop-Location
-}
-
-$RepoRoot = (& git -C $Root rev-parse --show-toplevel).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Could not resolve repository root" }
-$ExpectedHead = (& git -C $RepoRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Could not resolve repository HEAD" }
-$ExpectedRemote = (& git -C $RepoRoot remote get-url origin).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Could not resolve repository remote" }
+$RepoRoot = (
+    Invoke-NativeCapture -Name "git-root" `
+        -FilePath "git" `
+        -Arguments @("-C", $Root, "rev-parse", "--show-toplevel")
+).text.Trim()
+$ExpectedHead = (
+    Invoke-NativeCapture -Name "git-head" `
+        -FilePath "git" `
+        -Arguments @("-C", $RepoRoot, "rev-parse", "HEAD")
+).text.Trim()
+$ExpectedRemote = (
+    Invoke-NativeCapture -Name "git-remote" `
+        -FilePath "git" `
+        -Arguments @("-C", $RepoRoot, "remote", "get-url", "origin")
+).text.Trim()
 
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) (
     "moomoo-discovery-v4-" + [Guid]::NewGuid().ToString("N")
@@ -80,7 +154,6 @@ $Runtime = Join-Path $TempRoot "runtime"
 $Data = Join-Path $Runtime "data"
 $Config = Join-Path $Runtime "config.yaml"
 $Db = Join-Path $Data "moomoo.db"
-$StdErrPath = Join-Path $TempRoot "gate-stderr.txt"
 
 try {
     New-Item -ItemType Directory -Path $Data -Force | Out-Null
@@ -108,37 +181,25 @@ virtual_trade:
             Get-FileHash -LiteralPath (Join-Path $Root $Name) -Algorithm SHA256
         ).Hash
     }
-    $ExpectedFileHashesJson = ConvertTo-Json -Compress -InputObject $ExpectedFileHashes
-    $ConfigRootsJson = ConvertTo-Json -Compress -InputObject @($Runtime)
-    $RuntimeJson = ConvertTo-Json -Compress -InputObject @($Runtime)
-
-    $Raw = & $PowerShellExecutable -NoProfile -NonInteractive `
-        -ExecutionPolicy Bypass `
-        -File $Gate `
-        -ExpectedFileHashesJson $ExpectedFileHashesJson `
-        -RunDiscovery `
-        -RepoPath $RepoRoot `
-        -ProtectedCheckoutPath $RepoRoot `
-        -ExpectedHead $ExpectedHead `
-        -ExpectedRemote $ExpectedRemote `
-        -ConfigSearchRootsJson $ConfigRootsJson `
-        -ProductionWorkingDirectoryCandidatesJson $RuntimeJson `
-        2> $StdErrPath
-    $ExitCode = $LASTEXITCODE
-    $RawText = @($Raw | ForEach-Object { [string]$_ }) -join "`n"
-    $StdErrText = if (Test-Path -LiteralPath $StdErrPath) {
-        Get-Content -LiteralPath $StdErrPath -Raw -ErrorAction SilentlyContinue
-    } else {
-        ""
-    }
-
-    if ($ExitCode -ne 0) {
-        throw "Synthetic gated discovery failed. stdout=$RawText stderr=$StdErrText"
-    }
+    $GateArguments = @(
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", $Gate,
+        "-ExpectedFileHashesJson", (ConvertTo-Json -Compress -InputObject $ExpectedFileHashes),
+        "-RunDiscovery",
+        "-RepoPath", $RepoRoot,
+        "-ProtectedCheckoutPath", $RepoRoot,
+        "-ExpectedHead", $ExpectedHead,
+        "-ExpectedRemote", $ExpectedRemote,
+        "-ConfigSearchRootsJson", (ConvertTo-Json -Compress -InputObject @($Runtime)),
+        "-ProductionWorkingDirectoryCandidatesJson", (ConvertTo-Json -Compress -InputObject @($Runtime))
+    )
+    $GateResult = Invoke-NativeCapture -Name "synthetic-gated-discovery" `
+        -FilePath $PowerShellExecutable `
+        -Arguments $GateArguments
     try {
-        $Payload = $RawText | ConvertFrom-Json
+        $Payload = $GateResult.text | ConvertFrom-Json
     } catch {
-        throw "Synthetic gated discovery emitted invalid JSON. stdout=$RawText stderr=$StdErrText error=$($_.Exception.Message)"
+        throw "Synthetic gated discovery emitted invalid JSON: $($_.Exception.Message)"
     }
     if (-not [bool]$Payload.gate.gate_passed) {
         throw "Synthetic parser/hash gate did not pass"
@@ -162,19 +223,36 @@ virtual_trade:
     $Mapping = @(
         $Payload.discovery.runtime_path_evidence |
             Where-Object {
-                [bool]$_.runtime_authoritative -and
+                [bool]$_.runtime_human_asserted -and
                 [bool]$_.database_exists -and
                 $_.resolved_database_path -eq $Db
             }
     )
     if ($Mapping.Count -ne 1) {
-        throw "Expected one authoritative existing runtime mapping, got $($Mapping.Count)"
+        throw "Expected one human-asserted existing runtime mapping, got $($Mapping.Count)"
     }
 
-    $OperatorVersion = (& $PythonExecutable $Operator --version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $OperatorVersion -ne "1.2.1") {
+    $OperatorVersion = (
+        Invoke-NativeCapture -Name "operator-version" `
+            -FilePath $PythonExecutable `
+            -Arguments @($Operator, "--version")
+    ).text.Trim()
+    if ($OperatorVersion -ne "1.2.1") {
         throw "Operator version check failed: expected 1.2.1, got $OperatorVersion"
     }
+
+    Write-DiagnosticText -Name "environment.json" -Text (
+        [pscustomobject]@{
+            powershell_version = $PSVersionTable.PSVersion.ToString()
+            powershell_edition = if (
+                $PSVersionTable.PSObject.Properties.Name -contains "PSEdition"
+            ) { [string]$PSVersionTable.PSEdition } else { "Desktop" }
+            python_executable = $PythonExecutable
+            nested_powershell_executable = $PowerShellExecutable
+            repository_root = $RepoRoot
+            tested_head = $ExpectedHead
+        } | ConvertTo-Json -Depth 6
+    )
 } finally {
     if (Test-Path -LiteralPath $TempRoot) {
         Remove-Item -LiteralPath $TempRoot -Recurse -Force
