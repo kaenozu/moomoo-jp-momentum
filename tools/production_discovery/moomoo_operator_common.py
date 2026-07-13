@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 DISCOVERY_FILENAME = "moomoo_production_readonly_discovery_v4.ps1"
 GATE_FILENAME = "moomoo_discovery_v4_gate.ps1"
 DEFAULT_EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
@@ -137,8 +137,11 @@ def as_list(value: Any) -> list[Any]:
 
 
 def is_error_object(value: Any) -> bool:
-    return isinstance(value, dict) and (
-        "error" in value or "error_type" in value or "invocation_error" in value
+    if not isinstance(value, dict):
+        return False
+    return any(
+        key in value and value.get(key) not in (None, "", [], {})
+        for key in ("error", "error_type", "invocation_error")
     )
 
 

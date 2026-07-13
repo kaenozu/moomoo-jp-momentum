@@ -56,9 +56,9 @@ def write_fixture_bundle(
         "report_type": (
             "moomoo_discovery_operator_bundle_manifest"
         ),
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "source_commit": "a" * 40,
-        "source_ref": "refs/pull/31/merge",
+        "source_ref": "refs/pull/33/merge",
         "authorization": {
             "production_readiness": "BLOCKED",
             "preflight_authorized": False,
@@ -143,9 +143,10 @@ class BundleBuilderTests(unittest.TestCase):
             write_fixture_bundle(left)
             write_fixture_bundle(right)
             report = comparer.compare_bundles(left, right)
-            self.assertTrue(report["passed"])
+            self.assertTrue(report["passed"], report)
             self.assertTrue(
-                report["comparison"]["outer_sha256_equal"]
+                report["comparison"]["outer_sha256_equal"],
+                report,
             )
 
     def test_different_bundles_are_rejected(self) -> None:

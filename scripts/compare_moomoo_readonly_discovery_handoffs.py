@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and byte-compare two discovery-operator ZIP bundles."""
+"""Validate and byte-compare two read-only discovery handoff ZIPs."""
 
 from __future__ import annotations
 
@@ -9,6 +9,16 @@ import json
 import zipfile
 from pathlib import Path
 from typing import Any, Sequence
+
+HANDOFF_VERSION = "1.2.2"
+OPERATOR_VERSION = "1.2.2"
+OPERATOR_BUNDLE_NAME = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
+AUTHORIZATION = {
+    "production_readiness": "BLOCKED",
+    "preflight_authorized": False,
+    "production_drill_authorized": False,
+    "cutover_authorized": False,
+}
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -20,22 +30,20 @@ def sha256_file(path: Path) -> str:
 
 
 def parse_sums(data: bytes) -> dict[str, str]:
-    rows: dict[str, str] = {}
     text = data.decode("utf-8")
-    for line_number, line in enumerate(
-        text.splitlines(), start=1
-    ):
+    rows: dict[str, str] = {}
+    for line_number, line in enumerate(text.splitlines(), start=1):
         if not line:
             continue
         try:
             digest, name = line.split("  ", 1)
         except ValueError as exc:
             raise ValueError(
-                f"Invalid SHA256SUMS line {line_number}: {line!r}"
+                f"Invalid HANDOFF_SHA256SUMS line {line_number}: {line!r}"
             ) from exc
+        digest = digest.lower()
         if len(digest) != 64 or any(
-            char not in "0123456789abcdefABCDEF"
-            for char in digest
+            char not in "0123456789abcdef" for char in digest
         ):
             raise ValueError(
                 f"Invalid SHA-256 on line {line_number}"
@@ -44,11 +52,13 @@ def parse_sums(data: bytes) -> dict[str, str]:
             raise ValueError(
                 f"Missing or duplicate filename on line {line_number}"
             )
-        rows[name] = digest.lower()
+        if Path(name).is_absolute() or ".." in Path(name).parts:
+            raise ValueError(f"Unsafe filename on line {line_number}: {name}")
+        rows[name] = digest
     return rows
 
 
-def inspect_bundle(path: Path) -> dict[str, Any]:
+def inspect_handoff(path: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
         "path": str(path),
         "zip_sha256": None,
@@ -62,10 +72,11 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
         "errors": [],
     }
     if not path.is_file():
-        result["errors"].append("bundle does not exist")
+        result["errors"].append("handoff does not exist")
         return result
 
     result["zip_sha256"] = sha256_file(path)
+    members: dict[str, bytes] = {}
     try:
         with zipfile.ZipFile(path, "r") as archive:
             names = [
@@ -78,8 +89,7 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
             )
             result["duplicate_entries"] = duplicates
             result["member_names"] = sorted(names)
-            bad_member = archive.testzip()
-            result["bad_compressed_member"] = bad_member
+            result["bad_compressed_member"] = archive.testzip()
             members = {
                 name: archive.read(name)
                 for name in names
@@ -98,12 +108,32 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
     if result["bad_compressed_member"]:
         result["errors"].append("compressed data test failed")
 
+    required = {
+        "HANDOFF_SHA256SUMS.txt",
+        "HANDOFF_MANIFEST.json",
+        "README_FIRST.md",
+        "LOCAL_AGENT_PROMPT.md",
+        "EVIDENCE_REVIEW_CHECKLIST.md",
+        "OPERATOR_README_ORIGINAL.md",
+        "run-readonly-discovery.ps1",
+        "verify-handoff.ps1",
+        OPERATOR_BUNDLE_NAME,
+    }
+    missing = sorted(required - set(members))
+    if missing:
+        result["errors"].append(f"missing required members: {missing}")
+
     try:
-        sums = parse_sums(members["SHA256SUMS.txt"])
+        sums = parse_sums(members["HANDOFF_SHA256SUMS.txt"])
     except (KeyError, UnicodeError, ValueError) as exc:
-        result["errors"].append(f"SHA256SUMS invalid: {exc}")
+        result["errors"].append(f"handoff checksums invalid: {exc}")
         sums = {}
 
+    expected_covered = set(members) - {"HANDOFF_SHA256SUMS.txt"}
+    if set(sums) != expected_covered:
+        result["errors"].append(
+            "handoff checksum coverage does not exactly match package members"
+        )
     hash_errors: list[str] = []
     for name, expected in sorted(sums.items()):
         data = members.get(name)
@@ -121,7 +151,7 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
 
     try:
         manifest = json.loads(
-            members["bundle-manifest.json"].decode("utf-8")
+            members["HANDOFF_MANIFEST.json"].decode("utf-8")
         )
         result["manifest"] = manifest
     except (KeyError, UnicodeError, json.JSONDecodeError) as exc:
@@ -129,32 +159,71 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
         manifest = None
 
     if isinstance(manifest, dict):
-        expected_auth = {
-            "production_readiness": "BLOCKED",
-            "preflight_authorized": False,
-            "production_drill_authorized": False,
-            "cutover_authorized": False,
-        }
-        if manifest.get("authorization") != expected_auth:
+        if manifest.get("report_type") != (
+            "moomoo_readonly_discovery_handoff_manifest"
+        ):
+            result["errors"].append("unexpected handoff report_type")
+        if manifest.get("schema_version") != 1:
+            result["errors"].append("unexpected handoff schema_version")
+        if manifest.get("handoff_version") != HANDOFF_VERSION:
+            result["errors"].append("unexpected handoff version")
+        if manifest.get("operator_version") != OPERATOR_VERSION:
+            result["errors"].append("unexpected operator version")
+        expected_head = str(
+            manifest.get("expected_checkout_head", "")
+        ).lower()
+        if len(expected_head) != 40 or any(
+            char not in "0123456789abcdef" for char in expected_head
+        ):
+            result["errors"].append("invalid expected checkout HEAD")
+        if str(manifest.get("source_commit", "")).lower() != expected_head:
+            result["errors"].append(
+                "source_commit and expected checkout HEAD differ"
+            )
+        if manifest.get("authorization") != AUTHORIZATION:
             result["errors"].append(
                 "manifest authorization boundary is not fail-closed"
             )
-        if manifest.get("operator_version") != "1.2.2":
-            result["errors"].append(
-                "unexpected operator version in manifest"
-            )
-        if not manifest.get("source_commit"):
-            result["errors"].append(
-                "manifest source_commit is missing"
-            )
+        bundle = manifest.get("operator_bundle")
+        if not isinstance(bundle, dict):
+            result["errors"].append("operator_bundle manifest is missing")
+        else:
+            name = bundle.get("name")
+            if name != OPERATOR_BUNDLE_NAME:
+                result["errors"].append("unexpected operator bundle name")
+            bundle_data = members.get(str(name))
+            if bundle_data is None:
+                result["errors"].append("operator bundle member is missing")
+            elif sha256_bytes(bundle_data) != bundle.get("sha256"):
+                result["errors"].append(
+                    "operator bundle SHA-256 does not match manifest"
+                )
+            if str(bundle.get("source_commit", "")).lower() != expected_head:
+                result["errors"].append(
+                    "operator bundle source_commit does not match expected HEAD"
+                )
+        payload_files = manifest.get("payload_files")
+        if not isinstance(payload_files, dict):
+            result["errors"].append("payload_files is missing")
+        else:
+            for name, expected in sorted(payload_files.items()):
+                data = members.get(name)
+                if data is None:
+                    result["errors"].append(
+                        f"payload_files lists missing member: {name}"
+                    )
+                elif sha256_bytes(data) != expected:
+                    result["errors"].append(
+                        f"payload_files hash mismatch: {name}"
+                    )
 
     result["valid"] = not result["errors"]
     return result
 
 
-def compare_bundles(left: Path, right: Path) -> dict[str, Any]:
-    left_result = inspect_bundle(left)
-    right_result = inspect_bundle(right)
+def compare_handoffs(left: Path, right: Path) -> dict[str, Any]:
+    left_result = inspect_handoff(left)
+    right_result = inspect_handoff(right)
     left_names = set(left_result["member_names"])
     right_names = set(right_result["member_names"])
     left_members = left_result["members"]
@@ -166,16 +235,14 @@ def compare_bundles(left: Path, right: Path) -> dict[str, Any]:
     )
     comparison = {
         "outer_sha256_equal": (
-            left_result["zip_sha256"]
-            == right_result["zip_sha256"]
+            left_result["zip_sha256"] == right_result["zip_sha256"]
         ),
         "member_sets_equal": left_names == right_names,
         "left_only_members": sorted(left_names - right_names),
         "right_only_members": sorted(right_names - left_names),
         "differing_members": differing_members,
         "manifest_equal": (
-            left_result["manifest"]
-            == right_result["manifest"]
+            left_result["manifest"] == right_result["manifest"]
         ),
     }
     passed = (
@@ -187,7 +254,7 @@ def compare_bundles(left: Path, right: Path) -> dict[str, Any]:
         and comparison["manifest_equal"]
     )
     return {
-        "report_type": "moomoo_operator_bundle_comparison",
+        "report_type": "moomoo_readonly_discovery_handoff_comparison",
         "passed": passed,
         "left": {
             key: value
@@ -213,7 +280,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
-    report = compare_bundles(
+    report = compare_handoffs(
         Path(args.left).resolve(),
         Path(args.right).resolve(),
     )
