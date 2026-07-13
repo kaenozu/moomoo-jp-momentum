@@ -13,6 +13,14 @@ $Gate = Join-Path $Root "moomoo_discovery_v4_gate.ps1"
 $Operator = Join-Path $Root "moomoo_discovery_operator.py"
 $Tests = Join-Path $Root "test_moomoo_discovery_operator.py"
 
+$RequestedEngine = [IO.Path]::GetFileName($PowerShellExecutable).ToLowerInvariant()
+if ($RequestedEngine -eq "powershell.exe" -and $PSVersionTable.PSVersion.Major -ne 5) {
+    throw "powershell.exe validation must run inside Windows PowerShell 5.1"
+}
+if ($RequestedEngine -eq "pwsh.exe" -and $PSVersionTable.PSVersion.Major -lt 7) {
+    throw "pwsh.exe validation must run inside PowerShell 7 or newer"
+}
+
 $PowerShellFiles = @(
     $Discovery,
     (Join-Path $Root "moomoo_discovery_v4_common.ps1"),
@@ -40,6 +48,7 @@ $PythonFiles = @(
     (Join-Path $Root "moomoo_operator_review.py"),
     (Join-Path $Root "moomoo_operator_cli.py"),
     $Tests,
+    (Join-Path $Root "test_bundle_builder.py"),
     (Join-Path $Root "validate_moomoo_discovery_operator.py")
 )
 & $PythonExecutable -m py_compile $PythonFiles
@@ -71,6 +80,7 @@ $Runtime = Join-Path $TempRoot "runtime"
 $Data = Join-Path $Runtime "data"
 $Config = Join-Path $Runtime "config.yaml"
 $Db = Join-Path $Data "moomoo.db"
+$StdErrPath = Join-Path $TempRoot "gate-stderr.txt"
 
 try {
     New-Item -ItemType Directory -Path $Data -Force | Out-Null
@@ -102,29 +112,34 @@ virtual_trade:
     $ConfigRootsJson = ConvertTo-Json -Compress -InputObject @($Runtime)
     $RuntimeJson = ConvertTo-Json -Compress -InputObject @($Runtime)
 
-    $PreviousPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $Raw = & $PowerShellExecutable -NoProfile -NonInteractive `
-            -ExecutionPolicy Bypass `
-            -File $Gate `
-            -ExpectedFileHashesJson $ExpectedFileHashesJson `
-            -RunDiscovery `
-            -RepoPath $RepoRoot `
-            -ProtectedCheckoutPath $RepoRoot `
-            -ExpectedHead $ExpectedHead `
-            -ExpectedRemote $ExpectedRemote `
-            -ConfigSearchRootsJson $ConfigRootsJson `
-            -ProductionWorkingDirectoryCandidatesJson $RuntimeJson 2>&1
-        $ExitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $PreviousPreference
+    $Raw = & $PowerShellExecutable -NoProfile -NonInteractive `
+        -ExecutionPolicy Bypass `
+        -File $Gate `
+        -ExpectedFileHashesJson $ExpectedFileHashesJson `
+        -RunDiscovery `
+        -RepoPath $RepoRoot `
+        -ProtectedCheckoutPath $RepoRoot `
+        -ExpectedHead $ExpectedHead `
+        -ExpectedRemote $ExpectedRemote `
+        -ConfigSearchRootsJson $ConfigRootsJson `
+        -ProductionWorkingDirectoryCandidatesJson $RuntimeJson `
+        2> $StdErrPath
+    $ExitCode = $LASTEXITCODE
+    $RawText = @($Raw | ForEach-Object { [string]$_ }) -join "`n"
+    $StdErrText = if (Test-Path -LiteralPath $StdErrPath) {
+        Get-Content -LiteralPath $StdErrPath -Raw -ErrorAction SilentlyContinue
+    } else {
+        ""
     }
 
     if ($ExitCode -ne 0) {
-        throw "Synthetic gated discovery failed: $($Raw -join "`n")"
+        throw "Synthetic gated discovery failed. stdout=$RawText stderr=$StdErrText"
     }
-    $Payload = ($Raw -join "`n") | ConvertFrom-Json
+    try {
+        $Payload = $RawText | ConvertFrom-Json
+    } catch {
+        throw "Synthetic gated discovery emitted invalid JSON. stdout=$RawText stderr=$StdErrText error=$($_.Exception.Message)"
+    }
     if (-not [bool]$Payload.gate.gate_passed) {
         throw "Synthetic parser/hash gate did not pass"
     }
@@ -140,6 +155,9 @@ virtual_trade:
     if ([bool]$Payload.discovery.authorization.preflight_authorized) {
         throw "Discovery incorrectly authorized preflight"
     }
+    if ($null -eq $Payload.discovery_diagnostics) {
+        throw "Gate did not retain discovery stream diagnostics"
+    }
 
     $Mapping = @(
         $Payload.discovery.runtime_path_evidence |
@@ -153,9 +171,9 @@ virtual_trade:
         throw "Expected one authoritative existing runtime mapping, got $($Mapping.Count)"
     }
 
-    $OperatorHash = (& $PythonExecutable $Operator --version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $OperatorHash -ne "1.2.0") {
-        throw "Operator version check failed"
+    $OperatorVersion = (& $PythonExecutable $Operator --version).Trim()
+    if ($LASTEXITCODE -ne 0 -or $OperatorVersion -ne "1.2.1") {
+        throw "Operator version check failed: expected 1.2.1, got $OperatorVersion"
     }
 } finally {
     if (Test-Path -LiteralPath $TempRoot) {
