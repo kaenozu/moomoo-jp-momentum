@@ -145,7 +145,9 @@ function Add-RuntimeCandidate {
         [AllowNull()][string]$Path,
         [Parameter(Mandatory = $true)][string]$SourceType,
         [AllowNull()][string]$SourceId,
-        [Parameter(Mandatory = $true)][bool]$Authoritative
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("machine_observed", "human_asserted", "derived_candidate")]
+        [string]$EvidenceClass
     )
     if (-not $Path -or -not $Path.Trim()) {
         return
@@ -161,6 +163,10 @@ function Add-RuntimeCandidate {
             path = $full
             exists = Test-Path -LiteralPath $full -PathType Container
             evidence = @()
+            evidence_classes = @()
+            machine_observed = $false
+            human_asserted = $false
+            derived_candidate = $false
             authoritative = $false
         }
     }
@@ -168,10 +174,23 @@ function Add-RuntimeCandidate {
     $row.evidence += [pscustomobject]@{
         source_type = $SourceType
         source_id = $SourceId
-        authoritative = $Authoritative
+        evidence_class = $EvidenceClass
+        authoritative = ($EvidenceClass -eq "machine_observed")
     }
-    if ($Authoritative) {
-        $row.authoritative = $true
+    if ($row.evidence_classes -notcontains $EvidenceClass) {
+        $row.evidence_classes += $EvidenceClass
+    }
+    switch ($EvidenceClass) {
+        "machine_observed" {
+            $row.machine_observed = $true
+            $row.authoritative = $true
+        }
+        "human_asserted" {
+            $row.human_asserted = $true
+        }
+        "derived_candidate" {
+            $row.derived_candidate = $true
+        }
     }
 }
 
@@ -182,22 +201,32 @@ function Get-RuntimeWorkingDirectoryCandidates {
     )
     $map = @{}
     foreach ($path in $ProductionWorkingDirectoryCandidates) {
-        Add-RuntimeCandidate -Map $map -Path $path -SourceType "operator_explicit" -SourceId $path -Authoritative $true
+        Add-RuntimeCandidate -Map $map -Path $path `
+            -SourceType "operator_explicit" -SourceId $path `
+            -EvidenceClass "human_asserted"
     }
     foreach ($task in @($ScheduledTasks)) {
         if ($task -and -not ($task.PSObject.Properties.Name -contains "error_type")) {
             Add-RuntimeCandidate -Map $map -Path $task.working_directory `
                 -SourceType "scheduled_task_working_directory" `
                 -SourceId "$($task.task_path)$($task.task_name)" `
-                -Authoritative $true
+                -EvidenceClass "machine_observed"
         }
     }
-    Add-RuntimeCandidate -Map $map -Path (Get-Location).Path -SourceType "discovery_invocation_directory" -SourceId $null -Authoritative $false
-    Add-RuntimeCandidate -Map $map -Path $RepoPath -SourceType "verified_checkout" -SourceId $RepoPath -Authoritative $false
-    Add-RuntimeCandidate -Map $map -Path $ProtectedCheckoutPath -SourceType "protected_checkout" -SourceId $ProtectedCheckoutPath -Authoritative $false
+    Add-RuntimeCandidate -Map $map -Path (Get-Location).Path `
+        -SourceType "discovery_invocation_directory" -SourceId $null `
+        -EvidenceClass "derived_candidate"
+    Add-RuntimeCandidate -Map $map -Path $RepoPath `
+        -SourceType "verified_checkout" -SourceId $RepoPath `
+        -EvidenceClass "derived_candidate"
+    Add-RuntimeCandidate -Map $map -Path $ProtectedCheckoutPath `
+        -SourceType "protected_checkout" -SourceId $ProtectedCheckoutPath `
+        -EvidenceClass "derived_candidate"
     foreach ($config in @($ConfigCandidates)) {
         if ($config -and -not ($config.PSObject.Properties.Name -contains "error_type")) {
-            Add-RuntimeCandidate -Map $map -Path $config.directory -SourceType "config_directory" -SourceId $config.path -Authoritative $false
+            Add-RuntimeCandidate -Map $map -Path $config.directory `
+                -SourceType "config_directory" -SourceId $config.path `
+                -EvidenceClass "derived_candidate"
         }
     }
     @($map.Values | Sort-Object path)
@@ -235,6 +264,10 @@ function Resolve-ConfigRuntimePaths {
                     config_path = $config.path
                     production_working_directory = $runtime.path
                     runtime_authoritative = $runtime.authoritative
+                    runtime_machine_observed = $runtime.machine_observed
+                    runtime_human_asserted = $runtime.human_asserted
+                    runtime_derived_candidate = $runtime.derived_candidate
+                    runtime_evidence_classes = $runtime.evidence_classes
                     runtime_evidence = $runtime.evidence
                     configured_database_path = $rawDb
                     configured_backup_directory = $rawBackup
@@ -250,6 +283,10 @@ function Resolve-ConfigRuntimePaths {
                 production_working_directory = $runtime.path
                 working_directory_exists = $runtime.exists
                 runtime_authoritative = $runtime.authoritative
+                runtime_machine_observed = $runtime.machine_observed
+                runtime_human_asserted = $runtime.human_asserted
+                runtime_derived_candidate = $runtime.derived_candidate
+                runtime_evidence_classes = $runtime.evidence_classes
                 runtime_evidence = $runtime.evidence
                 configured_database_path = $rawDb
                 resolved_database_path = $dbPath
