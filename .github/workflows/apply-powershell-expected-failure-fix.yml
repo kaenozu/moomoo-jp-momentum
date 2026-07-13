@@ -1,0 +1,109 @@
+name: apply PowerShell expected-failure capture fix
+
+on:
+  push:
+    branches:
+      - agent/sqlite-backup-recovery-drill
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sqlite-backup-recovery-drill
+          fetch-depth: 0
+
+      - name: Apply exact expected-failure capture patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/sqlite_backup_recovery_drill.ps1")
+          text = path.read_text(encoding="utf-8")
+          old = '''$corruptVerifyRaw = & $Python database_backup.py `
+              --config $DrillConfig verify $CorruptBackup 2>&1
+          $CorruptVerifyExit = $LASTEXITCODE
+          $corruptVerifyRaw |
+              Set-Content -Encoding utf8 "$EvidenceDir\\60-corrupt-verify-output.txt"
+          if ($CorruptVerifyExit -eq 0) {
+              throw "corrupted copy accepted by verify"
+          }
+
+          $corruptRestoreRaw = & $Python database_backup.py `
+              --config $DrillConfig restore `
+              $CorruptBackup $CorruptRestorePath `
+              --strategy $Strategy --dry-run 2>&1
+          $CorruptRestoreExit = $LASTEXITCODE
+          $corruptRestoreRaw |
+              Set-Content -Encoding utf8 "$EvidenceDir\\61-corrupt-restore-output.txt"
+          if ($CorruptRestoreExit -eq 0) {
+              throw "corrupted copy accepted by restore dry-run"
+          }
+          '''
+          new = '''$previousErrorActionPreference = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          try {
+              $corruptVerifyRaw = & $Python database_backup.py `
+                  --config $DrillConfig verify $CorruptBackup 2>&1
+              $CorruptVerifyExit = $LASTEXITCODE
+              $corruptVerifyRaw |
+                  Set-Content -Encoding utf8 "$EvidenceDir\\60-corrupt-verify-output.txt"
+              if ($CorruptVerifyExit -eq 0) {
+                  throw "corrupted copy accepted by verify"
+              }
+
+              $corruptRestoreRaw = & $Python database_backup.py `
+                  --config $DrillConfig restore `
+                  $CorruptBackup $CorruptRestorePath `
+                  --strategy $Strategy --dry-run 2>&1
+              $CorruptRestoreExit = $LASTEXITCODE
+              $corruptRestoreRaw |
+                  Set-Content -Encoding utf8 "$EvidenceDir\\61-corrupt-restore-output.txt"
+              if ($CorruptRestoreExit -eq 0) {
+                  throw "corrupted copy accepted by restore dry-run"
+              }
+          } finally {
+              $ErrorActionPreference = $previousErrorActionPreference
+          }
+          '''
+          if new in text:
+              print("Expected-failure capture fix is already present")
+              raise SystemExit(0)
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected one corruption block, found {count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          pwsh -NoProfile -Command '
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              "scripts/sqlite_backup_recovery_drill.ps1",
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          '
+
+      - name: Commit exact fix
+        run: |
+          if git diff --quiet -- scripts/sqlite_backup_recovery_drill.ps1; then
+            echo "No expected-failure change required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/sqlite_backup_recovery_drill.ps1
+          git commit -m "fix: capture expected corruption failures on PowerShell 5"
+          git push origin HEAD:agent/sqlite-backup-recovery-drill
