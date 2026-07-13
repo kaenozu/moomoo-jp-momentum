@@ -235,6 +235,29 @@ virtual_trade:
         throw "Gate did not retain discovery stream diagnostics"
     }
 
+    $RepositorySnapshot = $Payload.discovery.repositories.preflight_candidate
+    if ($null -eq $RepositorySnapshot) {
+        throw "Synthetic discovery omitted the verified repository snapshot"
+    }
+    if ($RepositorySnapshot.PSObject.Properties.Name -contains "error_type") {
+        throw "Verified repository snapshot failed: $($RepositorySnapshot.error)"
+    }
+    if ([string]$RepositorySnapshot.status -ne "PASS") {
+        throw "Verified repository snapshot status was $($RepositorySnapshot.status), expected PASS"
+    }
+    if (-not [bool]$RepositorySnapshot.clean) {
+        throw "Verified repository snapshot did not report a clean checkout"
+    }
+    if ([string]$RepositorySnapshot.head -ne $ExpectedHead) {
+        throw "Verified repository snapshot HEAD did not match the tested merge ref"
+    }
+    if (-not [bool]$RepositorySnapshot.origin_matches) {
+        throw "Verified repository snapshot origin did not match the expected remote"
+    }
+    if (-not [bool]$RepositorySnapshot.drill_script_exists) {
+        throw "Verified repository snapshot did not contain the recovery drill script"
+    }
+
     $Mapping = @(
         $Payload.discovery.runtime_path_evidence |
             Where-Object {
