@@ -13,7 +13,14 @@ $Gate = Join-Path $Root "moomoo_discovery_v4_gate.ps1"
 $Operator = Join-Path $Root "moomoo_discovery_operator.py"
 $Tests = Join-Path $Root "test_moomoo_discovery_operator.py"
 
-foreach ($Path in @($Discovery, $Gate)) {
+$PowerShellFiles = @(
+    $Discovery,
+    (Join-Path $Root "moomoo_discovery_v4_common.ps1"),
+    (Join-Path $Root "moomoo_discovery_v4_runtime.ps1"),
+    (Join-Path $Root "moomoo_discovery_v4_storage.ps1"),
+    $Gate
+)
+foreach ($Path in $PowerShellFiles) {
     $Tokens = $null
     $Errors = $null
     [System.Management.Automation.Language.Parser]::ParseFile(
@@ -27,7 +34,15 @@ foreach ($Path in @($Discovery, $Gate)) {
     }
 }
 
-& $PythonExecutable -m py_compile $Operator $Tests
+$PythonFiles = @(
+    $Operator,
+    (Join-Path $Root "moomoo_operator_common.py"),
+    (Join-Path $Root "moomoo_operator_review.py"),
+    (Join-Path $Root "moomoo_operator_cli.py"),
+    $Tests,
+    (Join-Path $Root "validate_moomoo_discovery_operator.py")
+)
+& $PythonExecutable -m py_compile $PythonFiles
 if ($LASTEXITCODE -ne 0) {
     throw "Python compile validation failed"
 }
@@ -72,9 +87,18 @@ virtual_trade:
   enabled: true
 "@ | Set-Content -LiteralPath $Config -Encoding UTF8
 
-    $ExpectedDiscoveryHash = (
-        Get-FileHash -LiteralPath $Discovery -Algorithm SHA256
-    ).Hash
+    $ExpectedFileHashes = [ordered]@{}
+    foreach ($Name in @(
+        "moomoo_production_readonly_discovery_v4.ps1",
+        "moomoo_discovery_v4_common.ps1",
+        "moomoo_discovery_v4_runtime.ps1",
+        "moomoo_discovery_v4_storage.ps1"
+    )) {
+        $ExpectedFileHashes[$Name] = (
+            Get-FileHash -LiteralPath (Join-Path $Root $Name) -Algorithm SHA256
+        ).Hash
+    }
+    $ExpectedFileHashesJson = ConvertTo-Json -Compress -InputObject $ExpectedFileHashes
     $ConfigRootsJson = ConvertTo-Json -Compress -InputObject @($Runtime)
     $RuntimeJson = ConvertTo-Json -Compress -InputObject @($Runtime)
 
@@ -84,7 +108,7 @@ virtual_trade:
         $Raw = & $PowerShellExecutable -NoProfile -NonInteractive `
             -ExecutionPolicy Bypass `
             -File $Gate `
-            -ExpectedDiscoverySha256 $ExpectedDiscoveryHash `
+            -ExpectedFileHashesJson $ExpectedFileHashesJson `
             -RunDiscovery `
             -RepoPath $RepoRoot `
             -ProtectedCheckoutPath $RepoRoot `
