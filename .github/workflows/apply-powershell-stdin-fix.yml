@@ -1,0 +1,100 @@
+name: apply PowerShell Python stdin fix
+
+on:
+  push:
+    branches:
+      - agent/sqlite-backup-recovery-drill
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sqlite-backup-recovery-drill
+          fetch-depth: 0
+
+      - name: Replace multiline python -c invocations exactly
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              Path("tests/run_database_backup_drill_windows.ps1"): [
+                  (
+                      "$fixtureRaw = & python -c $FixtureScript $LiveDb $Config $ProductionBackupDir 2>&1",
+                      "$fixtureRaw = $FixtureScript | & python - $LiveDb $Config $ProductionBackupDir 2>&1",
+                  ),
+              ],
+              Path("scripts/sqlite_backup_recovery_drill.ps1"): [
+                  (
+                      "$configInfoRaw = & $Python -c $ConfigInfoScript $ProductionConfig 2>&1",
+                      "$configInfoRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1",
+                  ),
+                  (
+                      "$journalRaw = & $Python -c $JournalModeScript $LiveDb 2>&1",
+                      "$journalRaw = $JournalModeScript | & $Python - $LiveDb 2>&1",
+                  ),
+                  (
+                      "$buildRaw = & $Python -c $BuildDrillConfigScript `\n    $ProductionConfig $LiveDb $PrimaryDrillDir $DrillConfig 2>&1",
+                      "$buildRaw = $BuildDrillConfigScript | & $Python - `\n    $ProductionConfig $LiveDb $PrimaryDrillDir $DrillConfig 2>&1",
+                  ),
+                  (
+                      "$corruptRaw = & $Python -c $CorruptScript $CorruptBackup 2>&1",
+                      "$corruptRaw = $CorruptScript | & $Python - $CorruptBackup 2>&1",
+                  ),
+                  (
+                      "$finalConfigRaw = & $Python -c $ConfigInfoScript $ProductionConfig 2>&1",
+                      "$finalConfigRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1",
+                  ),
+              ],
+          }
+
+          for path, pairs in replacements.items():
+              text = path.read_text(encoding="utf-8")
+              for old, new in pairs:
+                  if new in text:
+                      continue
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f"{path}: expected one target, found {count}: {old}")
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+          PY
+
+          git diff --check
+          pwsh -NoProfile -Command '
+            foreach ($path in @(
+              "scripts/sqlite_backup_recovery_drill.ps1",
+              "tests/run_database_backup_drill_windows.ps1"
+            )) {
+              $tokens = $null
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                $path,
+                [ref]$tokens,
+                [ref]$errors
+              ) | Out-Null
+              if ($errors.Count -gt 0) {
+                $errors | ForEach-Object { Write-Error $_.Message }
+                exit 1
+              }
+            }
+          '
+
+      - name: Commit exact fixes
+        run: |
+          if git diff --quiet -- scripts/sqlite_backup_recovery_drill.ps1 tests/run_database_backup_drill_windows.ps1; then
+            echo "No stdin compatibility change required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/sqlite_backup_recovery_drill.ps1 tests/run_database_backup_drill_windows.ps1
+          git commit -m "fix: pipe embedded Python scripts on PowerShell 5"
+          git push origin HEAD:agent/sqlite-backup-recovery-drill
