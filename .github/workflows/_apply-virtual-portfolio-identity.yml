@@ -1,0 +1,93 @@
+name: temporary virtual portfolio identity applicator
+
+on:
+  push:
+    branches:
+      - agent/virtual-portfolio-identity
+    paths:
+      - scripts/_apply_virtual_portfolio_identity.py
+      - .github/workflows/_apply-virtual-portfolio-identity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/virtual-portfolio-identity
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+      - name: Apply identity split
+        run: python scripts/_apply_virtual_portfolio_identity.py
+      - name: Validate Python and PowerShell changes
+        shell: bash
+        run: |
+          python -m py_compile \
+            src/trading_identity.py \
+            src/signals.py \
+            src/virtual_trade_integrity.py \
+            src/database_backup.py \
+            run_daily_cycle.py \
+            virtual_order.py \
+            database_backup.py \
+            tests/test_virtual_portfolio_identity.py \
+            tests/test_database_backup_drill.py
+          python -m pytest -q \
+            tests/test_virtual_portfolio_identity.py \
+            tests/test_database_backup.py \
+            tests/test_database_backup_drill.py \
+            tests/test_daily_cycle.py \
+            tests/test_daily_cycle_integrity.py
+          ruff check \
+            src/trading_identity.py \
+            src/signals.py \
+            src/virtual_trade_integrity.py \
+            src/database_backup.py \
+            run_daily_cycle.py \
+            virtual_order.py \
+            database_backup.py \
+            tests/test_virtual_portfolio_identity.py \
+            tests/test_database_backup_drill.py
+          pyright
+          pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/sqlite_backup_recovery_drill.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+          pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("tests/run_database_backup_drill_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+          git diff --check
+      - name: Commit generated patch
+        shell: bash
+        run: |
+          if [[ -z "$(git status --porcelain -- . ':!scripts/_apply_virtual_portfolio_identity.py' ':!.github/workflows/_apply-virtual-portfolio-identity.yml')" ]]; then
+            echo "No generated changes"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/trading_identity.py \
+            src/signals.py \
+            run_daily_cycle.py \
+            virtual_order.py \
+            app.py \
+            database_backup.py \
+            src/database_backup.py \
+            src/virtual_trade_integrity.py \
+            scripts/sqlite_backup_recovery_drill.ps1 \
+            config.example.yaml \
+            README.md \
+            tests/test_database_backup_drill.py \
+            tests/run_database_backup_drill_windows.ps1 \
+            tests/test_virtual_portfolio_identity.py \
+            .github/workflows/tests.yml \
+            pyrightconfig.json
+          git commit -m "fix: separate signal strategy from virtual portfolio"
+          git push origin HEAD:agent/virtual-portfolio-identity
