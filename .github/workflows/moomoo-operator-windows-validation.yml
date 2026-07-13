@@ -38,29 +38,75 @@ jobs:
       - name: Record checkout line-ending state
         shell: powershell
         run: |
-          & git check-attr text eol -- tools/production_discovery/*.ps1
-          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py
+          New-Item -ItemType Directory -Path .ci-diagnostics -Force | Out-Null
+          $PSVersionTable | Out-String | Set-Content .ci-diagnostics\powershell-version.txt
+          & git check-attr text eol -- tools/production_discovery/*.ps1 2>&1 |
+            Tee-Object .ci-diagnostics\git-attributes.txt
+          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py 2>&1 |
+            Tee-Object .ci-diagnostics\git-eol.txt
       - name: Run static and regression validation
+        id: validate
+        continue-on-error: true
         shell: powershell
-        run: >-
-          .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1
-          -PythonExecutable python
-          -PowerShellExecutable powershell.exe
+        run: |
+          $log = ".ci-diagnostics\validation.log"
+          try {
+            & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
+              -PythonExecutable python `
+              -PowerShellExecutable powershell.exe *>&1 |
+                Tee-Object -FilePath $log
+            $code = if ($LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append
+            $code = 1
+          }
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($code -ne 0) { exit $code }
       - name: Build operator bundle
-        run: python .\scripts\build_moomoo_discovery_operator_bundle.py
+        id: build
+        if: steps.validate.outcome == 'success'
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $log = ".ci-diagnostics\bundle-build.log"
+          & python .\scripts\build_moomoo_discovery_operator_bundle.py 2>&1 |
+            Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($code -ne 0) { exit $code }
       - name: Verify tracked repository unchanged
+        id: clean
+        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
+        continue-on-error: true
         shell: powershell
         run: |
           & git diff --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
           & git diff --cached --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
-      - uses: actions/upload-artifact@v4
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-operator-v1.2.1-powershell5-diagnostics
+          path: .ci-diagnostics
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload operator bundle
+        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
+        uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell5
           path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 7
+      - name: Enforce validation result
+        if: always()
+        shell: powershell
+        run: |
+          if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
+          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build failed" }
+          if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
 
   powershell-7:
     name: PowerShell 7
@@ -76,26 +122,72 @@ jobs:
       - name: Record checkout line-ending state
         shell: pwsh
         run: |
-          & git check-attr text eol -- tools/production_discovery/*.ps1
-          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py
+          New-Item -ItemType Directory -Path .ci-diagnostics -Force | Out-Null
+          $PSVersionTable | Out-String | Set-Content .ci-diagnostics/powershell-version.txt
+          & git check-attr text eol -- tools/production_discovery/*.ps1 2>&1 |
+            Tee-Object .ci-diagnostics/git-attributes.txt
+          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py 2>&1 |
+            Tee-Object .ci-diagnostics/git-eol.txt
       - name: Run static and regression validation
+        id: validate
+        continue-on-error: true
         shell: pwsh
-        run: >-
-          .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1
-          -PythonExecutable python
-          -PowerShellExecutable pwsh.exe
+        run: |
+          $log = ".ci-diagnostics/validation.log"
+          try {
+            & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
+              -PythonExecutable python `
+              -PowerShellExecutable pwsh.exe *>&1 |
+                Tee-Object -FilePath $log
+            $code = if ($LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+          } catch {
+            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append
+            $code = 1
+          }
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($code -ne 0) { exit $code }
       - name: Build operator bundle
-        run: python .\scripts\build_moomoo_discovery_operator_bundle.py
+        id: build
+        if: steps.validate.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $log = ".ci-diagnostics/bundle-build.log"
+          & python .\scripts\build_moomoo_discovery_operator_bundle.py 2>&1 |
+            Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($code -ne 0) { exit $code }
       - name: Verify tracked repository unchanged
+        id: clean
+        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: |
           & git diff --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
           & git diff --cached --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
-      - uses: actions/upload-artifact@v4
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-operator-v1.2.1-powershell7-diagnostics
+          path: .ci-diagnostics
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload operator bundle
+        if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
+        uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell7
           path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
           retention-days: 7
+      - name: Enforce validation result
+        if: always()
+        shell: pwsh
+        run: |
+          if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
+          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build failed" }
+          if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
