@@ -13,6 +13,7 @@ TARGETS = (
     "tests/test_moomoo_human_validation.py",
     ".github/workflows/moomoo-operator-release.yml",
     "tools/production_discovery/README_moomoo_human_validation_ja.md",
+    "tools/production_discovery/validate_moomoo_human_validation.py",
 )
 
 
@@ -38,17 +39,21 @@ def main() -> None:
         "tests/test_moomoo_discovery_release.py",
         ".github/workflows/moomoo-operator-release.yml",
         "tools/production_discovery/README_moomoo_human_validation_ja.md",
+        "tools/production_discovery/validate_moomoo_human_validation.py",
     }
     missing = sorted(required - set(changed))
     if missing:
         raise RuntimeError(f"Expected release version updates were absent: {missing}")
 
     critical = [ROOT / item for item in required]
-    stale = [str(path.relative_to(ROOT)) for path in critical if "1.2.1" in path.read_text(encoding="utf-8")]
+    stale = [
+        str(path.relative_to(ROOT))
+        for path in critical
+        if "1.2.1" in path.read_text(encoding="utf-8")
+    ]
     if stale:
         raise RuntimeError(f"Stale release v1.2.1 references remain: {stale}")
 
-    # Remove the one-shot applicator and restore the normal test workflow.
     (ROOT / "scripts/_apply_release_v1_2_2.py").unlink()
     (ROOT / ".github/workflows/tests.yml").write_bytes(
         subprocess.run(
@@ -60,17 +65,22 @@ def main() -> None:
     )
 
     run("git", "config", "user.name", "github-actions[bot]")
-    run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+    run(
+        "git",
+        "config",
+        "user.email",
+        "41898282+github-actions[bot]@users.noreply.github.com",
+    )
     run("git", "add", "-A")
     run("git", "commit", "-m", "fix: align discovery release with operator v1.2.2")
 
-    # The builders read exact committed Git blob bytes, so validate after commit.
     run(
         sys.executable,
         "-m",
         "py_compile",
         "scripts/build_moomoo_discovery_release.py",
         "scripts/compare_moomoo_discovery_releases.py",
+        "tools/production_discovery/validate_moomoo_human_validation.py",
     )
     run(
         sys.executable,
