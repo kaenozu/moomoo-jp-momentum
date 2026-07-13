@@ -317,7 +317,7 @@ def validate_operator_result(payload: Any) -> list[str]:
     errors: list[str] = []
     expected = {
         "report_type": "moomoo_discovery_operator_result",
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "status": "completed_readonly_discovery",
         "operator_exit_code": 0,
         "powershell_exit_code": 0,
@@ -390,9 +390,9 @@ def validate_release_manifest(
         errors.append("unexpected release manifest report_type")
     if payload.get("release_format_version") != 1:
         errors.append("release_format_version must be 1")
-    if payload.get("operator_version") != "1.2.1":
+    if payload.get("operator_version") != "1.2.2":
         errors.append(
-            "release manifest operator_version must be 1.2.1"
+            "release manifest operator_version must be 1.2.2"
         )
     if payload.get("source_bytes") != "git_blob":
         errors.append("release manifest source_bytes must be git_blob")
@@ -433,7 +433,7 @@ def validate_release_manifest(
         errors.append("release manifest operator_bundle is missing")
     else:
         if operator.get("filename") != (
-            "moomoo_production_discovery_operator_v4_v1.2.1.zip"
+            "moomoo_production_discovery_operator_v4_v1.2.2.zip"
         ):
             errors.append(
                 "release manifest operator filename is invalid"

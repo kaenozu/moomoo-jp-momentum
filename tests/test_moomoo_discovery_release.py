@@ -63,7 +63,7 @@ def make_operator_bundle(
         "report_type": (
             "moomoo_discovery_operator_bundle_manifest"
         ),
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "source_commit": commit,
         "source_ref": source_ref,
         "source_bytes": "git_blob",
@@ -96,7 +96,7 @@ def write_fixture_release(
     manifest = {
         "report_type": "moomoo_discovery_release_manifest",
         "release_format_version": 1,
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "source_commit": "a" * 40,
         "source_ref": "refs/heads/master",
         "source_event": "push",
