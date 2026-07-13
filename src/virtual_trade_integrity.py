@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -679,7 +680,7 @@ class VirtualTradeIntegrityChecker:
             return report
 
         try:
-            with self._connect_read_only() as connection:
+            with closing(self._connect_read_only()) as connection:
                 if not self._validate_schema(connection, report):
                     return report
                 has_commission = (

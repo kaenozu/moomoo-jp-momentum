@@ -27,7 +27,128 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run fast tests
-        run: python -m pytest tests/ -m "not slow" -q
+        run: |
+          set +e
+          python -m pytest tests/ -m "not slow" -q > "$RUNNER_TEMP/pytest.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/pytest.log"
+          exit "$status"
+
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: ${{ runner.temp }}/pytest.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Parse recovery drill PowerShell
+        shell: pwsh
+        run: |
+          $Tokens = $null
+          $ParseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              "scripts/sqlite_backup_recovery_drill.ps1",
+              [ref]$Tokens,
+              [ref]$ParseErrors
+          ) | Out-Null
+          if ($ParseErrors.Count -gt 0) {
+              $ParseErrors | ForEach-Object { Write-Error $_.Message }
+              throw "Recovery drill script contains PowerShell parse errors"
+          }
+
+      - name: Run temporary SQLite recovery drill
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Root = Join-Path $env:RUNNER_TEMP "sqlite-recovery-drill-$env:GITHUB_RUN_ID"
+          $LiveDb = Join-Path $Root "live/moomoo.db"
+          $Config = Join-Path $Root "config.yaml"
+          $Evidence = Join-Path $Root "evidence"
+          $Secondary = Join-Path $Root "secondary"
+          $Restore = Join-Path $Root "restore/moomoo-restored.db"
+          New-Item -ItemType Directory -Path $Root | Out-Null
+
+          $FixtureScript = @'
+          from pathlib import Path
+          import sqlite3
+          import sys
+          import yaml
+          from src.models import CREATE_TABLES_SQL
+
+          db_path = Path(sys.argv[1]).resolve()
+          config_path = Path(sys.argv[2]).resolve()
+          db_path.parent.mkdir(parents=True, exist_ok=True)
+          with sqlite3.connect(db_path) as connection:
+              connection.execute("PRAGMA journal_mode=WAL")
+              connection.executescript(CREATE_TABLES_SQL)
+              connection.commit()
+          payload = {
+              "database": {"path": str(db_path)},
+              "database_backup": {
+                  "enabled": True,
+                  "directory": str((config_path.parent / "production-backups").resolve()),
+                  "retain_daily": 7,
+                  "retain_weekly": 4,
+                  "retain_pre_cycle": 7,
+                  "retain_post_cycle": 7,
+                  "verify_after_backup": True,
+              },
+              "cycle_control": {"enabled": True},
+              "virtual_trade": {
+                  "enabled": True,
+                  "initial_cash": 150000,
+                  "commission": 0,
+              },
+          }
+          config_path.write_text(
+              yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+              encoding="utf-8",
+          )
+          '@
+          $FixtureRaw = & python -c $FixtureScript $LiveDb $Config 2>&1
+          if ($LASTEXITCODE -ne 0) { throw ($FixtureRaw -join "`n") }
+
+          $ExpectedHead = (& git rev-parse HEAD).Trim()
+          & pwsh -NoProfile -File scripts/sqlite_backup_recovery_drill.ps1 `
+              -ExpectedHead $ExpectedHead `
+              -ProductionConfig $Config `
+              -EvidenceDir $Evidence `
+              -SecondaryDir $Secondary `
+              -RestorePath $Restore `
+              -Strategy momentum `
+              -ConfirmProductionExecution
+          if ($LASTEXITCODE -ne 0) {
+              throw "Temporary SQLite recovery drill failed"
+          }
+
+          $ResultPath = Join-Path $Evidence "70-final-result.json"
+          if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
+              throw "Recovery drill did not create final evidence"
+          }
+          $Result = Get-Content -Raw -LiteralPath $ResultPath | ConvertFrom-Json
+          if ($Result.status -ne "pending_operator_review") {
+              throw "Unexpected drill status: $($Result.status)"
+          }
+          if ([int]$Result.integrity_errors -ne 0) {
+              throw "Temporary drill reported integrity errors"
+          }
+          if (-not [bool]$Result.live_state_unchanged) {
+              throw "Temporary drill changed the live state"
+          }
+          if (-not [bool]$Result.restored_state_matches) {
+              throw "Temporary drill restore did not match"
+          }
+          if ([int]$Result.corrupt_verify_exit_code -eq 0) {
+              throw "Corrupt backup was accepted by verify"
+          }
+          if ([int]$Result.corrupt_restore_dry_run_exit_code -eq 0) {
+              throw "Corrupt backup was accepted by restore dry-run"
+          }
+          if (-not (Test-Path -LiteralPath $Restore -PathType Leaf)) {
+              throw "Temporary drill restore file is missing"
+          }
 
       - name: Run ruff
         run: >-
