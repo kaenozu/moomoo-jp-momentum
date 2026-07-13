@@ -4,9 +4,11 @@
 
 - Issue: `kaenozu/moomoo-jp-momentum#27`
 - PowerShell棚卸し本体: v4.0.0
-- Pythonオペレーターツール: v1.2.0
+- Pythonオペレーターツール: v1.2.1
 
-v4は、検証済みclean checkoutと本番runtime directoryが別である場合を明示的に扱います。`database.path: data/moomoo.db`のような相対パスをcheckout基準で決めつけず、Scheduled Taskの`WorkingDirectory`またはオペレーターが直接確認したruntime directoryごとに解決候補を記録します。
+> **v1.2.0は使用禁止です。** Windows検証で失敗した候補版であり、`WINDOWS_VALIDATION_FAILED_CANDIDATE / DO_NOT_USE_FOR_PRODUCTION`として扱います。
+
+v4は、検証済みclean checkoutと本番runtime directoryが別である場合を明示的に扱います。`database.path: data/moomoo.db`のような相対パスをcheckout基準で決めつけず、runtime evidenceごとに解決候補を記録します。
 
 ## 安全境界
 
@@ -25,25 +27,59 @@ v4は、検証済みclean checkoutと本番runtime directoryが別である場�
 終了コード0でも、本番ドリル許可ではありません。結果は常に次を維持します。
 
 ```text
-production_readiness       = BLOCKED
-preflight_authorized       = false
+production_readiness        = BLOCKED
+preflight_authorized        = false
 production_drill_authorized = false
-cutover_authorized         = false
+cutover_authorized          = false
 ```
 
-## v1.2.0の主な改善
+## v1.2.1の改善
 
-- `--expected-head`を必須化し、古いmaster SHAの暗黙利用を廃止
-- `--production-working-directory`を複数指定可能
-- Scheduled Taskの`WorkingDirectory`をauthoritative runtime evidenceとして保持
-- configとruntime directoryの全組合せについて、相対`database.path`と`database_backup.directory`を解決
-- 既存DBへ解決するauthoritative mappingが0件なら機械検証失敗
-- 複数の既存DBへ解決する場合は`MULTIPLE_LIVE_DB_PATHS`でfalse-successを拒否
-- Windows Serviceと実行中プロセスはworking directoryを直接証明しないため、人手確認として残す
-- WSL、Docker、別ユーザーセッションをread-onlyで棚卸し
-- 別PC writer不存在はローカル実行では証明不能と明記
-- JSON配列をPowerShellへ渡す際はJSON文字列1引数を使用し、Windows PowerShell 5.1の配列引数差を回避
-- 証跡、マスキング、終了コード、許可境界を`05-operator-result.json`へ固定
+### runtime evidenceを3分類
+
+```text
+machine_observed
+  Scheduled TaskのWorkingDirectoryなど、実機から直接取得した値
+
+human_asserted
+  オペレーターが明示入力し、根拠参照を添付した値
+
+derived_candidate
+  checkout、config directory、実行directoryなどから導出した候補
+```
+
+`--production-working-directory`は`human_asserted`です。入力しただけでmachine-observed evidenceには昇格しません。
+
+### 判定を3層へ分離
+
+```text
+machine_validation_status
+human_validation_status
+operational_validation_status
+```
+
+代表的な正常終了は次です。
+
+```text
+validation_status             = MACHINE_PASS_HUMAN_REVIEW_REQUIRED
+machine_validation_status     = PASS
+human_validation_status       = PENDING
+operational_validation_status = INCONCLUSIVE
+production_readiness          = BLOCKED
+```
+
+単純な`PASS`を本番同定完了として表示しません。
+
+### Windows／配布物ハードニング
+
+- Windows PowerShell 5.1とPowerShell 7のstderrを診断ログへ分離
+- 失敗時も診断artifactを保持
+- Git blobの正確なbytesからbundleを生成
+- checkoutのCRLF／LF差でfrozen SHAが変わらない
+- 各シェルで2回ビルドし同一SHAを確認
+- PowerShell 5.1とPowerShell 7のZIPをbyte-for-byte比較
+- ZIP重複entry、圧縮破損、内部`SHA256SUMS.txt`、manifest、安全境界を検証
+- manifestへsource commit／refを記録
 
 ## 前提
 
@@ -52,7 +88,7 @@ cutover_authorized         = false
 - PyYAML
 - Git
 - Windows PowerShell 5.1またはPowerShell 7
-- 検証用checkout、保護対象checkout、配布bundle、証跡出力先が区別されている
+- 検証用checkout、保護対象checkout、bundle、証跡出力先が分離されている
 - 証跡出力ルートは事前作成済み
 
 ## 実行前に確認する値
@@ -66,11 +102,12 @@ approved 40-character Git SHA
 origin URL
 config search root
 production process working directory
+working directoryを裏付ける証拠
 ```
 
-runtime directoryは、Scheduled Taskの`Start in`／`WorkingDirectory`、サービス運用手順、起動バッチ、実際の起動コマンドなどから確認します。
-
 ## 実行例
+
+明示的にruntime directoryを入力する場合は、その根拠も必須です。
 
 ```powershell
 python .\moomoo_discovery_operator.py run `
@@ -81,28 +118,33 @@ python .\moomoo_discovery_operator.py run `
   --expected-head "<approved-40-character-sha>" `
   --expected-remote "https://github.com/kaenozu/moomoo-jp-momentum.git" `
   --config-search-root "C:\moomoo-runtime" `
-  --production-working-directory "C:\moomoo-runtime"
+  --production-working-directory "C:\moomoo-runtime" `
+  --production-working-directory-source "manual-command" `
+  --production-working-directory-evidence "<redacted launch-command reference>"
 
 $operatorExitCode = $LASTEXITCODE
 Write-Host "operator exit code=$operatorExitCode"
 ```
 
-複数のruntime候補が直接証拠として残る場合は、オプションを繰り返します。
+使用可能なsource:
 
-```powershell
---production-working-directory "C:\runtime-a" `
---production-working-directory "D:\runtime-b"
+```text
+manual-command
+startup-script
+service-runbook
+scheduled-task-review
+other-direct-evidence
 ```
 
-複数候補が別々の既存DBへ解決した場合、ツールは成功扱いにしません。
+Scheduled Taskの`WorkingDirectory`が自動取得される場合は`machine_observed`として記録されます。ただし、そのTaskが本番のactive launch sourceかは人が確認します。
 
 ## 終了コード
 
 | code | status | 意味 |
 |---:|---|---|
-| 0 | `completed_readonly_discovery` | 機械検証PASS。人手確認と全本番ゲートは残る |
-| 2 | `completed_with_corrections_required` | runtime/config/DBの証拠不足、競合、環境不備を修正して再実行 |
-| 1 | `blocked` | hash/parser/PowerShell/JSON/出力先等の実行ゲート失敗 |
+| 0 | `completed_readonly_discovery` | 機械検証はPASS。人手確認と全本番ゲートは未完了 |
+| 2 | `completed_with_corrections_required` | 機械検証失敗またはruntime／DB競合を修正して再実行 |
+| 1 | `blocked` | hash、parser、PowerShell、JSON、出力先など実行ゲート失敗 |
 
 ## 最初に確認する証跡
 
@@ -112,17 +154,33 @@ Write-Host "operator exit code=$operatorExitCode"
 04-discovery-summary.md
 ```
 
-`05-operator-result.json`の期待値は次です。
+期待される安全側の値:
 
 ```text
-status                       = completed_readonly_discovery
-validation_status            = PASS
-production_readiness         = BLOCKED
-preflight_authorized         = false
-production_drill_authorized  = false
-cutover_authorized           = false
-operator_exit_code           = 0
+status                        = completed_readonly_discovery
+validation_status             = MACHINE_PASS_HUMAN_REVIEW_REQUIRED
+machine_validation_status     = PASS
+human_validation_status       = PENDING
+operational_validation_status = INCONCLUSIVE
+production_readiness          = BLOCKED
+preflight_authorized          = false
+production_drill_authorized   = false
+cutover_authorized            = false
+operator_exit_code            = 0
 ```
+
+## false-success防止
+
+次の場合は本番同定完了ではありません。
+
+- human-asserted directoryだけが既存DBへ解決した
+- config候補が複数ある
+- active launch sourceが未確認
+- Service／Processのworking directoryが不明
+- 別ユーザー、WSL、Docker、別PC writerを除外できない
+- 単一DB候補が存在するだけで、それが本番DBか確認していない
+
+複数のsupported runtime候補が別々の既存DBへ解決した場合は`MULTIPLE_LIVE_DB_PATHS`で拒否します。
 
 ## 外部共有
 
@@ -165,10 +223,13 @@ operator_exit_code           = 0
 
 ## 開発者向け検証
 
+Windows PowerShell 5.1:
+
 ```powershell
 .\run_moomoo_discovery_operator_tests.ps1 `
   -PythonExecutable python `
-  -PowerShellExecutable powershell.exe
+  -PowerShellExecutable powershell.exe `
+  -DiagnosticsDir .\ci-diagnostics
 ```
 
 PowerShell 7:
@@ -176,7 +237,8 @@ PowerShell 7:
 ```powershell
 pwsh -NoProfile -File .\run_moomoo_discovery_operator_tests.ps1 `
   -PythonExecutable python `
-  -PowerShellExecutable pwsh.exe
+  -PowerShellExecutable pwsh.exe `
+  -DiagnosticsDir .\ci-diagnostics
 ```
 
 静的検査:
