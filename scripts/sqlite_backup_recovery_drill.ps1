@@ -555,24 +555,30 @@ $corruptRaw = $CorruptScript | & $Python - $CorruptBackup 2>&1
 $corruptExit = $LASTEXITCODE
 if ($corruptExit -ne 0) { throw ($corruptRaw -join "`n") }
 
-$corruptVerifyRaw = & $Python database_backup.py `
-    --config $DrillConfig verify $CorruptBackup 2>&1
-$CorruptVerifyExit = $LASTEXITCODE
-$corruptVerifyRaw |
-    Set-Content -Encoding utf8 "$EvidenceDir\60-corrupt-verify-output.txt"
-if ($CorruptVerifyExit -eq 0) {
-    throw "corrupted copy accepted by verify"
-}
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $corruptVerifyRaw = & $Python database_backup.py `
+        --config $DrillConfig verify $CorruptBackup 2>&1
+    $CorruptVerifyExit = $LASTEXITCODE
+    $corruptVerifyRaw |
+        Set-Content -Encoding utf8 "$EvidenceDir\60-corrupt-verify-output.txt"
+    if ($CorruptVerifyExit -eq 0) {
+        throw "corrupted copy accepted by verify"
+    }
 
-$corruptRestoreRaw = & $Python database_backup.py `
-    --config $DrillConfig restore `
-    $CorruptBackup $CorruptRestorePath `
-    --strategy $Strategy --dry-run 2>&1
-$CorruptRestoreExit = $LASTEXITCODE
-$corruptRestoreRaw |
-    Set-Content -Encoding utf8 "$EvidenceDir\61-corrupt-restore-output.txt"
-if ($CorruptRestoreExit -eq 0) {
-    throw "corrupted copy accepted by restore dry-run"
+    $corruptRestoreRaw = & $Python database_backup.py `
+        --config $DrillConfig restore `
+        $CorruptBackup $CorruptRestorePath `
+        --strategy $Strategy --dry-run 2>&1
+    $CorruptRestoreExit = $LASTEXITCODE
+    $corruptRestoreRaw |
+        Set-Content -Encoding utf8 "$EvidenceDir\61-corrupt-restore-output.txt"
+    if ($CorruptRestoreExit -eq 0) {
+        throw "corrupted copy accepted by restore dry-run"
+    }
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
 }
 if (Test-Path -LiteralPath $CorruptRestorePath) {
     throw "corrupt restore created destination"
