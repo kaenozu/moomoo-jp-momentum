@@ -57,7 +57,8 @@
     "tests/test_daily_cycle_operational_guards.py",
     "tests/test_operational_notifier.py",
     "tests/test_alert_target_date.py",
-    "tests/test_database_backup.py"
+    "tests/test_database_backup.py",
+    "tests/test_database_backup_drill.py"
   ],
   "exclude": [
     ".venv",
