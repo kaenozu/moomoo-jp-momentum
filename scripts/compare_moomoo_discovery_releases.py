@@ -62,13 +62,17 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def sha256_file(path: Path) -> str:
-    return sha256_bytes(path.read_bytes())
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def parse_sums(data: bytes) -> dict[str, str]:
     rows: dict[str, str] = {}
     for line_number, line in enumerate(
-        data.decode("utf-8").splitlines(), start=1
+        data.decode("utf-8-sig").splitlines(), start=1
     ):
         if not line:
             continue
