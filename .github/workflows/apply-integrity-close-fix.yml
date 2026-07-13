@@ -1,0 +1,90 @@
+name: apply integrity close fix
+
+on:
+  push:
+    branches:
+      - agent/sqlite-backup-recovery-drill
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sqlite-backup-recovery-drill
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Apply exact connection-lifetime patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/virtual_trade_integrity.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_import = "import sqlite3\nfrom dataclasses import asdict, dataclass, field"
+          new_import = (
+              "import sqlite3\n"
+              "from contextlib import closing\n"
+              "from dataclasses import asdict, dataclass, field"
+          )
+          old_with = "            with self._connect_read_only() as connection:"
+          new_with = (
+              "            with closing(self._connect_read_only()) as connection:"
+          )
+
+          if new_import in text and new_with in text:
+              print("Explicit-close fix is already present")
+              raise SystemExit(0)
+
+          if text.count(old_import) != 1:
+              raise SystemExit(
+                  f"expected one import target, found {text.count(old_import)}"
+              )
+          if text.count(old_with) != 1:
+              raise SystemExit(
+                  f"expected one connection target, found {text.count(old_with)}"
+              )
+
+          text = text.replace(old_import, new_import, 1)
+          text = text.replace(old_with, new_with, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git diff --check
+          git diff -- src/virtual_trade_integrity.py
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Verify focused regression
+        run: >-
+          python -m pytest
+          tests/test_virtual_trade_integrity_connection.py
+          tests/test_database_backup_drill.py
+          tests/test_database_backup.py
+          -q
+
+      - name: Commit exact fix
+        run: |
+          if git diff --quiet -- src/virtual_trade_integrity.py; then
+            echo "No source change required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/virtual_trade_integrity.py
+          git commit -m "fix: close integrity checker database connections"
+          git push origin HEAD:agent/sqlite-backup-recovery-drill
