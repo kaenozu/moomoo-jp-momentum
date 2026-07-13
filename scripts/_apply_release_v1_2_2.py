@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,13 @@ TARGETS = (
 
 def run(*args: str) -> None:
     subprocess.run(args, cwd=ROOT, check=True)
+
+
+def run_without_github_event_identity(*args: str) -> None:
+    env = os.environ.copy()
+    for name in ("GITHUB_SHA", "GITHUB_REF", "GITHUB_EVENT_NAME"):
+        env.pop(name, None)
+    subprocess.run(args, cwd=ROOT, check=True, env=env)
 
 
 def main() -> None:
@@ -94,19 +102,19 @@ def main() -> None:
         left = Path(tmp) / "left"
         right = Path(tmp) / "right"
         report = Path(tmp) / "comparison.json"
-        run(
+        run_without_github_event_identity(
             sys.executable,
             "scripts/build_moomoo_discovery_release.py",
             "--output-dir",
             str(left),
         )
-        run(
+        run_without_github_event_identity(
             sys.executable,
             "scripts/build_moomoo_discovery_release.py",
             "--output-dir",
             str(right),
         )
-        run(
+        run_without_github_event_identity(
             sys.executable,
             "scripts/compare_moomoo_discovery_releases.py",
             "--left",
