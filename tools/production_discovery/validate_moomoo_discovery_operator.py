@@ -10,11 +10,14 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
+REPO_ROOT = ROOT.parents[1]
 PYTHON_FILES = [
     ROOT / "moomoo_discovery_operator.py",
     ROOT / "moomoo_operator_common.py",
     ROOT / "moomoo_operator_review.py",
     ROOT / "moomoo_operator_cli.py",
+    REPO_ROOT / "scripts" / "build_moomoo_discovery_operator_bundle.py",
+    REPO_ROOT / "scripts" / "compare_moomoo_discovery_operator_bundles.py",
 ]
 DISCOVERY_FILES = [
     ROOT / "moomoo_production_readonly_discovery_v4.ps1",
@@ -24,13 +27,17 @@ DISCOVERY_FILES = [
 ]
 GATE = ROOT / "moomoo_discovery_v4_gate.ps1"
 
-FORBIDDEN_OPERATOR_IMPORTS = {"sqlite3", "requests", "httpx", "moomoo", "futu"}
+FORBIDDEN_OPERATOR_IMPORTS = {
+    "sqlite3", "requests", "httpx", "moomoo", "futu"
+}
 FORBIDDEN_DISCOVERY_TOKENS = {
-    "Stop-Process", "Stop-Service", "Start-Service", "Disable-ScheduledTask",
-    "Enable-ScheduledTask", "Set-ScheduledTask", "Register-ScheduledTask",
-    "Unregister-ScheduledTask", "Set-Content", "Out-File", "Add-Content",
-    "Remove-Item", "New-Item", "sqlite3.connect", "System.Data.SQLite",
-    "-PreflightOnly", "-ConfirmProductionExecution",
+    "Stop-Process", "Stop-Service", "Start-Service",
+    "Disable-ScheduledTask", "Enable-ScheduledTask",
+    "Set-ScheduledTask", "Register-ScheduledTask",
+    "Unregister-ScheduledTask", "Set-Content", "Out-File",
+    "Add-Content", "Remove-Item", "New-Item",
+    "sqlite3.connect", "System.Data.SQLite", "-PreflightOnly",
+    "-ConfirmProductionExecution",
 }
 
 
@@ -42,13 +49,18 @@ def validate_operator() -> dict[str, Any]:
     forbidden_imports: set[str] = set()
     shell_true_lines: list[str] = []
     files: list[dict[str, Any]] = []
+    combined = ""
     for path in PYTHON_FILES:
         source = path.read_text(encoding="utf-8")
+        combined += source
         tree = ast.parse(source, filename=str(path))
         imports: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                imports.update(alias.name.split(".")[0] for alias in node.names)
+                imports.update(
+                    alias.name.split(".")[0]
+                    for alias in node.names
+                )
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.add(node.module.split(".")[0])
             elif isinstance(node, ast.Call):
@@ -58,14 +70,43 @@ def validate_operator() -> dict[str, Any]:
                         and isinstance(keyword.value, ast.Constant)
                         and keyword.value.value is True
                     ):
-                        shell_true_lines.append(f"{path.name}:{node.lineno}")
-        forbidden_imports.update(imports & FORBIDDEN_OPERATOR_IMPORTS)
-        files.append({"path": str(path), "sha256": sha256(path), "syntax_ok": True})
+                        shell_true_lines.append(
+                            f"{path.name}:{node.lineno}"
+                        )
+        forbidden_imports.update(
+            imports & FORBIDDEN_OPERATOR_IMPORTS
+        )
+        files.append(
+            {
+                "path": str(path),
+                "sha256": sha256(path),
+                "syntax_ok": True,
+            }
+        )
+    required_tokens = [
+        'VERSION = "1.2.1"',
+        "machine_validation_status",
+        "human_validation_status",
+        "operational_validation_status",
+        "MACHINE_PASS_HUMAN_REVIEW_REQUIRED",
+        "--production-working-directory-source",
+        "--production-working-directory-evidence",
+        "source_commit",
+        "compare_bundles",
+    ]
+    missing_tokens = [
+        token for token in required_tokens if token not in combined
+    ]
     return {
         "files": files,
         "forbidden_imports": sorted(forbidden_imports),
         "shell_true_lines": shell_true_lines,
-        "passed": not forbidden_imports and not shell_true_lines,
+        "missing_contract_tokens": missing_tokens,
+        "passed": (
+            not forbidden_imports
+            and not shell_true_lines
+            and not missing_tokens
+        ),
     }
 
 
@@ -76,35 +117,51 @@ def validate_discovery() -> dict[str, Any]:
     for path in DISCOVERY_FILES:
         source = path.read_text(encoding="utf-8")
         combined += source
-        file_hits = sorted(token for token in FORBIDDEN_DISCOVERY_TOKENS if token in source)
-        hits.extend(f"{path.name}:{token}" for token in file_hits)
-        files.append({"path": str(path), "sha256": sha256(path)})
-    required_flags = {
+        file_hits = sorted(
+            token
+            for token in FORBIDDEN_DISCOVERY_TOKENS
+            if token in source
+        )
+        hits.extend(
+            f"{path.name}:{token}" for token in file_hits
+        )
+        files.append(
+            {"path": str(path), "sha256": sha256(path)}
+        )
+    required_tokens = {
         "sqlite_connection_performed = $false",
         "process_or_task_state_changed = $false",
         "git_mutation_performed = $false",
         "preflight_executed = $false",
         "production_drill_executed = $false",
         "cutover_executed = $false",
+        '"machine_observed"',
+        '"human_asserted"',
+        '"derived_candidate"',
+        "runtime_machine_observed",
+        "runtime_human_asserted",
     }
-    missing_flags = sorted(flag for flag in required_flags if flag not in combined)
+    missing_tokens = sorted(
+        token for token in required_tokens if token not in combined
+    )
     return {
         "files": files,
         "forbidden_token_hits": hits,
-        "missing_safety_flags": missing_flags,
-        "passed": not hits and not missing_flags,
+        "missing_safety_or_evidence_tokens": missing_tokens,
+        "passed": not hits and not missing_tokens,
     }
 
 
 def validate_gate() -> dict[str, Any]:
     source = GATE.read_text(encoding="utf-8")
     required = [
-        "System.Management.Automation.Language.Parser", "ExpectedFileHashesJson",
-        "file_checks", "hash_matches", "gate_passed",
-        "WarningVariable", "WarningAction SilentlyContinue",
-        "InformationVariable", "InformationAction SilentlyContinue",
-        "discovery_diagnostics",
-        "preflight_authorized = $false", "production_drill_authorized = $false",
+        "System.Management.Automation.Language.Parser",
+        "ExpectedFileHashesJson", "file_checks", "hash_matches",
+        "gate_passed", "WarningVariable",
+        "WarningAction SilentlyContinue", "InformationVariable",
+        "InformationAction SilentlyContinue", "discovery_diagnostics",
+        "preflight_authorized = $false",
+        "production_drill_authorized = $false",
         "cutover_authorized = $false",
     ]
     missing = [item for item in required if item not in source]
@@ -118,12 +175,17 @@ def validate_gate() -> dict[str, Any]:
 
 def main() -> int:
     payload = {
-        "report_type": "moomoo_discovery_operator_static_validation",
+        "report_type": (
+            "moomoo_discovery_operator_static_validation"
+        ),
         "operator": validate_operator(),
         "discovery": validate_discovery(),
         "gate": validate_gate(),
     }
-    payload["passed"] = all(payload[name]["passed"] for name in ("operator", "discovery", "gate"))
+    payload["passed"] = all(
+        payload[name]["passed"]
+        for name in ("operator", "discovery", "gate")
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if payload["passed"] else 1
 
