@@ -10,7 +10,7 @@ on:
       - .github/workflows/_apply-verified-handoff-split.yml
   push:
     branches:
-      - agent/verified-readonly-handoff
+      - agent/verified-readonly-handoff-v2
     paths:
       - scripts/_apply_verified_handoff_split.py
       - scripts/_verified_handoff_trigger.txt
@@ -21,12 +21,12 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/verified-readonly-handoff'
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/verified-readonly-handoff-v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/verified-readonly-handoff
+          ref: agent/verified-readonly-handoff-v2
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -102,6 +102,10 @@ def safe_extract_function'''
           if cleanup_marker not in text:
               raise RuntimeError('Could not locate applicator cleanup block')
           text = text.replace(cleanup_marker, cleanup_replacement, 1)
+          text = text.replace(
+              'HEAD:agent/verified-readonly-handoff',
+              'HEAD:agent/verified-readonly-handoff-v2',
+          )
 
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
