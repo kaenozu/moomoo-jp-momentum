@@ -19,7 +19,9 @@ EXPECTED_AUTHORIZATION = {
     "cutover_authorized": False,
 }
 OPERATOR_VERSION = "1.2.2"
+HANDOFF_VERSION = "1.2.2"
 OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
+HANDOFF_ZIP = "moomoo-readonly-discovery-handoff-v1.2.2.zip"
 RELEASE_VERIFIER = "compare_moomoo_discovery_releases.py"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -44,8 +46,20 @@ EXPECTED_OPERATOR_MEMBERS = EXPECTED_OPERATOR_SOURCE_MEMBERS | {
     "SHA256SUMS.txt",
     "bundle-manifest.json",
 }
+EXPECTED_HANDOFF_MEMBERS = {
+    "README_FIRST.md",
+    "LOCAL_AGENT_PROMPT.md",
+    "EVIDENCE_REVIEW_CHECKLIST.md",
+    "OPERATOR_README_ORIGINAL.md",
+    "run-readonly-discovery.ps1",
+    "verify-handoff.ps1",
+    OPERATOR_ZIP,
+    "HANDOFF_MANIFEST.json",
+    "HANDOFF_SHA256SUMS.txt",
+}
 EXPECTED_RELEASE_MEMBERS = {
     OPERATOR_ZIP,
+    HANDOFF_ZIP,
     "human-validation.schema.json",
     "human-validation.template.json",
     "validate_moomoo_human_validation.py",
@@ -71,7 +85,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def parse_sums(data: bytes) -> dict[str, str]:
+def parse_sums(data: bytes, label: str) -> dict[str, str]:
     rows: dict[str, str] = {}
     for line_number, line in enumerate(
         data.decode("utf-8-sig").splitlines(), start=1
@@ -82,17 +96,21 @@ def parse_sums(data: bytes) -> dict[str, str]:
             digest, name = line.split("  ", 1)
         except ValueError as exc:
             raise ValueError(
-                f"Invalid SHA256SUMS line {line_number}: {line!r}"
+                f"Invalid {label} line {line_number}: {line!r}"
             ) from exc
         digest = digest.lower()
         if HEX64.fullmatch(digest) is None:
-            raise ValueError(f"Invalid SHA-256 on line {line_number}")
+            raise ValueError(
+                f"Invalid SHA-256 in {label} line {line_number}"
+            )
         if not name or name in rows:
             raise ValueError(
-                f"Missing or duplicate filename on line {line_number}"
+                f"Missing or duplicate filename in {label} line {line_number}"
             )
         if Path(name).is_absolute() or ".." in Path(name).parts:
-            raise ValueError(f"Unsafe filename on line {line_number}: {name}")
+            raise ValueError(
+                f"Unsafe filename in {label} line {line_number}: {name}"
+            )
         rows[name] = digest
     return rows
 
@@ -120,16 +138,17 @@ def read_zip_members(
 
 def validate_hash_manifest(
     members: dict[str, bytes],
+    sums_name: str,
     expected_names: set[str],
 ) -> list[str]:
     try:
-        sums = parse_sums(members["SHA256SUMS.txt"])
+        sums = parse_sums(members[sums_name], sums_name)
     except (KeyError, UnicodeError, ValueError) as exc:
-        return [f"SHA256SUMS invalid: {exc}"]
+        return [f"{sums_name} invalid: {exc}"]
     errors: list[str] = []
     if set(sums) != expected_names:
         errors.append(
-            "SHA256SUMS member set mismatch: "
+            f"{sums_name} member set mismatch: "
             f"expected {sorted(expected_names)!r}, got {sorted(sums)!r}"
         )
     for name, expected in sorted(sums.items()):
@@ -183,7 +202,9 @@ def inspect_operator_bundle(
             f"got {sorted(set(names))!r}"
         )
     hash_errors = validate_hash_manifest(
-        members, EXPECTED_OPERATOR_SOURCE_MEMBERS
+        members,
+        "SHA256SUMS.txt",
+        EXPECTED_OPERATOR_SOURCE_MEMBERS,
     )
     result["internal_hash_errors"] = hash_errors
     result["errors"].extend(
@@ -245,6 +266,164 @@ def inspect_operator_bundle(
     return result
 
 
+def inspect_handoff_bundle(
+    data: bytes,
+    expected_commit: str,
+    expected_ref: str | None,
+    release_operator_data: bytes,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "sha256": sha256_bytes(data),
+        "member_names": [],
+        "duplicate_entries": [],
+        "bad_compressed_member": None,
+        "internal_hash_errors": [],
+        "manifest": None,
+        "nested_operator_sha256": None,
+        "valid": False,
+        "errors": [],
+    }
+    try:
+        names, members, duplicates, bad_member = read_zip_members(
+            io.BytesIO(data)
+        )
+    except (OSError, zipfile.BadZipFile) as exc:
+        result["errors"].append(
+            f"nested handoff ZIP read failed: {exc}"
+        )
+        return result
+    result["member_names"] = sorted(names)
+    result["duplicate_entries"] = duplicates
+    result["bad_compressed_member"] = bad_member
+    if duplicates:
+        result["errors"].append(
+            "nested handoff ZIP has duplicate entries"
+        )
+    if bad_member:
+        result["errors"].append(
+            "nested handoff compressed data test failed"
+        )
+    if set(names) != EXPECTED_HANDOFF_MEMBERS:
+        result["errors"].append(
+            "nested handoff member set mismatch: "
+            f"expected {sorted(EXPECTED_HANDOFF_MEMBERS)!r}, "
+            f"got {sorted(set(names))!r}"
+        )
+    hash_errors = validate_hash_manifest(
+        members,
+        "HANDOFF_SHA256SUMS.txt",
+        EXPECTED_HANDOFF_MEMBERS - {"HANDOFF_SHA256SUMS.txt"},
+    )
+    result["internal_hash_errors"] = hash_errors
+    result["errors"].extend(
+        f"nested handoff {error}" for error in hash_errors
+    )
+    try:
+        manifest = json.loads(
+            members["HANDOFF_MANIFEST.json"].decode("utf-8")
+        )
+        result["manifest"] = manifest
+    except (KeyError, UnicodeError, json.JSONDecodeError) as exc:
+        result["errors"].append(
+            f"nested handoff manifest invalid: {exc}"
+        )
+        manifest = None
+    operator_data = members.get(OPERATOR_ZIP)
+    if operator_data is None:
+        result["errors"].append(
+            "nested handoff operator ZIP is missing"
+        )
+    else:
+        operator_sha = sha256_bytes(operator_data)
+        result["nested_operator_sha256"] = operator_sha
+        if operator_data != release_operator_data:
+            result["errors"].append(
+                "nested handoff operator ZIP differs from release operator ZIP"
+            )
+    if isinstance(manifest, dict):
+        if manifest.get("report_type") != (
+            "moomoo_readonly_discovery_handoff_manifest"
+        ):
+            result["errors"].append(
+                "nested handoff manifest report_type is invalid"
+            )
+        if manifest.get("schema_version") != 1:
+            result["errors"].append(
+                "nested handoff schema_version is invalid"
+            )
+        if manifest.get("handoff_version") != HANDOFF_VERSION:
+            result["errors"].append(
+                f"nested handoff version is not {HANDOFF_VERSION}"
+            )
+        if manifest.get("operator_version") != OPERATOR_VERSION:
+            result["errors"].append(
+                f"nested handoff operator version is not {OPERATOR_VERSION}"
+            )
+        if manifest.get("source_commit") != expected_commit:
+            result["errors"].append(
+                "nested handoff source_commit differs from release"
+            )
+        if manifest.get("source_ref") != expected_ref:
+            result["errors"].append(
+                "nested handoff source_ref differs from release"
+            )
+        if manifest.get("expected_checkout_head") != expected_commit:
+            result["errors"].append(
+                "nested handoff expected_checkout_head differs from release"
+            )
+        if manifest.get("source_bytes") != "git_blob":
+            result["errors"].append(
+                "nested handoff source_bytes is not git_blob"
+            )
+        if manifest.get("authorization") != EXPECTED_AUTHORIZATION:
+            result["errors"].append(
+                "nested handoff authorization is not fail-closed"
+            )
+        operator = manifest.get("operator_bundle")
+        if not isinstance(operator, dict):
+            result["errors"].append(
+                "nested handoff operator metadata is missing"
+            )
+        elif operator_data is not None:
+            if operator.get("name") != OPERATOR_ZIP:
+                result["errors"].append(
+                    "nested handoff operator filename is invalid"
+                )
+            if operator.get("sha256") != sha256_bytes(operator_data):
+                result["errors"].append(
+                    "nested handoff operator SHA-256 is invalid"
+                )
+            if operator.get("source_commit") != expected_commit:
+                result["errors"].append(
+                    "nested handoff operator source_commit differs"
+                )
+        payload_files = manifest.get("payload_files")
+        expected_payload = EXPECTED_HANDOFF_MEMBERS - {
+            "HANDOFF_SHA256SUMS.txt",
+            "HANDOFF_MANIFEST.json",
+        }
+        if not isinstance(payload_files, dict) or set(payload_files) != expected_payload:
+            result["errors"].append(
+                "nested handoff payload_files set is invalid"
+            )
+        elif any(
+            payload_files.get(name) != sha256_bytes(members[name])
+            for name in expected_payload
+        ):
+            result["errors"].append(
+                "nested handoff payload_files hash mismatch"
+            )
+        policy = manifest.get("distribution_policy")
+        if not isinstance(policy, dict) or policy.get(
+            "production_eligible_only_inside_canonical_release"
+        ) is not True:
+            result["errors"].append(
+                "nested handoff distribution policy is not canonical-release-only"
+            )
+    result["valid"] = not result["errors"]
+    return result
+
+
 def inspect_release(path: Path) -> dict[str, Any]:
     result: dict[str, Any] = {
         "path": str(path),
@@ -255,6 +434,7 @@ def inspect_release(path: Path) -> dict[str, Any]:
         "internal_hash_errors": [],
         "manifest": None,
         "operator_bundle": None,
+        "readonly_handoff": None,
         "members": {},
         "valid": False,
         "errors": [],
@@ -285,7 +465,9 @@ def inspect_release(path: Path) -> dict[str, Any]:
             f"got {sorted(set(names))!r}"
         )
     hash_errors = validate_hash_manifest(
-        members, EXPECTED_RELEASE_SUM_MEMBERS
+        members,
+        "SHA256SUMS.txt",
+        EXPECTED_RELEASE_SUM_MEMBERS,
     )
     result["internal_hash_errors"] = hash_errors
     result["errors"].extend(hash_errors)
@@ -312,6 +494,8 @@ def inspect_release(path: Path) -> dict[str, Any]:
             )
         if manifest.get("operator_version") != OPERATOR_VERSION:
             result["errors"].append("unexpected operator version")
+        if manifest.get("handoff_version") != HANDOFF_VERSION:
+            result["errors"].append("unexpected handoff version")
         if manifest.get("source_bytes") != "git_blob":
             result["errors"].append(
                 "release source_bytes is not git_blob"
@@ -361,29 +545,28 @@ def inspect_release(path: Path) -> dict[str, Any]:
             result["errors"].append(
                 "human-validation manifest metadata is invalid"
             )
-        operator = manifest.get("operator_bundle")
+        operator_meta = manifest.get("operator_bundle")
         operator_data = members.get(OPERATOR_ZIP)
-        if not isinstance(operator, dict):
+        if not isinstance(operator_meta, dict):
             result["errors"].append(
                 "operator bundle metadata is missing"
             )
         elif operator_data is None:
-            result["errors"].append("nested operator ZIP is missing")
+            result["errors"].append("operator ZIP is missing")
         else:
-            if operator.get("filename") != OPERATOR_ZIP:
+            if operator_meta.get("filename") != OPERATOR_ZIP:
                 result["errors"].append(
                     "operator bundle filename is invalid"
                 )
-            actual_operator_sha = sha256_bytes(operator_data)
-            if operator.get("sha256") != actual_operator_sha:
+            if operator_meta.get("sha256") != sha256_bytes(operator_data):
                 result["errors"].append(
-                    "nested operator ZIP SHA-256 does not match manifest"
+                    "operator ZIP SHA-256 does not match manifest"
                 )
-            if operator.get("manifest_source_commit") != commit:
+            if operator_meta.get("manifest_source_commit") != commit:
                 result["errors"].append(
                     "operator manifest_source_commit differs from release"
                 )
-            if operator.get("manifest_source_ref") != source_ref:
+            if operator_meta.get("manifest_source_ref") != source_ref:
                 result["errors"].append(
                     "operator manifest_source_ref differs from release"
                 )
@@ -393,7 +576,53 @@ def inspect_release(path: Path) -> dict[str, Any]:
             result["operator_bundle"] = operator_result
             if not operator_result["valid"]:
                 result["errors"].append(
-                    "nested operator bundle validation failed"
+                    "operator bundle validation failed"
+                )
+        handoff_meta = manifest.get("readonly_handoff")
+        handoff_data = members.get(HANDOFF_ZIP)
+        if not isinstance(handoff_meta, dict):
+            result["errors"].append(
+                "readonly handoff metadata is missing"
+            )
+        elif handoff_data is None:
+            result["errors"].append("readonly handoff ZIP is missing")
+        elif operator_data is not None:
+            if handoff_meta.get("filename") != HANDOFF_ZIP:
+                result["errors"].append(
+                    "readonly handoff filename is invalid"
+                )
+            if handoff_meta.get("sha256") != sha256_bytes(handoff_data):
+                result["errors"].append(
+                    "readonly handoff SHA-256 does not match manifest"
+                )
+            if handoff_meta.get("manifest_source_commit") != commit:
+                result["errors"].append(
+                    "handoff manifest_source_commit differs from release"
+                )
+            if handoff_meta.get("manifest_source_ref") != source_ref:
+                result["errors"].append(
+                    "handoff manifest_source_ref differs from release"
+                )
+            if handoff_meta.get("nested_operator_sha256") != sha256_bytes(operator_data):
+                result["errors"].append(
+                    "handoff nested operator SHA-256 differs from release operator"
+                )
+            if handoff_meta.get(
+                "production_eligible_only_inside_canonical_release"
+            ) is not True:
+                result["errors"].append(
+                    "handoff is not restricted to canonical release"
+                )
+            handoff_result = inspect_handoff_bundle(
+                handoff_data,
+                commit,
+                source_ref,
+                operator_data,
+            )
+            result["readonly_handoff"] = handoff_result
+            if not handoff_result["valid"]:
+                result["errors"].append(
+                    "readonly handoff validation failed"
                 )
     result["valid"] = not result["errors"]
     return result
