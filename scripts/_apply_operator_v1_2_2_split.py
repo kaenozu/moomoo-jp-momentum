@@ -129,17 +129,19 @@ def main() -> None:
     if 'VERSION = "1.2.2"' not in common:
         raise RuntimeError("Operator version was not updated to 1.2.2")
 
+    (ROOT / "scripts/_apply_operator_v1_2_2_split.py").unlink()
+    (ROOT / ".github/workflows/_apply-operator-v1.2.2-split.yml").unlink()
+
+    run("git", "config", "user.name", "github-actions[bot]")
+    run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+    run("git", "add", "-A")
+    run("git", "commit", "-m", "fix: harden readonly discovery operator on Windows")
+
+    # Git-blob tests must run after the new source state is committed locally.
     run("python", "-m", "py_compile", "scripts/build_moomoo_discovery_operator_bundle.py", "scripts/compare_moomoo_discovery_operator_bundles.py")
     run("python", "tools/production_discovery/validate_moomoo_discovery_operator.py")
     run("python", "-m", "unittest", "discover", "-s", "tools/production_discovery", "-p", "test_*.py")
 
-    (ROOT / "scripts/_apply_operator_v1_2_2_split.py").unlink()
-    (ROOT / ".github/workflows/_apply-operator-v1.2.2-split.yml").unlink()
-
-    run("git", "add", "-A")
-    run("git", "config", "user.name", "github-actions[bot]")
-    run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
-    run("git", "commit", "-m", "fix: harden readonly discovery operator on Windows")
     run("git", "push", "origin", "HEAD:agent/operator-v1.2.2-windows-hardening")
 
 
