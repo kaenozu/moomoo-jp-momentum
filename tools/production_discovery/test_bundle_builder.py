@@ -143,9 +143,10 @@ class BundleBuilderTests(unittest.TestCase):
             write_fixture_bundle(left)
             write_fixture_bundle(right)
             report = comparer.compare_bundles(left, right)
-            self.assertTrue(report["passed"])
+            self.assertTrue(report["passed"], report)
             self.assertTrue(
-                report["comparison"]["outer_sha256_equal"]
+                report["comparison"]["outer_sha256_equal"],
+                report,
             )
 
     def test_different_bundles_are_rejected(self) -> None:
