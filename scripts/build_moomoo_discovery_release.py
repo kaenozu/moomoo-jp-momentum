@@ -22,8 +22,8 @@ RELEASE_VERIFIER_PATH = (
     ROOT / "scripts" / "compare_moomoo_discovery_releases.py"
 )
 HUMAN_SOURCE = ROOT / "tools" / "production_discovery"
-OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.1.zip"
-RELEASE_ZIP = "moomoo_production_discovery_release_v1.2.1.zip"
+OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
+RELEASE_ZIP = "moomoo_production_discovery_release_v1.2.2.zip"
 RELEASE_VERIFIER = "compare_moomoo_discovery_releases.py"
 HUMAN_FILES = (
     "human-validation.schema.json",
@@ -149,6 +149,10 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     )
 
     operator_manifest = read_operator_manifest(operator_zip)
+    if operator_manifest.get("operator_version") != "1.2.2":
+        raise RuntimeError(
+            "Operator bundle version does not match release version"
+        )
     if operator_manifest.get("source_commit") != source_commit:
         raise RuntimeError(
             "Operator bundle source_commit does not match release source_commit"
@@ -162,7 +166,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
             "Operator bundle authorization is not fail-closed"
         )
 
-    stage = output_dir / "moomoo_production_discovery_release_v1.2.1"
+    stage = output_dir / "moomoo_production_discovery_release_v1.2.2"
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir()
@@ -179,7 +183,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     manifest = {
         "report_type": "moomoo_discovery_release_manifest",
         "release_format_version": 1,
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "built_at": operator_builder.deterministic_built_at(),
         "source_commit": source_commit,
         "source_ref": source_ref,
@@ -234,7 +238,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     write_deterministic_zip(stage, release_zip)
     return {
         "report_type": "moomoo_discovery_release_build",
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "source_commit": source_commit,
         "source_ref": source_ref,
         "source_event": source_event,
