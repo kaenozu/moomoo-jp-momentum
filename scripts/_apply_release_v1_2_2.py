@@ -41,6 +41,16 @@ def main() -> None:
             path.write_text(updated, encoding="utf-8", newline="\n")
             changed.append(relative)
 
+    comparer_path = ROOT / "scripts/compare_moomoo_discovery_releases.py"
+    comparer = comparer_path.read_text(encoding="utf-8")
+    member = '    "test_moomoo_operator_common_errors.py",\n'
+    marker = '    "test_moomoo_discovery_operator.py",\n'
+    if member not in comparer:
+        if comparer.count(marker) != 1:
+            raise RuntimeError("Could not locate operator member insertion point")
+        comparer = comparer.replace(marker, marker + member, 1)
+        comparer_path.write_text(comparer, encoding="utf-8", newline="\n")
+
     required = {
         "scripts/build_moomoo_discovery_release.py",
         "scripts/compare_moomoo_discovery_releases.py",
@@ -61,6 +71,8 @@ def main() -> None:
     ]
     if stale:
         raise RuntimeError(f"Stale release v1.2.1 references remain: {stale}")
+    if member.strip() not in comparer_path.read_text(encoding="utf-8"):
+        raise RuntimeError("Release verifier lacks operator v1.2.2 member")
 
     (ROOT / "scripts/_apply_release_v1_2_2.py").unlink()
     (ROOT / ".github/workflows/tests.yml").write_bytes(
