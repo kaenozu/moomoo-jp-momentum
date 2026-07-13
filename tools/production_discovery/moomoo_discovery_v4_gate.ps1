@@ -1,14 +1,17 @@
 [CmdletBinding()]
 param(
     [string]$DiscoveryScriptPath,
-    [Parameter(Mandatory = $true)][string]$ExpectedFileHashesJson,
+    [string]$ExpectedFileHashesJson,
+    [string]$ExpectedFileHashesBase64,
     [switch]$RunDiscovery,
     [Parameter(Mandatory = $true)][string]$RepoPath,
     [Parameter(Mandatory = $true)][string]$ProtectedCheckoutPath,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$ExpectedHead,
     [Parameter(Mandatory = $true)][string]$ExpectedRemote,
-    [Parameter(Mandatory = $true)][string]$ConfigSearchRootsJson,
-    [string]$ProductionWorkingDirectoryCandidatesJson = "[]"
+    [string]$ConfigSearchRootsJson,
+    [string]$ConfigSearchRootsBase64,
+    [string]$ProductionWorkingDirectoryCandidatesJson = "[]",
+    [string]$ProductionWorkingDirectoryCandidatesBase64
 )
 
 Set-StrictMode -Version Latest
@@ -16,6 +19,25 @@ $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($DiscoveryScriptPath)) {
     $DiscoveryScriptPath = Join-Path $PSScriptRoot "moomoo_production_readonly_discovery_v4.ps1"
+}
+
+function Resolve-JsonArgument {
+    param(
+        [AllowEmptyString()][string]$Json,
+        [AllowEmptyString()][string]$Base64,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if (-not [string]::IsNullOrWhiteSpace($Base64)) {
+        try {
+            return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Base64))
+        } catch {
+            throw "$Name Base64 value is invalid: $($_.Exception.Message)"
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Json)) {
+        return $Json
+    }
+    throw "$Name must be supplied as JSON or UTF-8 Base64 JSON"
 }
 
 function Convert-ParserError {
@@ -30,13 +52,30 @@ function Convert-ParserError {
     }
 }
 
-$ExpectedFileHashes = $ExpectedFileHashesJson | ConvertFrom-Json
-$ConfigSearchRoots = @($ConfigSearchRootsJson | ConvertFrom-Json)
+$ExpectedFileHashesText = Resolve-JsonArgument `
+    -Json $ExpectedFileHashesJson `
+    -Base64 $ExpectedFileHashesBase64 `
+    -Name "ExpectedFileHashes"
+$ConfigSearchRootsText = Resolve-JsonArgument `
+    -Json $ConfigSearchRootsJson `
+    -Base64 $ConfigSearchRootsBase64 `
+    -Name "ConfigSearchRoots"
+if (-not [string]::IsNullOrWhiteSpace($ProductionWorkingDirectoryCandidatesBase64)) {
+    $ProductionWorkingDirectoryCandidatesText = Resolve-JsonArgument `
+        -Json $null `
+        -Base64 $ProductionWorkingDirectoryCandidatesBase64 `
+        -Name "ProductionWorkingDirectoryCandidates"
+} else {
+    $ProductionWorkingDirectoryCandidatesText = $ProductionWorkingDirectoryCandidatesJson
+}
+
+$ExpectedFileHashes = $ExpectedFileHashesText | ConvertFrom-Json
+$ConfigSearchRoots = @($ConfigSearchRootsText | ConvertFrom-Json)
 $ProductionWorkingDirectoryCandidates = @(
-    $ProductionWorkingDirectoryCandidatesJson | ConvertFrom-Json
+    $ProductionWorkingDirectoryCandidatesText | ConvertFrom-Json
 )
 if ($ConfigSearchRoots.Count -eq 0) {
-    throw "ConfigSearchRootsJson must contain at least one path"
+    throw "ConfigSearchRoots must contain at least one path"
 }
 
 $fileChecks = @()
