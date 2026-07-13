@@ -229,9 +229,9 @@ Invoke-NativeChecked -FilePath $PythonExecutable -Arguments @(
     "import yaml; print(yaml.__version__)"
 ) -Description "PyYAML import check" | Out-Null
 
-$ActualTop = (Invoke-NativeChecked -FilePath "git" -Arguments @(
+$ActualTop = (@(Invoke-NativeChecked -FilePath "git" -Arguments @(
     "-C", $VerifiedCheckout, "rev-parse", "--show-toplevel"
-) -Description "Verified checkout top-level check")[0].Trim()
+) -Description "Verified checkout top-level check"))[0].Trim()
 $ActualTop = [IO.Path]::GetFullPath($ActualTop)
 if (-not $ActualTop.Equals(
     $VerifiedCheckout,
@@ -240,16 +240,16 @@ if (-not $ActualTop.Equals(
     throw "VerifiedCheckout must be the exact Git top-level. Expected $VerifiedCheckout, got $ActualTop"
 }
 
-$ActualHead = (Invoke-NativeChecked -FilePath "git" -Arguments @(
+$ActualHead = (@(Invoke-NativeChecked -FilePath "git" -Arguments @(
     "-C", $VerifiedCheckout, "rev-parse", "HEAD"
-) -Description "Verified checkout HEAD check")[0].Trim().ToLowerInvariant()
+) -Description "Verified checkout HEAD check"))[0].Trim().ToLowerInvariant()
 if ($ActualHead -ne $ExpectedHead) {
     throw "Verified checkout HEAD mismatch. Expected $ExpectedHead, got $ActualHead"
 }
 
-$ActualRemote = (Invoke-NativeChecked -FilePath "git" -Arguments @(
+$ActualRemote = (@(Invoke-NativeChecked -FilePath "git" -Arguments @(
     "-C", $VerifiedCheckout, "remote", "get-url", "origin"
-) -Description "Verified checkout origin check")[0].Trim()
+) -Description "Verified checkout origin check"))[0].Trim()
 if ((Get-NormalizedRemote $ActualRemote) -ne (Get-NormalizedRemote $ExpectedRemote)) {
     throw "Verified checkout origin mismatch. Expected $ExpectedRemote, got $ActualRemote"
 }
