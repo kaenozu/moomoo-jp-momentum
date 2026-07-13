@@ -16,6 +16,9 @@ BUILDER_PATH = (
 COMPARE_PATH = (
     ROOT / "scripts" / "compare_moomoo_discovery_operator_bundles.py"
 )
+REPOSITORY_TESTS_AVAILABLE = (
+    BUILDER_PATH.is_file() and COMPARE_PATH.is_file()
+)
 
 
 def load_module(name: str, path: Path):
@@ -27,8 +30,16 @@ def load_module(name: str, path: Path):
     return module
 
 
-builder = load_module("moomoo_bundle_builder", BUILDER_PATH)
-comparer = load_module("moomoo_bundle_comparer", COMPARE_PATH)
+builder = (
+    load_module("moomoo_bundle_builder", BUILDER_PATH)
+    if REPOSITORY_TESTS_AVAILABLE
+    else None
+)
+comparer = (
+    load_module("moomoo_bundle_comparer", COMPARE_PATH)
+    if REPOSITORY_TESTS_AVAILABLE
+    else None
+)
 operator_common = load_module(
     "moomoo_operator_common_for_bundle_test",
     Path(__file__).with_name("moomoo_operator_common.py"),
@@ -74,10 +85,15 @@ def write_fixture_bundle(
             archive.writestr(info, data)
 
 
+@unittest.skipUnless(
+    REPOSITORY_TESTS_AVAILABLE,
+    "repository-only builder/comparer sources are not in operator bundle",
+)
 class BundleBuilderTests(unittest.TestCase):
     def test_checkout_line_endings_do_not_change_blob_equivalence(
         self,
     ) -> None:
+        assert builder is not None
         blob = b"first\nsecond\n"
         checkout = b"first\r\nsecond\r\n"
         self.assertTrue(
@@ -87,6 +103,7 @@ class BundleBuilderTests(unittest.TestCase):
     def test_substantive_change_is_not_line_ending_change(
         self,
     ) -> None:
+        assert builder is not None
         blob = b"first\nsecond\n"
         checkout = b"first\r\nchanged\r\n"
         self.assertFalse(
@@ -98,6 +115,7 @@ class BundleBuilderTests(unittest.TestCase):
         filename: str,
         expected: str,
     ) -> None:
+        assert builder is not None
         path = Path(__file__).with_name(filename)
         blob = builder.read_tracked_blob(path)
         self.assertEqual(
@@ -125,6 +143,7 @@ class BundleBuilderTests(unittest.TestCase):
         )
 
     def test_identical_bundles_compare_equal(self) -> None:
+        assert comparer is not None
         with tempfile.TemporaryDirectory() as root:
             left = Path(root) / "left.zip"
             right = Path(root) / "right.zip"
@@ -137,6 +156,7 @@ class BundleBuilderTests(unittest.TestCase):
             )
 
     def test_different_bundles_are_rejected(self) -> None:
+        assert comparer is not None
         with tempfile.TemporaryDirectory() as root:
             left = Path(root) / "left.zip"
             right = Path(root) / "right.zip"
