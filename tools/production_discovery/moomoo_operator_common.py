@@ -16,12 +16,12 @@ GATE_FILENAME = "moomoo_discovery_v4_gate.ps1"
 DEFAULT_EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
 EXPECTED_BUNDLE_FILE_SHA256: dict[str, str] = {
     "moomoo_production_readonly_discovery_v4.ps1": "1cc5961b434c68edae9a072bade38d59b063141c31e99585b496589691975d29",
-    "moomoo_discovery_v4_common.ps1": "39b22a9dd5505ed3de2a1e7f4e80c40a7a9ec5a22adca6c6f72bca64c2a1a9c5",
+    "moomoo_discovery_v4_common.ps1": "f96da0ccd514349b400ac09b0dfe13aabfe0e0d306ea51fbd5a818309dd0a38e",
     "moomoo_discovery_v4_runtime.ps1": "2e816d597d4823aa67df97808273d647812e0028162f60a844fc7df317b517d8",
-    "moomoo_discovery_v4_storage.ps1": "7d6146150565d858595cbd12aef6a2f13f40eebe1890fe738df281657f8af79d",
+    "moomoo_discovery_v4_storage.ps1": "824b1ab1b8c0ffe90827b78b9a647d86e1dbac5dcbf55ee530e7b63778359ed2",
 }
 EXPECTED_DISCOVERY_SHA256 = EXPECTED_BUNDLE_FILE_SHA256[DISCOVERY_FILENAME]
-EXPECTED_GATE_SHA256 = "7f0e70ebd74e9ecf309ca804fb2863a3d3a54058d26543a0437dc570073eb612"
+EXPECTED_GATE_SHA256 = "f190453d1b3ae3850146aaf01b64995fb8f42ff4effcb7bc8d352c54a81673fc"
 
 REQUIRED_COMMANDS = {
     "git", "python", "Get-CimInstance", "Get-ScheduledTask", "Get-Disk",
