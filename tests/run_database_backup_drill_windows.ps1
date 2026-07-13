@@ -119,7 +119,7 @@ config_path.write_text(
 )
 '@
 
-$fixtureRaw = & python -c $FixtureScript $LiveDb $Config $ProductionBackupDir 2>&1
+$fixtureRaw = $FixtureScript | & python - $LiveDb $Config $ProductionBackupDir 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "fixture creation failed:`n$($fixtureRaw -join '`n')"
 }

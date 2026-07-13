@@ -126,7 +126,7 @@ print(json.dumps({
 }, ensure_ascii=False))
 '@
 
-$configInfoRaw = & $Python -c $ConfigInfoScript $ProductionConfig 2>&1
+$configInfoRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1
 $configInfoExit = $LASTEXITCODE
 if ($configInfoExit -ne 0) { throw ($configInfoRaw -join "`n") }
 $ConfigInfo = ($configInfoRaw -join "`n") | ConvertFrom-Json
@@ -150,7 +150,7 @@ with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
     print(connection.execute("PRAGMA journal_mode").fetchone()[0])
 '@
 
-$journalRaw = & $Python -c $JournalModeScript $LiveDb 2>&1
+$journalRaw = $JournalModeScript | & $Python - $LiveDb 2>&1
 $journalExit = $LASTEXITCODE
 if ($journalExit -ne 0) { throw ($journalRaw -join "`n") }
 $JournalMode = ($journalRaw -join "").Trim()
@@ -242,7 +242,7 @@ out_path.write_text(
 )
 '@
 
-$buildRaw = & $Python -c $BuildDrillConfigScript `
+$buildRaw = $BuildDrillConfigScript | & $Python - `
     $ProductionConfig $LiveDb $PrimaryDrillDir $DrillConfig 2>&1
 $buildExit = $LASTEXITCODE
 if ($buildExit -ne 0) { throw ($buildRaw -join "`n") }
@@ -551,7 +551,7 @@ path = Path(sys.argv[1])
 with path.open("ab") as handle:
     handle.write(b"\x00")
 '@
-$corruptRaw = & $Python -c $CorruptScript $CorruptBackup 2>&1
+$corruptRaw = $CorruptScript | & $Python - $CorruptBackup 2>&1
 $corruptExit = $LASTEXITCODE
 if ($corruptExit -ne 0) { throw ($corruptRaw -join "`n") }
 
@@ -584,7 +584,7 @@ if (
 ) {
     throw "production config changed during drill"
 }
-$finalConfigRaw = & $Python -c $ConfigInfoScript $ProductionConfig 2>&1
+$finalConfigRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1
 $finalConfigExit = $LASTEXITCODE
 if ($finalConfigExit -ne 0) { throw ($finalConfigRaw -join "`n") }
 $FinalConfigInfo = ($finalConfigRaw -join "`n") | ConvertFrom-Json
