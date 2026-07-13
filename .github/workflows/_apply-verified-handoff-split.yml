@@ -6,6 +6,7 @@ on:
       - master
     paths:
       - scripts/_apply_verified_handoff_split.py
+      - scripts/_verified_handoff_trigger.txt
       - .github/workflows/_apply-verified-handoff-split.yml
 
 permissions:
@@ -88,6 +89,12 @@ def safe_extract_function'''
           if comparer_end not in text:
               raise RuntimeError('Could not locate comparer function end')
           text = text.replace(comparer_end, comparer_replacement, 1)
+
+          cleanup_marker = '(ROOT / ".github/workflows/_apply-verified-handoff-split.yml").unlink()'
+          cleanup_replacement = cleanup_marker + '\n    (ROOT / "scripts/_verified_handoff_trigger.txt").unlink()'
+          if cleanup_marker not in text:
+              raise RuntimeError('Could not locate applicator cleanup block')
+          text = text.replace(cleanup_marker, cleanup_replacement, 1)
 
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
