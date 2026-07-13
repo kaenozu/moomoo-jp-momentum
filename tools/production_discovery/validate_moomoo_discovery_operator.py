@@ -101,6 +101,9 @@ def validate_gate() -> dict[str, Any]:
     required = [
         "System.Management.Automation.Language.Parser", "ExpectedFileHashesJson",
         "file_checks", "hash_matches", "gate_passed",
+        "WarningVariable", "WarningAction SilentlyContinue",
+        "InformationVariable", "InformationAction SilentlyContinue",
+        "discovery_diagnostics",
         "preflight_authorized = $false", "production_drill_authorized = $false",
         "cutover_authorized = $false",
     ]
