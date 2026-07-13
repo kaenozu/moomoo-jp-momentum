@@ -258,16 +258,44 @@ virtual_trade:
         throw "Verified repository snapshot did not contain the recovery drill script"
     }
 
-    $Mapping = @(
+    $HumanExistingMappings = @(
         $Payload.discovery.runtime_path_evidence |
             Where-Object {
-                [bool]$_.runtime_human_asserted -and
-                [bool]$_.database_exists -and
-                $_.resolved_database_path -eq $Db
+                $_.runtime_human_asserted -eq $true -and
+                $_.database_exists -eq $true
             }
     )
-    if ($Mapping.Count -ne 1) {
-        throw "Expected one human-asserted existing runtime mapping, got $($Mapping.Count)"
+    $ExpectedDbPath = [IO.Path]::GetFullPath([string]$Db)
+    $MappingDebug = [pscustomobject]@{
+        expected_database_path = $ExpectedDbPath
+        human_existing_mapping_count = $HumanExistingMappings.Count
+        mappings = @($HumanExistingMappings | ForEach-Object {
+            [pscustomobject]@{
+                resolved_database_path = [string]$_.resolved_database_path
+                normalized_database_path = if ($_.resolved_database_path) {
+                    [IO.Path]::GetFullPath([string]$_.resolved_database_path)
+                } else {
+                    $null
+                }
+                runtime_human_asserted = $_.runtime_human_asserted
+                database_exists = $_.database_exists
+            }
+        })
+    }
+    Write-DiagnosticText -Name "runtime-mapping-debug.json" -Text (
+        $MappingDebug | ConvertTo-Json -Depth 8
+    )
+    if ($HumanExistingMappings.Count -ne 1) {
+        throw "Expected one human-asserted existing runtime mapping, got $($HumanExistingMappings.Count)"
+    }
+    $ResolvedDbPath = [IO.Path]::GetFullPath(
+        [string]$HumanExistingMappings[0].resolved_database_path
+    )
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        $ResolvedDbPath,
+        $ExpectedDbPath
+    )) {
+        throw "Resolved DB path mismatch: expected $ExpectedDbPath, got $ResolvedDbPath"
     }
 
     $OperatorVersion = (
