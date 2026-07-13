@@ -136,6 +136,14 @@ def write_fixture_release(
     path.write_bytes(deterministic_zip(members))
 
 
+def test_sha256sums_utf8_bom_is_supported() -> None:
+    digest = "a" * 64
+    parsed = comparer.parse_sums(
+        b"\xef\xbb\xbf" + f"{digest}  payload.txt\n".encode("utf-8")
+    )
+    assert parsed == {"payload.txt": digest}
+
+
 def test_release_candidate_requires_master_push() -> None:
     sha = "a" * 40
     assert builder.classify_release_candidate(

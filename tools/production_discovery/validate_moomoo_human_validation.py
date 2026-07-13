@@ -89,9 +89,19 @@ def parse_datetime(value: str) -> bool:
 
 
 def authorization_is_fail_closed(payload: Any) -> bool:
-    return isinstance(payload, dict) and all(
-        payload.get(key) == expected
-        for key, expected in EXPECTED_AUTHORIZATION.items()
+    if not isinstance(payload, dict):
+        return False
+    authorization_keys = {
+        key
+        for key in payload
+        if key == "production_readiness" or key.endswith("_authorized")
+    }
+    return (
+        authorization_keys == set(EXPECTED_AUTHORIZATION)
+        and all(
+            payload.get(key) == expected
+            for key, expected in EXPECTED_AUTHORIZATION.items()
+        )
     )
 
 

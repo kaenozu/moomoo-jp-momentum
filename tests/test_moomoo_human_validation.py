@@ -229,6 +229,18 @@ def test_confirmed_without_evidence_is_correction_required() -> None:
     assert result["eligibility_status"] == "CORRECTION_REQUIRED"
 
 
+def test_extra_authorization_key_is_correction_required() -> None:
+    operator = operator_result()
+    operator["emergency_authorized"] = False
+    _, result = validator.evaluate(
+        confirmed_human_payload(),
+        operator,
+        discovery_result(),
+        release_manifest(),
+    )
+    assert result["eligibility_status"] == "CORRECTION_REQUIRED"
+
+
 def test_inconsistent_runtime_mapping_is_correction_required() -> None:
     human = confirmed_human_payload()
     human["checks"]["resolved_live_database"]["value"] = (
