@@ -18,6 +18,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   windows-powershell-5:
     name: Windows PowerShell 5.1
@@ -38,16 +41,13 @@ jobs:
           -PowerShellExecutable powershell.exe
       - name: Build operator bundle
         run: python .\scripts\build_moomoo_discovery_operator_bundle.py
-      - name: Verify clean repository
+      - name: Verify tracked repository unchanged
         shell: powershell
         run: |
-          $Status = & git status --porcelain
-          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
-          $Unexpected = @($Status | Where-Object { $_ -notmatch '^\?\? dist/' })
-          if ($Unexpected.Count -gt 0) {
-            $Unexpected | ForEach-Object { Write-Error $_ }
-            throw "Validation modified tracked repository content"
-          }
+          & git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
+          & git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
       - uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.0-powershell5
