@@ -18,8 +18,14 @@ SOURCE = ROOT / "tools" / "production_discovery"
 DIST = ROOT / "dist"
 FILES = [
     "moomoo_production_readonly_discovery_v4.ps1",
+    "moomoo_discovery_v4_common.ps1",
+    "moomoo_discovery_v4_runtime.ps1",
+    "moomoo_discovery_v4_storage.ps1",
     "moomoo_discovery_v4_gate.ps1",
     "moomoo_discovery_operator.py",
+    "moomoo_operator_common.py",
+    "moomoo_operator_review.py",
+    "moomoo_operator_cli.py",
     "test_moomoo_discovery_operator.py",
     "run_moomoo_discovery_operator_tests.ps1",
     "validate_moomoo_discovery_operator.py",
@@ -44,13 +50,16 @@ def load_operator_module():
 
 def main() -> int:
     operator = load_operator_module()
-    discovery = SOURCE / operator.DISCOVERY_FILENAME
-    actual_discovery_hash = sha256(discovery)
-    if actual_discovery_hash != operator.EXPECTED_DISCOVERY_SHA256:
-        raise RuntimeError(
-            "Frozen discovery hash mismatch: "
-            f"{actual_discovery_hash} != {operator.EXPECTED_DISCOVERY_SHA256}"
-        )
+    expected_files = dict(operator.EXPECTED_BUNDLE_FILE_SHA256)
+    expected_files[operator.GATE_FILENAME] = operator.EXPECTED_GATE_SHA256
+    for name, expected_hash in expected_files.items():
+        actual_hash = sha256(SOURCE / name)
+        if actual_hash != expected_hash:
+            raise RuntimeError(
+                f"Frozen bundle hash mismatch for {name}: "
+                f"{actual_hash} != {expected_hash}"
+            )
+    actual_discovery_hash = expected_files[operator.DISCOVERY_FILENAME]
 
     subprocess.run(
         [sys.executable, str(SOURCE / "validate_moomoo_discovery_operator.py")],
