@@ -30,6 +30,7 @@ FILES = [
     "moomoo_operator_review.py",
     "moomoo_operator_cli.py",
     "test_moomoo_discovery_operator.py",
+    "test_moomoo_operator_common_errors.py",
     "test_bundle_builder.py",
     "run_moomoo_discovery_operator_tests.ps1",
     "validate_moomoo_discovery_operator.py",

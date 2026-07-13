@@ -67,9 +67,9 @@ jobs:
           if errorlevel 1 exit /b 1
           python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps5-build-b" --json-output "%RUNNER_TEMP%\operator-diagnostics-ps5\build-b.json" > "%RUNNER_TEMP%\operator-diagnostics-ps5\build-b.log" 2>&1
           if errorlevel 1 exit /b 1
-          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" --right "%RUNNER_TEMP%\ps5-build-b\moomoo_production_discovery_operator_v4_v1.2.1.zip" --output "%RUNNER_TEMP%\operator-diagnostics-ps5\same-shell-comparison.json" > "%RUNNER_TEMP%\operator-diagnostics-ps5\same-shell-comparison.log" 2>&1
+          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.2.zip" --right "%RUNNER_TEMP%\ps5-build-b\moomoo_production_discovery_operator_v4_v1.2.2.zip" --output "%RUNNER_TEMP%\operator-diagnostics-ps5\same-shell-comparison.json" > "%RUNNER_TEMP%\operator-diagnostics-ps5\same-shell-comparison.log" 2>&1
           if errorlevel 1 exit /b 1
-          copy /Y "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps5-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
+          copy /Y "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.2.zip" "%RUNNER_TEMP%\ps5-artifact\moomoo_production_discovery_operator_v4_v1.2.2.zip"
           if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
         shell: powershell
@@ -88,15 +88,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-operator-v1.2.1-diagnostics-powershell5
+          name: moomoo-operator-v1.2.2-diagnostics-powershell5
           path: ${{ runner.temp }}/operator-diagnostics-ps5
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 5.1 bundle
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.1-powershell5
-          path: ${{ runner.temp }}/ps5-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          name: moomoo-discovery-operator-v1.2.2-powershell5
+          path: ${{ runner.temp }}/ps5-artifact/moomoo_production_discovery_operator_v4_v1.2.2.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -140,9 +140,9 @@ jobs:
           if errorlevel 1 exit /b 1
           python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps7-build-b" --json-output "%RUNNER_TEMP%\operator-diagnostics-ps7\build-b.json" > "%RUNNER_TEMP%\operator-diagnostics-ps7\build-b.log" 2>&1
           if errorlevel 1 exit /b 1
-          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" --right "%RUNNER_TEMP%\ps7-build-b\moomoo_production_discovery_operator_v4_v1.2.1.zip" --output "%RUNNER_TEMP%\operator-diagnostics-ps7\same-shell-comparison.json" > "%RUNNER_TEMP%\operator-diagnostics-ps7\same-shell-comparison.log" 2>&1
+          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.2.zip" --right "%RUNNER_TEMP%\ps7-build-b\moomoo_production_discovery_operator_v4_v1.2.2.zip" --output "%RUNNER_TEMP%\operator-diagnostics-ps7\same-shell-comparison.json" > "%RUNNER_TEMP%\operator-diagnostics-ps7\same-shell-comparison.log" 2>&1
           if errorlevel 1 exit /b 1
-          copy /Y "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps7-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
+          copy /Y "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.2.zip" "%RUNNER_TEMP%\ps7-artifact\moomoo_production_discovery_operator_v4_v1.2.2.zip"
           if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
         shell: pwsh
@@ -161,15 +161,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-operator-v1.2.1-diagnostics-powershell7
+          name: moomoo-operator-v1.2.2-diagnostics-powershell7
           path: ${{ runner.temp }}/operator-diagnostics-ps7
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 7 bundle
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.1-powershell7
-          path: ${{ runner.temp }}/ps7-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          name: moomoo-discovery-operator-v1.2.2-powershell7
+          path: ${{ runner.temp }}/ps7-artifact/moomoo_production_discovery_operator_v4_v1.2.2.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -188,23 +188,23 @@ jobs:
           python-version: "3.11"
       - uses: actions/download-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.1-powershell5
+          name: moomoo-discovery-operator-v1.2.2-powershell5
           path: artifacts/powershell5
       - uses: actions/download-artifact@v4
         with:
-          name: moomoo-discovery-operator-v1.2.1-powershell7
+          name: moomoo-discovery-operator-v1.2.2-powershell7
           path: artifacts/powershell7
       - name: Compare cross-shell bundles byte for byte
         run: >-
           python ./scripts/compare_moomoo_discovery_operator_bundles.py
-          --left ./artifacts/powershell5/moomoo_production_discovery_operator_v4_v1.2.1.zip
-          --right ./artifacts/powershell7/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          --left ./artifacts/powershell5/moomoo_production_discovery_operator_v4_v1.2.2.zip
+          --right ./artifacts/powershell7/moomoo_production_discovery_operator_v4_v1.2.2.zip
           --output ./cross-shell-comparison.json
       - name: Upload cross-shell comparison
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-operator-v1.2.1-cross-shell-comparison
+          name: moomoo-operator-v1.2.2-cross-shell-comparison
           path: cross-shell-comparison.json
           if-no-files-found: warn
           retention-days: 14
