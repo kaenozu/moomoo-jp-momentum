@@ -140,7 +140,11 @@ function Get-RepositorySnapshot {
     $branchValue = if ($branch.exit_code -eq 0) { ($branch.output -join "").Trim() } else { $null }
     $headValue = if ($head.exit_code -eq 0) { ($head.output -join "").Trim() } else { $null }
     $topValue = if ($top.exit_code -eq 0) { ($top.output -join "").Trim() } else { $null }
-    $dirtyLines = if ($working.exit_code -eq 0) { @($working.output | Where-Object { $_ }) } else { @() }
+    $dirtyLines = @(
+        if ($working.exit_code -eq 0) {
+            $working.output | Where-Object { $_ }
+        }
+    )
 
     $reads = @($remote, $branch, $head, $top, $working)
     $allGitReadsSucceeded = $true
