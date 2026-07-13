@@ -151,7 +151,13 @@ def validate_gate() -> dict[str, Any]:
     source = GATE.read_text(encoding="utf-8")
     required = [
         "System.Management.Automation.Language.Parser",
-        "ExpectedFileHashesJson", "file_checks", "hash_matches",
+        "ExpectedFileHashesJson", "ExpectedFileHashesBase64",
+        "ConfigSearchRootsJson", "ConfigSearchRootsBase64",
+        "ProductionWorkingDirectoryCandidatesJson",
+        "ProductionWorkingDirectoryCandidatesBase64",
+        "[Text.Encoding]::UTF8.GetString",
+        "[Convert]::FromBase64String",
+        "Resolve-JsonArgument", "file_checks", "hash_matches",
         "gate_passed", "WarningVariable",
         "WarningAction SilentlyContinue", "InformationVariable",
         "InformationAction SilentlyContinue", "discovery_diagnostics",
