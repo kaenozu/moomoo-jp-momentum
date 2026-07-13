@@ -1,0 +1,240 @@
+name: moomoo discovery master-bound release
+
+on:
+  pull_request:
+    paths:
+      - "tools/production_discovery/human-validation.schema.json"
+      - "tools/production_discovery/human-validation.template.json"
+      - "tools/production_discovery/validate_moomoo_human_validation.py"
+      - "tools/production_discovery/README_moomoo_human_validation_ja.md"
+      - "scripts/build_moomoo_discovery_release.py"
+      - "scripts/compare_moomoo_discovery_releases.py"
+      - "tests/test_moomoo_human_validation.py"
+      - "tests/test_moomoo_discovery_release.py"
+      - ".github/workflows/moomoo-operator-release.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "tools/production_discovery/**"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - "scripts/build_moomoo_discovery_release.py"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
+      - "scripts/compare_moomoo_discovery_releases.py"
+      - ".github/workflows/moomoo-operator-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  SOURCE_DATE_EPOCH: "1783900800"
+
+jobs:
+  windows-powershell-5:
+    name: Windows PowerShell 5.1 release build
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install validation dependencies
+        run: python -m pip install PyYAML pytest
+      - name: Compile release and human-gate Python
+        shell: powershell
+        run: >-
+          python -m py_compile
+          scripts/build_moomoo_discovery_release.py
+          scripts/compare_moomoo_discovery_releases.py
+          tools/production_discovery/validate_moomoo_human_validation.py
+      - name: Run human-gate and release tests
+        shell: powershell
+        run: >-
+          python -m pytest
+          tests/test_moomoo_human_validation.py
+          tests/test_moomoo_discovery_release.py
+          -q
+      - name: Prepare release directories
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps5-a" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps5-b" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps5-diagnostics" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps5-artifact" -Force | Out-Null
+          $PSVersionTable | Out-String | Set-Content "$env:RUNNER_TEMP\release-ps5-diagnostics\powershell-version.txt"
+      - name: Build release twice
+        shell: cmd
+        run: |
+          python .\scripts\build_moomoo_discovery_release.py --output-dir "%RUNNER_TEMP%\release-ps5-a" --json-output "%RUNNER_TEMP%\release-ps5-diagnostics\build-a.json" > "%RUNNER_TEMP%\release-ps5-diagnostics\build-a.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\build_moomoo_discovery_release.py --output-dir "%RUNNER_TEMP%\release-ps5-b" --json-output "%RUNNER_TEMP%\release-ps5-diagnostics\build-b.json" > "%RUNNER_TEMP%\release-ps5-diagnostics\build-b.log" 2>&1
+          if errorlevel 1 exit /b 1
+      - name: Compare same-shell releases
+        shell: cmd
+        run: |
+          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.1.zip" --right "%RUNNER_TEMP%\release-ps5-b\moomoo_production_discovery_release_v1.2.1.zip" --output "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.log" 2>&1
+          if errorlevel 1 exit /b 1
+          copy /Y "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.1.zip" "%RUNNER_TEMP%\release-ps5-artifact\moomoo_production_discovery_release_v1.2.1.zip"
+          if errorlevel 1 exit /b 1
+      - name: Verify repository remains clean
+        shell: powershell
+        run: |
+          $Status = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($Status.Count -ne 0) {
+            $Status | ForEach-Object { Write-Error $_ }
+            throw "Release validation created repository artifacts"
+          }
+      - name: Upload PowerShell 5.1 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-release-v1.2.1-diagnostics-powershell5
+          path: ${{ runner.temp }}/release-ps5-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 5.1 release
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-discovery-release-v1.2.1-powershell5
+          path: ${{ runner.temp }}/release-ps5-artifact/moomoo_production_discovery_release_v1.2.1.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  powershell-7:
+    name: PowerShell 7 release build
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install validation dependencies
+        run: python -m pip install PyYAML pytest
+      - name: Compile release and human-gate Python
+        shell: pwsh
+        run: >-
+          python -m py_compile
+          scripts/build_moomoo_discovery_release.py
+          scripts/compare_moomoo_discovery_releases.py
+          tools/production_discovery/validate_moomoo_human_validation.py
+      - name: Run human-gate and release tests
+        shell: pwsh
+        run: >-
+          python -m pytest
+          tests/test_moomoo_human_validation.py
+          tests/test_moomoo_discovery_release.py
+          -q
+      - name: Prepare release directories
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps7-a" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps7-b" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps7-diagnostics" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\release-ps7-artifact" -Force | Out-Null
+          $PSVersionTable | Out-String | Set-Content "$env:RUNNER_TEMP\release-ps7-diagnostics\powershell-version.txt"
+      - name: Build release twice
+        shell: cmd
+        run: |
+          python .\scripts\build_moomoo_discovery_release.py --output-dir "%RUNNER_TEMP%\release-ps7-a" --json-output "%RUNNER_TEMP%\release-ps7-diagnostics\build-a.json" > "%RUNNER_TEMP%\release-ps7-diagnostics\build-a.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\build_moomoo_discovery_release.py --output-dir "%RUNNER_TEMP%\release-ps7-b" --json-output "%RUNNER_TEMP%\release-ps7-diagnostics\build-b.json" > "%RUNNER_TEMP%\release-ps7-diagnostics\build-b.log" 2>&1
+          if errorlevel 1 exit /b 1
+      - name: Compare same-shell releases
+        shell: cmd
+        run: |
+          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.1.zip" --right "%RUNNER_TEMP%\release-ps7-b\moomoo_production_discovery_release_v1.2.1.zip" --output "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.log" 2>&1
+          if errorlevel 1 exit /b 1
+          copy /Y "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.1.zip" "%RUNNER_TEMP%\release-ps7-artifact\moomoo_production_discovery_release_v1.2.1.zip"
+          if errorlevel 1 exit /b 1
+      - name: Verify repository remains clean
+        shell: pwsh
+        run: |
+          $Status = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($Status.Count -ne 0) {
+            $Status | ForEach-Object { Write-Error $_ }
+            throw "Release validation created repository artifacts"
+          }
+      - name: Upload PowerShell 7 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-release-v1.2.1-diagnostics-powershell7
+          path: ${{ runner.temp }}/release-ps7-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 7 release
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-discovery-release-v1.2.1-powershell7
+          path: ${{ runner.temp }}/release-ps7-artifact/moomoo_production_discovery_release_v1.2.1.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  compare-releases:
+    name: Compare PowerShell 5.1 and PowerShell 7 releases
+    needs:
+      - windows-powershell-5
+      - powershell-7
+    if: ${{ needs.windows-powershell-5.result == 'success' && needs.powershell-7.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-discovery-release-v1.2.1-powershell5
+          path: artifacts/powershell5
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-discovery-release-v1.2.1-powershell7
+          path: artifacts/powershell7
+      - name: Compare releases byte for byte
+        run: >-
+          python ./scripts/compare_moomoo_discovery_releases.py
+          --left ./artifacts/powershell5/moomoo_production_discovery_release_v1.2.1.zip
+          --right ./artifacts/powershell7/moomoo_production_discovery_release_v1.2.1.zip
+          --output ./cross-shell-release-comparison.json
+      - name: Upload cross-shell comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-release-v1.2.1-cross-shell-comparison
+          path: cross-shell-release-comparison.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload canonical release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-discovery-release-canonical-${{ github.sha }}
+          path: artifacts/powershell7/moomoo_production_discovery_release_v1.2.1.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  attest-master-release:
+    name: Attest master release provenance
+    needs:
+      - compare-releases
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.ENABLE_ARTIFACT_ATTESTATION == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-discovery-release-canonical-${{ github.sha }}
+          path: release
+      - name: Create artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: release/moomoo_production_discovery_release_v1.2.1.zip

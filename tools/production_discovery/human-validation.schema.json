@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kaenozu/moomoo-jp-momentum/human-validation.schema.json",
+  "title": "Moomoo production discovery human validation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "review_id",
+    "reviewed_at",
+    "reviewer",
+    "checks",
+    "authorization_acknowledgement"
+  ],
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "evidence_refs", "notes"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "PENDING",
+            "INCONCLUSIVE",
+            "BLOCKED",
+            "CORRECTION_REQUIRED"
+          ]
+        },
+        "value": {"type": "string"},
+        "evidence_refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "CONFIRMED"}}},
+          "then": {
+            "properties": {
+              "value": {"minLength": 1},
+              "evidence_refs": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {"const": 1},
+    "review_id": {"type": "string", "minLength": 1},
+    "reviewed_at": {"type": "string", "format": "date-time"},
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "role"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1}
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "production_host_identity",
+        "launch_source",
+        "production_working_directory",
+        "active_config_path",
+        "resolved_live_database",
+        "wal_shm_state",
+        "writer_inventory",
+        "other_host_writer_review",
+        "writer_stop_procedure",
+        "writer_start_procedure",
+        "no_write_window",
+        "secondary_storage_failure_domain",
+        "secondary_storage_free_space",
+        "no_real_order_api"
+      ],
+      "properties": {
+        "production_host_identity": {"$ref": "#/$defs/check"},
+        "launch_source": {"$ref": "#/$defs/check"},
+        "production_working_directory": {"$ref": "#/$defs/check"},
+        "active_config_path": {"$ref": "#/$defs/check"},
+        "resolved_live_database": {"$ref": "#/$defs/check"},
+        "wal_shm_state": {"$ref": "#/$defs/check"},
+        "writer_inventory": {"$ref": "#/$defs/check"},
+        "other_host_writer_review": {"$ref": "#/$defs/check"},
+        "writer_stop_procedure": {"$ref": "#/$defs/check"},
+        "writer_start_procedure": {"$ref": "#/$defs/check"},
+        "no_write_window": {"$ref": "#/$defs/check"},
+        "secondary_storage_failure_domain": {"$ref": "#/$defs/check"},
+        "secondary_storage_free_space": {"$ref": "#/$defs/check"},
+        "no_real_order_api": {"$ref": "#/$defs/check"}
+      }
+    },
+    "authorization_acknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "production_readiness",
+        "preflight_authorized",
+        "production_drill_authorized",
+        "cutover_authorized",
+        "separate_approval_required"
+      ],
+      "properties": {
+        "production_readiness": {"const": "BLOCKED"},
+        "preflight_authorized": {"const": false},
+        "production_drill_authorized": {"const": false},
+        "cutover_authorized": {"const": false},
+        "separate_approval_required": {"const": true}
+      }
+    }
+  }
+}

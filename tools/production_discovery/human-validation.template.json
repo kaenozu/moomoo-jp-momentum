@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "review_id": "replace-with-unique-review-id",
+  "reviewed_at": "2026-07-13T00:00:00+09:00",
+  "reviewer": {
+    "name": "replace-with-reviewer",
+    "role": "operator-reviewer"
+  },
+  "checks": {
+    "production_host_identity": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "launch_source": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "production_working_directory": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "active_config_path": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "resolved_live_database": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "wal_shm_state": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "writer_inventory": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "other_host_writer_review": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "writer_stop_procedure": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "writer_start_procedure": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "no_write_window": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "secondary_storage_failure_domain": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "secondary_storage_free_space": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""},
+    "no_real_order_api": {"status": "PENDING", "value": "", "evidence_refs": [], "notes": ""}
+  },
+  "authorization_acknowledgement": {
+    "production_readiness": "BLOCKED",
+    "preflight_authorized": false,
+    "production_drill_authorized": false,
+    "cutover_authorized": false,
+    "separate_approval_required": true
+  }
+}
