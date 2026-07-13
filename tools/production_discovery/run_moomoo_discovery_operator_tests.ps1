@@ -303,8 +303,8 @@ virtual_trade:
             -FilePath $PythonExecutable `
             -Arguments @($Operator, "--version")
     ).text.Trim()
-    if ($OperatorVersion -ne "1.2.1") {
-        throw "Operator version check failed: expected 1.2.1, got $OperatorVersion"
+    if ($OperatorVersion -ne "1.2.2") {
+        throw "Operator version check failed: expected 1.2.2, got $OperatorVersion"
     }
 
     Write-DiagnosticText -Name "environment.json" -Text (
