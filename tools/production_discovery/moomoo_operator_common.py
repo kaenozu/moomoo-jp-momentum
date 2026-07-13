@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 DISCOVERY_FILENAME = "moomoo_production_readonly_discovery_v4.ps1"
 GATE_FILENAME = "moomoo_discovery_v4_gate.ps1"
 DEFAULT_EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
@@ -212,12 +212,42 @@ def parseable_configs(discovery: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def authoritative_runtime_rows(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+def runtime_rows_by_class(discovery: dict[str, Any], evidence_class: str) -> list[dict[str, Any]]:
+    flag_name = {
+        "machine_observed": "machine_observed",
+        "human_asserted": "human_asserted",
+        "derived_candidate": "derived_candidate",
+    }[evidence_class]
+    return [
+        row
+        for row in non_error_rows(discovery.get("runtime_working_directory_candidates"))
+        if row.get(flag_name) is True
+        or evidence_class in as_list(row.get("evidence_classes"))
+    ]
+
+
+def machine_observed_runtime_rows(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = runtime_rows_by_class(discovery, "machine_observed")
+    if rows:
+        return rows
     return [
         row
         for row in non_error_rows(discovery.get("runtime_working_directory_candidates"))
         if row.get("authoritative") is True
     ]
+
+
+def human_asserted_runtime_rows(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+    return runtime_rows_by_class(discovery, "human_asserted")
+
+
+def derived_runtime_rows(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+    return runtime_rows_by_class(discovery, "derived_candidate")
+
+
+def authoritative_runtime_rows(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+    """Backward-compatible alias for machine-observed runtime evidence."""
+    return machine_observed_runtime_rows(discovery)
 
 
 def existing_runtime_mappings(discovery: dict[str, Any]) -> list[dict[str, Any]]:
@@ -226,6 +256,22 @@ def existing_runtime_mappings(discovery: dict[str, Any]) -> list[dict[str, Any]]
         for row in non_error_rows(discovery.get("runtime_path_evidence"))
         if row.get("database_exists") is True and not row.get("resolution_error")
     ]
+
+
+def mapping_has_class(row: dict[str, Any], evidence_class: str) -> bool:
+    flag_name = {
+        "machine_observed": "runtime_machine_observed",
+        "human_asserted": "runtime_human_asserted",
+        "derived_candidate": "runtime_derived_candidate",
+    }[evidence_class]
+    if row.get(flag_name) is True:
+        return True
+    if evidence_class == "machine_observed" and row.get("runtime_authoritative") is True:
+        return True
+    return any(
+        evidence.get("evidence_class") == evidence_class
+        for evidence in non_error_rows(row.get("runtime_evidence"))
+    )
 
 
 def unique_existing_db_paths(rows: Iterable[dict[str, Any]]) -> set[str]:
