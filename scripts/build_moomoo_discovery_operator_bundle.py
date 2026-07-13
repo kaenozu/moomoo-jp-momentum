@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,15 @@ def load_operator_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def deterministic_built_at() -> str:
+    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH", "1783900800")
+    try:
+        timestamp = int(source_date_epoch)
+    except ValueError as exc:
+        raise RuntimeError("SOURCE_DATE_EPOCH must be an integer") from exc
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
 
 
 def main() -> int:
@@ -91,7 +101,7 @@ def main() -> int:
         "report_type": "moomoo_discovery_operator_bundle_manifest",
         "operator_version": operator.VERSION,
         "discovery_version": "4.0.0",
-        "built_at": datetime.now(timezone.utc).isoformat(),
+        "built_at": deterministic_built_at(),
         "discovery_sha256": actual_discovery_hash,
         "files": {
             path.name: sha256(path)
