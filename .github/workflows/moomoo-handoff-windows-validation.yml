@@ -1,0 +1,283 @@
+name: moomoo handoff Windows validation
+
+on:
+  pull_request:
+    paths:
+      - ".gitattributes"
+      - "tools/production_discovery/**"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
+      - "scripts/build_moomoo_readonly_discovery_handoff.py"
+      - "scripts/compare_moomoo_readonly_discovery_handoffs.py"
+      - "scripts/test_moomoo_readonly_discovery_handoff_builder.py"
+      - ".github/workflows/moomoo-handoff-windows-validation.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - ".gitattributes"
+      - "tools/production_discovery/**"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
+      - "scripts/build_moomoo_readonly_discovery_handoff.py"
+      - "scripts/compare_moomoo_readonly_discovery_handoffs.py"
+      - "scripts/test_moomoo_readonly_discovery_handoff_builder.py"
+      - ".github/workflows/moomoo-handoff-windows-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  SOURCE_DATE_EPOCH: "1783900800"
+
+jobs:
+  windows-powershell-5:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install YAML parser
+        run: python -m pip install PyYAML
+      - name: Prepare PowerShell 5.1 directories and diagnostics
+        shell: powershell
+        run: |
+          $Diagnostics = "$env:RUNNER_TEMP\handoff-diagnostics-ps5"
+          New-Item -ItemType Directory -Path $Diagnostics -Force | Out-Null
+          foreach ($Name in @("operator", "handoff-a", "handoff-b", "artifact")) {
+            New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps5-$Name" -Force | Out-Null
+          }
+          $PSVersionTable | Out-String | Set-Content "$Diagnostics\powershell-version.txt"
+          & git check-attr text eol -- tools/production_discovery/handoff/* scripts/*.py 2>&1 |
+            Tee-Object "$Diagnostics\git-attributes.txt"
+          & git ls-files --eol -- tools/production_discovery scripts/*.py .github/workflows/*.yml 2>&1 |
+            Tee-Object "$Diagnostics\git-eol.txt"
+      - name: Compile and run handoff builder tests
+        shell: cmd
+        run: |
+          python -m py_compile .\scripts\build_moomoo_readonly_discovery_handoff.py .\scripts\compare_moomoo_readonly_discovery_handoffs.py .\scripts\test_moomoo_readonly_discovery_handoff_builder.py .\tools\production_discovery\handoff_test_python_shim.py
+          if errorlevel 1 exit /b 1
+          python .\scripts\test_moomoo_readonly_discovery_handoff_builder.py -v > "%RUNNER_TEMP%\handoff-diagnostics-ps5\python-tests.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps5\python-tests.log"
+            exit /b 1
+          )
+      - name: Build operator bundle
+        shell: cmd
+        run: |
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps5-operator" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps5\operator-build.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps5\operator-build.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps5\operator-build.log"
+            exit /b 1
+          )
+      - name: Build handoff twice and compare
+        shell: cmd
+        run: |
+          set OPERATOR=%RUNNER_TEMP%\ps5-operator\moomoo_production_discovery_operator_v4_v1.2.1.zip
+          python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps5-handoff-a" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-a.log"
+            exit /b 1
+          )
+          python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps5-handoff-b" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-b.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-b.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps5\handoff-build-b.log"
+            exit /b 1
+          )
+          python .\scripts\compare_moomoo_readonly_discovery_handoffs.py --left "%RUNNER_TEMP%\ps5-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" --right "%RUNNER_TEMP%\ps5-handoff-b\moomoo-readonly-discovery-handoff-v1.2.2.zip" --output "%RUNNER_TEMP%\handoff-diagnostics-ps5\same-shell-comparison.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps5\same-shell-comparison.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps5\same-shell-comparison.log"
+            exit /b 1
+          )
+          copy /Y "%RUNNER_TEMP%\ps5-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" "%RUNNER_TEMP%\ps5-artifact\moomoo-readonly-discovery-handoff-v1.2.2.zip"
+          if errorlevel 1 exit /b 1
+      - name: Run positive and negative handoff validation
+        shell: powershell
+        run: |
+          & .\tools\production_discovery\run_moomoo_readonly_discovery_handoff_tests.ps1 `
+            -HandoffZip "$env:RUNNER_TEMP\ps5-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" `
+            -PythonExecutable python `
+            -PowerShellExecutable powershell.exe `
+            -DiagnosticsDir "$env:RUNNER_TEMP\handoff-diagnostics-ps5" *>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP\handoff-diagnostics-ps5\handoff-validation.log"
+      - name: Verify tracked repository unchanged
+        shell: powershell
+        run: |
+          & git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
+          & git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
+          $Status = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($Status.Count -ne 0) {
+            $Status | ForEach-Object { Write-Error $_ }
+            throw "Validation created repository artifacts"
+          }
+      - name: Upload PowerShell 5.1 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: handoff-v1.2.2-diagnostics-powershell5
+          path: ${{ runner.temp }}/handoff-diagnostics-ps5
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 5.1 handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-readonly-discovery-handoff-v1.2.2-powershell5
+          path: ${{ runner.temp }}/ps5-artifact/moomoo-readonly-discovery-handoff-v1.2.2.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  powershell-7:
+    name: PowerShell 7
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install YAML parser
+        run: python -m pip install PyYAML
+      - name: Prepare PowerShell 7 directories and diagnostics
+        shell: pwsh
+        run: |
+          $Diagnostics = "$env:RUNNER_TEMP\handoff-diagnostics-ps7"
+          New-Item -ItemType Directory -Path $Diagnostics -Force | Out-Null
+          foreach ($Name in @("operator", "handoff-a", "handoff-b", "artifact")) {
+            New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps7-$Name" -Force | Out-Null
+          }
+          $PSVersionTable | Out-String | Set-Content "$Diagnostics\powershell-version.txt"
+          & git check-attr text eol -- tools/production_discovery/handoff/* scripts/*.py 2>&1 |
+            Tee-Object "$Diagnostics\git-attributes.txt"
+          & git ls-files --eol -- tools/production_discovery scripts/*.py .github/workflows/*.yml 2>&1 |
+            Tee-Object "$Diagnostics\git-eol.txt"
+      - name: Compile and run handoff builder tests
+        shell: cmd
+        run: |
+          python -m py_compile .\scripts\build_moomoo_readonly_discovery_handoff.py .\scripts\compare_moomoo_readonly_discovery_handoffs.py .\scripts\test_moomoo_readonly_discovery_handoff_builder.py .\tools\production_discovery\handoff_test_python_shim.py
+          if errorlevel 1 exit /b 1
+          python .\scripts\test_moomoo_readonly_discovery_handoff_builder.py -v > "%RUNNER_TEMP%\handoff-diagnostics-ps7\python-tests.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps7\python-tests.log"
+            exit /b 1
+          )
+      - name: Build operator bundle
+        shell: cmd
+        run: |
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps7-operator" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps7\operator-build.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps7\operator-build.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps7\operator-build.log"
+            exit /b 1
+          )
+      - name: Build handoff twice and compare
+        shell: cmd
+        run: |
+          set OPERATOR=%RUNNER_TEMP%\ps7-operator\moomoo_production_discovery_operator_v4_v1.2.1.zip
+          python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps7-handoff-a" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-a.log"
+            exit /b 1
+          )
+          python .\scripts\build_moomoo_readonly_discovery_handoff.py --operator-bundle "%OPERATOR%" --output-dir "%RUNNER_TEMP%\ps7-handoff-b" --json-output "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-b.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-b.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps7\handoff-build-b.log"
+            exit /b 1
+          )
+          python .\scripts\compare_moomoo_readonly_discovery_handoffs.py --left "%RUNNER_TEMP%\ps7-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" --right "%RUNNER_TEMP%\ps7-handoff-b\moomoo-readonly-discovery-handoff-v1.2.2.zip" --output "%RUNNER_TEMP%\handoff-diagnostics-ps7\same-shell-comparison.json" > "%RUNNER_TEMP%\handoff-diagnostics-ps7\same-shell-comparison.log" 2>&1
+          if errorlevel 1 (
+            type "%RUNNER_TEMP%\handoff-diagnostics-ps7\same-shell-comparison.log"
+            exit /b 1
+          )
+          copy /Y "%RUNNER_TEMP%\ps7-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" "%RUNNER_TEMP%\ps7-artifact\moomoo-readonly-discovery-handoff-v1.2.2.zip"
+          if errorlevel 1 exit /b 1
+      - name: Run positive and negative handoff validation
+        shell: pwsh
+        run: |
+          & .\tools\production_discovery\run_moomoo_readonly_discovery_handoff_tests.ps1 `
+            -HandoffZip "$env:RUNNER_TEMP\ps7-handoff-a\moomoo-readonly-discovery-handoff-v1.2.2.zip" `
+            -PythonExecutable python `
+            -PowerShellExecutable pwsh.exe `
+            -DiagnosticsDir "$env:RUNNER_TEMP\handoff-diagnostics-ps7" *>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP\handoff-diagnostics-ps7\handoff-validation.log"
+      - name: Verify tracked repository unchanged
+        shell: pwsh
+        run: |
+          & git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
+          & git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
+          $Status = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($Status.Count -ne 0) {
+            $Status | ForEach-Object { Write-Error $_ }
+            throw "Validation created repository artifacts"
+          }
+      - name: Upload PowerShell 7 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: handoff-v1.2.2-diagnostics-powershell7
+          path: ${{ runner.temp }}/handoff-diagnostics-ps7
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 7 handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-readonly-discovery-handoff-v1.2.2-powershell7
+          path: ${{ runner.temp }}/ps7-artifact/moomoo-readonly-discovery-handoff-v1.2.2.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  compare-handoffs:
+    name: Compare PowerShell 5.1 and PowerShell 7 handoffs
+    needs:
+      - windows-powershell-5
+      - powershell-7
+    if: ${{ needs.windows-powershell-5.result == 'success' && needs.powershell-7.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-readonly-discovery-handoff-v1.2.2-powershell5
+          path: artifacts/powershell5
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-readonly-discovery-handoff-v1.2.2-powershell7
+          path: artifacts/powershell7
+      - name: Compare cross-shell handoffs byte for byte
+        run: >-
+          python ./scripts/compare_moomoo_readonly_discovery_handoffs.py
+          --left ./artifacts/powershell5/moomoo-readonly-discovery-handoff-v1.2.2.zip
+          --right ./artifacts/powershell7/moomoo-readonly-discovery-handoff-v1.2.2.zip
+          --output ./cross-shell-comparison.json
+      - name: Prepare authoritative CI artifact
+        run: |
+          mkdir -p authoritative
+          cp ./artifacts/powershell5/moomoo-readonly-discovery-handoff-v1.2.2.zip ./authoritative/
+      - name: Upload cross-shell comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: handoff-v1.2.2-cross-shell-comparison
+          path: cross-shell-comparison.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload authoritative handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-readonly-discovery-handoff-v1.2.2
+          path: authoritative/moomoo-readonly-discovery-handoff-v1.2.2.zip
+          if-no-files-found: error
+          retention-days: 14
