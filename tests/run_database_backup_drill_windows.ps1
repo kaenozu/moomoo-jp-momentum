@@ -71,8 +71,20 @@ function Get-Sha256 {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
 }
 
+function Assert-PathsAbsent {
+    param([Parameter(Mandatory = $true)][string[]]$Paths)
+
+    foreach ($Path in $Paths) {
+        if (Test-Path -LiteralPath $Path) {
+            throw "guard created an output path: $Path"
+        }
+    }
+}
+
 $RepoRoot = (Resolve-Path ".").Path
-$DrillScript = (Resolve-Path ".\scripts\sqlite_backup_recovery_drill.ps1").Path
+$DrillScript = (
+    Resolve-Path ".\scripts\sqlite_backup_recovery_drill.ps1"
+).Path
 $HeadSha = (& git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $HeadSha) {
     throw "could not resolve repository HEAD"
@@ -86,10 +98,15 @@ if (Test-Path -LiteralPath $Root) {
 }
 New-Item -ItemType Directory -Path $Root | Out-Null
 
-$LiveDb = Join-Path $Root "live database\moomoo.db"
-$Config = Join-Path $Root "production config.yaml"
-$ProductionBackupDir = Join-Path $Root "configured production backups"
-$ConfigHashBefore = $null
+# Keep the operational runtime directory separate from the verified checkout and
+# the config file. This reproduces a production config whose relative paths are
+# resolved from its actual runtime working directory.
+$ProductionWorkingDirectory = Join-Path $Root "production runtime"
+$LiveDb = Join-Path $ProductionWorkingDirectory "data\moomoo.db"
+$Config = Join-Path $Root "external config\production config.yaml"
+$ProductionBackupDir = Join-Path (
+    $ProductionWorkingDirectory
+) "configured production backups"
 
 $FixtureScript = @'
 from pathlib import Path
@@ -100,17 +117,18 @@ from src.models import CREATE_TABLES_SQL
 
 db_path = Path(sys.argv[1]).resolve()
 config_path = Path(sys.argv[2]).resolve()
-production_backup_dir = Path(sys.argv[3]).resolve()
 db_path.parent.mkdir(parents=True, exist_ok=True)
+config_path.parent.mkdir(parents=True, exist_ok=True)
 with sqlite3.connect(db_path) as connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.executescript(CREATE_TABLES_SQL)
     connection.commit()
+
 payload = {
-    "database": {"path": str(db_path)},
+    "database": {"path": "data/moomoo.db"},
     "database_backup": {
         "enabled": True,
-        "directory": str(production_backup_dir),
+        "directory": "configured production backups",
         "retain_daily": 7,
         "retain_weekly": 4,
         "retain_pre_cycle": 7,
@@ -130,7 +148,7 @@ config_path.write_text(
 )
 '@
 
-$fixtureRaw = $FixtureScript | & python - $LiveDb $Config $ProductionBackupDir 2>&1
+$fixtureRaw = $FixtureScript | & python - $LiveDb $Config 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "fixture creation failed:`n$($fixtureRaw -join '`n')"
 }
@@ -141,9 +159,33 @@ $BaseArguments = @(
     "-File", $DrillScript,
     "-ExpectedHead", $HeadSha,
     "-ProductionConfig", $Config,
+    "-ProductionWorkingDirectory", $ProductionWorkingDirectory,
     "-Strategy", "momentum"
 )
 $RepoSubdirectory = Join-Path $RepoRoot "tests"
+
+# Omitting the runtime directory must not silently resolve the relative DB from
+# the external config location. It defaults to the verified repository root and
+# fails closed because that DB is absent.
+$MissingContextEvidence = Join-Path $Root "missing context evidence"
+$MissingContextSecondary = Join-Path $Root "missing context secondary"
+$MissingContextRestore = Join-Path $Root "missing context restore\restored.db"
+$missingContextResult = Invoke-DrillProcess -Arguments @(
+    "-File", $DrillScript,
+    "-ExpectedHead", $HeadSha,
+    "-ProductionConfig", $Config,
+    "-EvidenceDir", $MissingContextEvidence,
+    "-SecondaryDir", $MissingContextSecondary,
+    "-RestorePath", $MissingContextRestore,
+    "-Strategy", "momentum",
+    "-PreflightOnly"
+)
+Assert-Failure $missingContextResult "missing-production-working-directory guard"
+Assert-PathsAbsent @(
+    $MissingContextEvidence,
+    $MissingContextSecondary,
+    $MissingContextRestore
+)
 
 # Wrong SHA must fail before any drill path is created.
 $WrongShaEvidence = Join-Path $Root "wrong sha evidence"
@@ -153,6 +195,7 @@ $wrongShaResult = Invoke-DrillProcess -Arguments @(
     "-File", $DrillScript,
     "-ExpectedHead", ("0" * 40),
     "-ProductionConfig", $Config,
+    "-ProductionWorkingDirectory", $ProductionWorkingDirectory,
     "-EvidenceDir", $WrongShaEvidence,
     "-SecondaryDir", $WrongShaSecondary,
     "-RestorePath", $WrongShaRestore,
@@ -160,21 +203,23 @@ $wrongShaResult = Invoke-DrillProcess -Arguments @(
     "-PreflightOnly"
 )
 Assert-Failure $wrongShaResult "wrong-SHA guard"
-if (
-    (Test-Path -LiteralPath $WrongShaEvidence) -or
-    (Test-Path -LiteralPath $WrongShaSecondary) -or
-    (Test-Path -LiteralPath $WrongShaRestore)
-) {
-    throw "wrong-SHA guard created an output path"
-}
+Assert-PathsAbsent @(
+    $WrongShaEvidence,
+    $WrongShaSecondary,
+    $WrongShaRestore
+)
 
 # Case-insensitive repository containment must be rejected on Windows.
-$RepoEvidence = (Join-Path $RepoRoot "temporary recovery evidence").ToUpperInvariant()
+$RepoEvidence = (
+    Join-Path $RepoRoot "temporary recovery evidence"
+).ToUpperInvariant()
 $repoPathResult = Invoke-DrillProcess -Arguments @(
     $BaseArguments + @(
         "-EvidenceDir", $RepoEvidence,
         "-SecondaryDir", (Join-Path $Root "repo guard secondary"),
-        "-RestorePath", (Join-Path $Root "repo guard restore\restored.db"),
+        "-RestorePath", (
+            Join-Path $Root "repo guard restore\restored.db"
+        ),
         "-PreflightOnly"
     )
 )
@@ -183,22 +228,29 @@ if (Test-Path -LiteralPath $RepoEvidence) {
     throw "repository-path guard created evidence inside the repository"
 }
 
-# Repository containment must still be enforced when invoked from a subdirectory.
-$SubdirRepoEvidence = Join-Path $RepoRoot "temporary subdir recovery evidence"
+# Repository containment must still be enforced from a repository subdirectory.
+$SubdirRepoEvidence = Join-Path (
+    $RepoRoot
+) "temporary subdir recovery evidence"
 $subdirRepoPathResult = Invoke-DrillProcess -Arguments @(
     $BaseArguments + @(
         "-EvidenceDir", $SubdirRepoEvidence,
-        "-SecondaryDir", (Join-Path $Root "subdir repo guard secondary"),
-        "-RestorePath", (Join-Path $Root "subdir repo guard restore\restored.db"),
+        "-SecondaryDir", (
+            Join-Path $Root "subdir repo guard secondary"
+        ),
+        "-RestorePath", (
+            Join-Path $Root "subdir repo guard restore\restored.db"
+        ),
         "-PreflightOnly"
     )
 ) -WorkingDirectory $RepoSubdirectory
 Assert-Failure $subdirRepoPathResult "subdirectory repository-path guard"
 if (Test-Path -LiteralPath $SubdirRepoEvidence) {
-    throw "subdirectory repository-path guard created evidence inside the repository"
+    throw "subdirectory guard created evidence inside the repository"
 }
 
-# Preflight must be read-only and create no requested output paths.
+# Preflight must resolve relative config paths from the explicit production
+# runtime directory, remain read-only, and create no requested output paths.
 $PreflightEvidence = Join-Path $Root "preflight evidence"
 $PreflightSecondary = Join-Path $Root "preflight secondary"
 $PreflightRestore = Join-Path $Root "preflight restore\restored.db"
@@ -216,12 +268,28 @@ if ($preflight.status -ne "preflight_only") {
     throw "unexpected preflight status: $($preflight.status)"
 }
 if (
-    (Test-Path -LiteralPath $PreflightEvidence) -or
-    (Test-Path -LiteralPath $PreflightSecondary) -or
-    (Test-Path -LiteralPath $PreflightRestore)
+    [string]$preflight.production_working_directory -ne
+    (Resolve-Path $ProductionWorkingDirectory).Path
 ) {
-    throw "preflight created an output path"
+    throw "preflight reported the wrong production working directory"
 }
+if ([string]$preflight.configured_database_path -ne "data/moomoo.db") {
+    throw "preflight did not preserve the configured relative DB path"
+}
+if ([string]$preflight.live_db -ne (Resolve-Path $LiveDb).Path) {
+    throw "preflight resolved the wrong live DB"
+}
+if (
+    [string]$preflight.configured_backup_directory -ne
+    [IO.Path]::GetFullPath($ProductionBackupDir)
+) {
+    throw "preflight resolved the wrong configured backup directory"
+}
+Assert-PathsAbsent @(
+    $PreflightEvidence,
+    $PreflightSecondary,
+    $PreflightRestore
+)
 if ((Get-Sha256 $Config) -ne $ConfigHashBefore) {
     throw "preflight changed the production config"
 }
@@ -229,9 +297,11 @@ if ((Get-Sha256 $LiveDb) -ne $LiveDbHashBefore) {
     throw "preflight changed the live database"
 }
 
-# An existing restore target must fail before evidence or secondary output is created.
+# An existing restore target must fail before evidence or secondary output.
 $ExistingRestore = Join-Path $Root "existing restore\restored.db"
-New-Item -ItemType Directory -Path (Split-Path $ExistingRestore -Parent) | Out-Null
+New-Item -ItemType Directory -Path (
+    Split-Path $ExistingRestore -Parent
+) | Out-Null
 Set-Content -LiteralPath $ExistingRestore -Value "must remain" -Encoding ascii
 $ExistingRestoreHash = Get-Sha256 $ExistingRestore
 $ExistingEvidence = Join-Path $Root "existing target evidence"
@@ -245,17 +315,13 @@ $existingResult = Invoke-DrillProcess -Arguments @(
     )
 )
 Assert-Failure $existingResult "existing-restore guard"
-if (
-    (Test-Path -LiteralPath $ExistingEvidence) -or
-    (Test-Path -LiteralPath $ExistingSecondary)
-) {
-    throw "existing-restore guard created drill output"
-}
+Assert-PathsAbsent @($ExistingEvidence, $ExistingSecondary)
 if ((Get-Sha256 $ExistingRestore) -ne $ExistingRestoreHash) {
     throw "existing-restore guard modified the existing target"
 }
 
-# Full temporary drill in the selected Windows PowerShell implementation.
+# Full temporary drill using relative DB and backup paths resolved from the
+# explicit production working directory.
 $Evidence = Join-Path $Root "full evidence"
 $Secondary = Join-Path $Root "full secondary"
 $Restore = Join-Path $Root "full restore\moomoo-restored.db"
@@ -276,6 +342,15 @@ if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
 $result = Get-Content -Raw -LiteralPath $ResultPath | ConvertFrom-Json
 if ($result.status -ne "pending_operator_review") {
     throw "unexpected full-drill status: $($result.status)"
+}
+if (
+    [string]$result.production_working_directory -ne
+    (Resolve-Path $ProductionWorkingDirectory).Path
+) {
+    throw "full drill recorded the wrong production working directory"
+}
+if ([string]$result.live_db -ne (Resolve-Path $LiveDb).Path) {
+    throw "full drill used the wrong live DB"
 }
 if ([int]$result.integrity_errors -ne 0) {
     throw "full drill reported integrity errors"
@@ -319,6 +394,10 @@ if ($gitStatus) {
     shell_version = $PSVersionTable.PSVersion.ToString()
     status = "passed"
     preflight_read_only = $true
+    production_working_directory_validated = $true
+    relative_database_path_validated = $true
+    relative_backup_path_validated = $true
+    missing_context_rejected = $true
     wrong_sha_rejected = $true
     repository_path_rejected = $true
     subdirectory_invocation_validated = $true
