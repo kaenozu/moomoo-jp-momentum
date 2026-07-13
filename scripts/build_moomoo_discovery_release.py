@@ -18,11 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 OPERATOR_BUILDER_PATH = (
     ROOT / "scripts" / "build_moomoo_discovery_operator_bundle.py"
 )
+HANDOFF_BUILDER_PATH = (
+    ROOT / "scripts" / "build_moomoo_readonly_discovery_handoff.py"
+)
 RELEASE_VERIFIER_PATH = (
     ROOT / "scripts" / "compare_moomoo_discovery_releases.py"
 )
 HUMAN_SOURCE = ROOT / "tools" / "production_discovery"
 OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
+HANDOFF_ZIP = "moomoo-readonly-discovery-handoff-v1.2.2.zip"
 RELEASE_ZIP = "moomoo_production_discovery_release_v1.2.2.zip"
 RELEASE_VERIFIER = "compare_moomoo_discovery_releases.py"
 HUMAN_FILES = (
@@ -52,10 +56,9 @@ def load_module(name: str, path: Path):
 operator_builder = load_module(
     "moomoo_operator_bundle_builder", OPERATOR_BUILDER_PATH
 )
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+handoff_builder = load_module(
+    "moomoo_readonly_handoff_builder", HANDOFF_BUILDER_PATH
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -91,18 +94,14 @@ def classify_release_candidate(
     )
 
 
-def read_operator_manifest(operator_zip: Path) -> dict[str, Any]:
-    with zipfile.ZipFile(operator_zip, "r") as archive:
+def read_zip_manifest(path: Path, name: str) -> dict[str, Any]:
+    with zipfile.ZipFile(path, "r") as archive:
         try:
-            payload = json.loads(
-                archive.read("bundle-manifest.json").decode("utf-8")
-            )
+            payload = json.loads(archive.read(name).decode("utf-8"))
         except (KeyError, UnicodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                f"Operator bundle manifest is invalid: {exc}"
-            ) from exc
+            raise RuntimeError(f"ZIP manifest is invalid: {path}:{name}: {exc}") from exc
     if not isinstance(payload, dict):
-        raise RuntimeError("Operator bundle manifest must be a JSON object")
+        raise RuntimeError(f"ZIP manifest must be a JSON object: {path}:{name}")
     return payload
 
 
@@ -129,14 +128,23 @@ def write_deterministic_zip(stage: Path, target: Path) -> None:
 def build_release(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     operator_output = output_dir / "_operator"
-    if operator_output.exists():
-        shutil.rmtree(operator_output)
+    handoff_output = output_dir / "_handoff"
+    for generated in (operator_output, handoff_output):
+        if generated.exists():
+            shutil.rmtree(generated)
+
     operator_result = operator_builder.build_bundle(operator_output)
     operator_zip = Path(str(operator_result["zip"]))
     if operator_zip.name != OPERATOR_ZIP:
-        raise RuntimeError(
-            f"Unexpected operator ZIP name: {operator_zip.name}"
-        )
+        raise RuntimeError(f"Unexpected operator ZIP name: {operator_zip.name}")
+
+    handoff_result = handoff_builder.build_handoff(
+        handoff_output,
+        operator_zip,
+    )
+    handoff_zip = Path(str(handoff_result["zip"]))
+    if handoff_zip.name != HANDOFF_ZIP:
+        raise RuntimeError(f"Unexpected handoff ZIP name: {handoff_zip.name}")
 
     source_commit, source_ref, source_event, head = source_identity()
     release_candidate = classify_release_candidate(
@@ -148,7 +156,12 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         else "VALIDATION_ONLY"
     )
 
-    operator_manifest = read_operator_manifest(operator_zip)
+    operator_manifest = read_zip_manifest(
+        operator_zip, "bundle-manifest.json"
+    )
+    handoff_manifest = read_zip_manifest(
+        handoff_zip, "HANDOFF_MANIFEST.json"
+    )
     if operator_manifest.get("operator_version") != "1.2.2":
         raise RuntimeError(
             "Operator bundle version does not match release version"
@@ -165,12 +178,34 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         raise RuntimeError(
             "Operator bundle authorization is not fail-closed"
         )
+    if handoff_manifest.get("handoff_version") != "1.2.2":
+        raise RuntimeError("Handoff version does not match release version")
+    if handoff_manifest.get("operator_version") != "1.2.2":
+        raise RuntimeError("Handoff operator version is not 1.2.2")
+    if handoff_manifest.get("source_commit") != source_commit:
+        raise RuntimeError(
+            "Handoff source_commit does not match release source_commit"
+        )
+    if handoff_manifest.get("source_ref") != source_ref:
+        raise RuntimeError(
+            "Handoff source_ref does not match release source_ref"
+        )
+    if handoff_manifest.get("authorization") != EXPECTED_AUTHORIZATION:
+        raise RuntimeError("Handoff authorization is not fail-closed")
+    handoff_operator = handoff_manifest.get("operator_bundle")
+    if not isinstance(handoff_operator, dict):
+        raise RuntimeError("Handoff operator metadata is missing")
+    if handoff_operator.get("sha256") != sha256_file(operator_zip):
+        raise RuntimeError(
+            "Handoff nested operator SHA-256 differs from release operator"
+        )
 
     stage = output_dir / "moomoo_production_discovery_release_v1.2.2"
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir()
     (stage / OPERATOR_ZIP).write_bytes(operator_zip.read_bytes())
+    (stage / HANDOFF_ZIP).write_bytes(handoff_zip.read_bytes())
     for name in HUMAN_FILES:
         source = HUMAN_SOURCE / name
         (stage / name).write_bytes(
@@ -184,6 +219,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         "report_type": "moomoo_discovery_release_manifest",
         "release_format_version": 1,
         "operator_version": "1.2.2",
+        "handoff_version": "1.2.2",
         "built_at": operator_builder.deterministic_built_at(),
         "source_commit": source_commit,
         "source_ref": source_ref,
@@ -200,6 +236,14 @@ def build_release(output_dir: Path) -> dict[str, Any]:
             "manifest_source_ref": operator_manifest.get(
                 "source_ref"
             ),
+        },
+        "readonly_handoff": {
+            "filename": HANDOFF_ZIP,
+            "sha256": sha256_file(stage / HANDOFF_ZIP),
+            "manifest_source_commit": handoff_manifest.get("source_commit"),
+            "manifest_source_ref": handoff_manifest.get("source_ref"),
+            "nested_operator_sha256": handoff_operator.get("sha256"),
+            "production_eligible_only_inside_canonical_release": True,
         },
         "human_validation": {
             "schema": "human-validation.schema.json",
@@ -239,6 +283,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     return {
         "report_type": "moomoo_discovery_release_build",
         "operator_version": "1.2.2",
+        "handoff_version": "1.2.2",
         "source_commit": source_commit,
         "source_ref": source_ref,
         "source_event": source_event,
@@ -247,6 +292,7 @@ def build_release(output_dir: Path) -> dict[str, Any]:
         "release_zip": str(release_zip),
         "release_zip_sha256": sha256_file(release_zip),
         "operator_zip_sha256": sha256_file(stage / OPERATOR_ZIP),
+        "handoff_zip_sha256": sha256_file(stage / HANDOFF_ZIP),
         "member_count": len(
             [path for path in stage.iterdir() if path.is_file()]
         ),
