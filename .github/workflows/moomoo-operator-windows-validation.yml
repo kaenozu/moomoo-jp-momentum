@@ -3,17 +3,19 @@ name: moomoo operator Windows validation
 on:
   pull_request:
     paths:
+      - ".gitattributes"
       - "tools/production_discovery/**"
       - "scripts/build_moomoo_discovery_operator_bundle.py"
-      - ".gitattributes"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
       - ".github/workflows/moomoo-operator-windows-validation.yml"
   push:
     branches:
       - master
     paths:
+      - ".gitattributes"
       - "tools/production_discovery/**"
       - "scripts/build_moomoo_discovery_operator_bundle.py"
-      - ".gitattributes"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
       - ".github/workflows/moomoo-operator-windows-validation.yml"
   workflow_dispatch:
 
@@ -22,12 +24,13 @@ permissions:
 
 env:
   PYTHONDONTWRITEBYTECODE: "1"
+  SOURCE_DATE_EPOCH: "1783900800"
 
 jobs:
   windows-powershell-5:
     name: Windows PowerShell 5.1
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,45 +38,51 @@ jobs:
           python-version: "3.11"
       - name: Install YAML parser
         run: python -m pip install PyYAML
-      - name: Record checkout line-ending state
+      - name: Prepare diagnostics and record checkout state
         shell: powershell
         run: |
           New-Item -ItemType Directory -Path ci-diagnostics -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps5-build-a" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps5-build-b" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps5-artifact" -Force | Out-Null
           $PSVersionTable | Out-String | Set-Content ci-diagnostics\powershell-version.txt
           & git check-attr text eol -- tools/production_discovery/*.ps1 2>&1 |
             Tee-Object ci-diagnostics\git-attributes.txt
-          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py 2>&1 |
+          & git ls-files --eol -- tools/production_discovery scripts/*.py 2>&1 |
             Tee-Object ci-diagnostics\git-eol.txt
-      - name: Run static and regression validation
+      - name: Run parser, static, regression, and synthetic validation
         id: validate
         continue-on-error: true
         shell: powershell
         run: |
-          $log = "ci-diagnostics\validation.log"
           try {
             & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
               -PythonExecutable python `
-              -PowerShellExecutable powershell.exe *>&1 |
-                Tee-Object -FilePath $log
+              -PowerShellExecutable powershell.exe `
+              -DiagnosticsDir "ci-diagnostics" *>&1 |
+                Tee-Object -FilePath ci-diagnostics\validation.log
             $code = 0
           } catch {
-            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append
+            $_ | Format-List * -Force | Out-String |
+              Tee-Object -FilePath ci-diagnostics\validation.log -Append
             $code = 1
           }
           "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($code -ne 0) { exit $code }
-      - name: Build operator bundle
+      - name: Build twice and compare on Windows PowerShell 5.1 runner
         id: build
         if: steps.validate.outcome == 'success'
         continue-on-error: true
-        shell: powershell
+        shell: cmd
         run: |
-          $log = "ci-diagnostics\bundle-build.log"
-          & python .\scripts\build_moomoo_discovery_operator_bundle.py 2>&1 |
-            Tee-Object -FilePath $log
-          $code = $LASTEXITCODE
-          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($code -ne 0) { exit $code }
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps5-build-a" --json-output "ci-diagnostics\build-a.json" > "ci-diagnostics\build-a.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps5-build-b" --json-output "ci-diagnostics\build-b.json" > "ci-diagnostics\build-b.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" --right "%RUNNER_TEMP%\ps5-build-b\moomoo_production_discovery_operator_v4_v1.2.1.zip" --output "ci-diagnostics\same-shell-comparison.json" > "ci-diagnostics\same-shell-comparison.log" 2>&1
+          if errorlevel 1 exit /b 1
+          copy /Y "%RUNNER_TEMP%\ps5-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps5-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
+          if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
         id: clean
         if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
@@ -84,34 +93,34 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
           & git diff --cached --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
-      - name: Upload validation diagnostics
+      - name: Upload PowerShell 5.1 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-operator-v1.2.1-powershell5-diagnostics
+          name: moomoo-operator-v1.2.1-diagnostics-powershell5
           path: ci-diagnostics
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload operator bundle
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 5.1 bundle
         if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell5
-          path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          path: ${{ runner.temp }}/ps5-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
-          retention-days: 7
-      - name: Enforce validation result
+          retention-days: 14
+      - name: Enforce PowerShell 5.1 result
         if: always()
         shell: powershell
         run: |
           if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
-          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build failed" }
+          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build or same-shell comparison failed" }
           if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
 
   powershell-7:
     name: PowerShell 7
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -119,45 +128,51 @@ jobs:
           python-version: "3.11"
       - name: Install YAML parser
         run: python -m pip install PyYAML
-      - name: Record checkout line-ending state
+      - name: Prepare diagnostics and record checkout state
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path ci-diagnostics -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps7-build-a" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps7-build-b" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\ps7-artifact" -Force | Out-Null
           $PSVersionTable | Out-String | Set-Content ci-diagnostics/powershell-version.txt
           & git check-attr text eol -- tools/production_discovery/*.ps1 2>&1 |
             Tee-Object ci-diagnostics/git-attributes.txt
-          & git ls-files --eol -- tools/production_discovery scripts/build_moomoo_discovery_operator_bundle.py 2>&1 |
+          & git ls-files --eol -- tools/production_discovery scripts/*.py 2>&1 |
             Tee-Object ci-diagnostics/git-eol.txt
-      - name: Run static and regression validation
+      - name: Run parser, static, regression, and synthetic validation
         id: validate
         continue-on-error: true
         shell: pwsh
         run: |
-          $log = "ci-diagnostics/validation.log"
           try {
             & .\tools\production_discovery\run_moomoo_discovery_operator_tests.ps1 `
               -PythonExecutable python `
-              -PowerShellExecutable pwsh.exe *>&1 |
-                Tee-Object -FilePath $log
+              -PowerShellExecutable pwsh.exe `
+              -DiagnosticsDir "ci-diagnostics" *>&1 |
+                Tee-Object -FilePath ci-diagnostics/validation.log
             $code = 0
           } catch {
-            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append
+            $_ | Format-List * -Force | Out-String |
+              Tee-Object -FilePath ci-diagnostics/validation.log -Append
             $code = 1
           }
           "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($code -ne 0) { exit $code }
-      - name: Build operator bundle
+      - name: Build twice and compare on PowerShell 7 runner
         id: build
         if: steps.validate.outcome == 'success'
         continue-on-error: true
-        shell: pwsh
+        shell: cmd
         run: |
-          $log = "ci-diagnostics/bundle-build.log"
-          & python .\scripts\build_moomoo_discovery_operator_bundle.py 2>&1 |
-            Tee-Object -FilePath $log
-          $code = $LASTEXITCODE
-          "exit_code=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($code -ne 0) { exit $code }
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps7-build-a" --json-output "ci-diagnostics\build-a.json" > "ci-diagnostics\build-a.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\build_moomoo_discovery_operator_bundle.py --output-dir "%RUNNER_TEMP%\ps7-build-b" --json-output "ci-diagnostics\build-b.json" > "ci-diagnostics\build-b.log" 2>&1
+          if errorlevel 1 exit /b 1
+          python .\scripts\compare_moomoo_discovery_operator_bundles.py --left "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" --right "%RUNNER_TEMP%\ps7-build-b\moomoo_production_discovery_operator_v4_v1.2.1.zip" --output "ci-diagnostics\same-shell-comparison.json" > "ci-diagnostics\same-shell-comparison.log" 2>&1
+          if errorlevel 1 exit /b 1
+          copy /Y "%RUNNER_TEMP%\ps7-build-a\moomoo_production_discovery_operator_v4_v1.2.1.zip" "%RUNNER_TEMP%\ps7-artifact\moomoo_production_discovery_operator_v4_v1.2.1.zip"
+          if errorlevel 1 exit /b 1
       - name: Verify tracked repository unchanged
         id: clean
         if: steps.validate.outcome == 'success' && steps.build.outcome == 'success'
@@ -168,26 +183,62 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
           & git diff --cached --exit-code
           if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
-      - name: Upload validation diagnostics
+      - name: Upload PowerShell 7 diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-operator-v1.2.1-powershell7-diagnostics
+          name: moomoo-operator-v1.2.1-diagnostics-powershell7
           path: ci-diagnostics
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload operator bundle
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload PowerShell 7 bundle
         if: steps.validate.outcome == 'success' && steps.build.outcome == 'success' && steps.clean.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-operator-v1.2.1-powershell7
-          path: dist/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          path: ${{ runner.temp }}/ps7-artifact/moomoo_production_discovery_operator_v4_v1.2.1.zip
           if-no-files-found: error
-          retention-days: 7
-      - name: Enforce validation result
+          retention-days: 14
+      - name: Enforce PowerShell 7 result
         if: always()
         shell: pwsh
         run: |
           if ("${{ steps.validate.outcome }}" -ne "success") { throw "Validation failed" }
-          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build failed" }
+          if ("${{ steps.build.outcome }}" -ne "success") { throw "Bundle build or same-shell comparison failed" }
           if ("${{ steps.clean.outcome }}" -ne "success") { throw "Repository cleanliness check failed" }
+
+  compare-bundles:
+    name: Compare PowerShell 5.1 and PowerShell 7 bundles
+    needs:
+      - windows-powershell-5
+      - powershell-7
+    if: ${{ needs.windows-powershell-5.result == 'success' && needs.powershell-7.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-discovery-operator-v1.2.1-powershell5
+          path: artifacts/powershell5
+      - uses: actions/download-artifact@v4
+        with:
+          name: moomoo-discovery-operator-v1.2.1-powershell7
+          path: artifacts/powershell7
+      - name: Compare cross-shell bundles byte for byte
+        run: >-
+          python ./scripts/compare_moomoo_discovery_operator_bundles.py
+          --left ./artifacts/powershell5/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          --right ./artifacts/powershell7/moomoo_production_discovery_operator_v4_v1.2.1.zip
+          --output ./cross-shell-comparison.json
+      - name: Upload cross-shell comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-operator-v1.2.1-cross-shell-comparison
+          path: cross-shell-comparison.json
+          if-no-files-found: warn
+          retention-days: 14
