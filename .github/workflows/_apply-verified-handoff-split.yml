@@ -30,8 +30,14 @@ jobs:
           from pathlib import Path
           path = Path('scripts/_apply_verified_handoff_split.py')
           text = path.read_text(encoding='utf-8')
-          text = text.replace('text += (\\n                ', 'text += (\n                ')
-          text = text.replace('    run(\\n        sys.executable,', '    run(\n        sys.executable,')
+          text = text.replace(
+              'text += (\\n                ',
+              'text += (' + chr(10) + '                ',
+          )
+          text = text.replace(
+              '    run(\\n        sys.executable,',
+              '    run(' + chr(10) + '        sys.executable,',
+          )
           path.write_text(text, encoding='utf-8', newline='\n')
           PY
           python -m py_compile scripts/_apply_verified_handoff_split.py
