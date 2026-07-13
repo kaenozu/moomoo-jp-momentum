@@ -10,14 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 DISCOVERY_FILENAME = "moomoo_production_readonly_discovery_v4.ps1"
 GATE_FILENAME = "moomoo_discovery_v4_gate.ps1"
 DEFAULT_EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
 EXPECTED_BUNDLE_FILE_SHA256: dict[str, str] = {
     "moomoo_production_readonly_discovery_v4.ps1": "1cc5961b434c68edae9a072bade38d59b063141c31e99585b496589691975d29",
     "moomoo_discovery_v4_common.ps1": "a2aa3a3a09a51662fff5d56190be9b4e85476668a9d9d7b6d2a08be9a86d9a88",
-    "moomoo_discovery_v4_runtime.ps1": "2e816d597d4823aa67df97808273d647812e0028162f60a844fc7df317b517d8",
+    "moomoo_discovery_v4_runtime.ps1": "2f60513de0d60f8ccbea0fa11b930309f2fb80e04f0d3c0022705ed6b56081e5",
     "moomoo_discovery_v4_storage.ps1": "824b1ab1b8c0ffe90827b78b9a647d86e1dbac5dcbf55ee530e7b63778359ed2",
 }
 EXPECTED_DISCOVERY_SHA256 = EXPECTED_BUNDLE_FILE_SHA256[DISCOVERY_FILENAME]
@@ -137,8 +137,11 @@ def as_list(value: Any) -> list[Any]:
 
 
 def is_error_object(value: Any) -> bool:
-    return isinstance(value, dict) and (
-        "error" in value or "error_type" in value or "invocation_error" in value
+    if not isinstance(value, dict):
+        return False
+    return any(
+        key in value and value.get(key) not in (None, "", [], {})
+        for key in ("error", "error_type", "invocation_error")
     )
 
 

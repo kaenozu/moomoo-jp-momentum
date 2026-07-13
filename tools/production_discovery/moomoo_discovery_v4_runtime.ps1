@@ -1,26 +1,49 @@
+function Get-OptionalPropertyValue {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if ($null -eq $InputObject) {
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    $property.Value
+}
+
 function Get-RelevantScheduledTasks {
     $rows = @()
     foreach ($task in (Get-ScheduledTask -ErrorAction Stop)) {
-        foreach ($action in @($task.Actions)) {
-            $workingDirectory = $null
-            if ($action.PSObject.Properties.Name -contains "WorkingDirectory") {
-                $workingDirectory = [string]$action.WorkingDirectory
+        $taskPath = [string](Get-OptionalPropertyValue -InputObject $task -Name "TaskPath")
+        $taskName = [string](Get-OptionalPropertyValue -InputObject $task -Name "TaskName")
+        $taskState = [string](Get-OptionalPropertyValue -InputObject $task -Name "State")
+        $principal = Get-OptionalPropertyValue -InputObject $task -Name "Principal"
+        foreach ($action in @(Get-OptionalPropertyValue -InputObject $task -Name "Actions")) {
+            if ($null -eq $action) {
+                continue
             }
-            $text = "$($task.TaskPath) $($task.TaskName) $($action.Execute) $($action.Arguments) $workingDirectory"
+            $execute = [string](Get-OptionalPropertyValue -InputObject $action -Name "Execute")
+            $arguments = [string](Get-OptionalPropertyValue -InputObject $action -Name "Arguments")
+            $workingDirectory = [string](Get-OptionalPropertyValue -InputObject $action -Name "WorkingDirectory")
+            $text = "$taskPath $taskName $execute $arguments $workingDirectory"
             if ($text -notmatch $writerPattern) {
                 continue
             }
-            $principal = $task.Principal
             $rows += [pscustomobject]@{
-                task_path = $task.TaskPath
-                task_name = $task.TaskName
-                state = [string]$task.State
-                execute = [string]$action.Execute
-                arguments = [string]$action.Arguments
-                working_directory = $workingDirectory
-                principal_user_id = if ($principal) { [string]$principal.UserId } else { $null }
-                principal_logon_type = if ($principal) { [string]$principal.LogonType } else { $null }
-                triggers = @($task.Triggers | ForEach-Object { [string]$_ })
+                task_path = $taskPath
+                task_name = $taskName
+                state = $taskState
+                execute = $execute
+                arguments = $arguments
+                working_directory = if ($workingDirectory) { $workingDirectory } else { $null }
+                principal_user_id = if ($principal) { [string](Get-OptionalPropertyValue -InputObject $principal -Name "UserId") } else { $null }
+                principal_logon_type = if ($principal) { [string](Get-OptionalPropertyValue -InputObject $principal -Name "LogonType") } else { $null }
+                triggers = @(
+                    @(Get-OptionalPropertyValue -InputObject $task -Name "Triggers") |
+                        ForEach-Object { [string]$_ }
+                )
             }
         }
     }

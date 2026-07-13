@@ -139,7 +139,7 @@ def inspect_bundle(path: Path) -> dict[str, Any]:
             result["errors"].append(
                 "manifest authorization boundary is not fail-closed"
             )
-        if manifest.get("operator_version") != "1.2.1":
+        if manifest.get("operator_version") != "1.2.2":
             result["errors"].append(
                 "unexpected operator version in manifest"
             )
