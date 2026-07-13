@@ -18,9 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tools" / "production_discovery" / "handoff"
 DEFAULT_DIST = ROOT / "dist"
 HANDOFF_VERSION = "1.2.2"
-OPERATOR_VERSION = "1.2.1"
+OPERATOR_VERSION = "1.2.2"
 OPERATOR_BUNDLE_NAME = (
-    "moomoo_production_discovery_operator_v4_v1.2.1.zip"
+    "moomoo_production_discovery_operator_v4_v1.2.2.zip"
 )
 OPERATOR_REQUIRED_MEMBERS = {
     "moomoo_production_readonly_discovery_v4.ps1",
