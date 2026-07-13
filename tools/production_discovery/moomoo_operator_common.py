@@ -17,7 +17,7 @@ DEFAULT_EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
 EXPECTED_BUNDLE_FILE_SHA256: dict[str, str] = {
     "moomoo_production_readonly_discovery_v4.ps1": "1cc5961b434c68edae9a072bade38d59b063141c31e99585b496589691975d29",
     "moomoo_discovery_v4_common.ps1": "39b22a9dd5505ed3de2a1e7f4e80c40a7a9ec5a22adca6c6f72bca64c2a1a9c5",
-    "moomoo_discovery_v4_runtime.ps1": "3cbdbe921763cd1270f08d6b45cc348856ab71cb5477947190d3af3fc93a73e6",
+    "moomoo_discovery_v4_runtime.ps1": "2e816d597d4823aa67df97808273d647812e0028162f60a844fc7df317b517d8",
     "moomoo_discovery_v4_storage.ps1": "7d6146150565d858595cbd12aef6a2f13f40eebe1890fe738df281657f8af79d",
 }
 EXPECTED_DISCOVERY_SHA256 = EXPECTED_BUNDLE_FILE_SHA256[DISCOVERY_FILENAME]
