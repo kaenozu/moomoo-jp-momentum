@@ -5,7 +5,7 @@
 - [ ] The package came from the GitHub Actions **master push** artifact after cross-shell comparison.
 - [ ] `verify-handoff.ps1` printed PASS.
 - [ ] `HANDOFF_MANIFEST.json` has `handoff_version = 1.2.2`.
-- [ ] `HANDOFF_MANIFEST.json` has `operator_version = 1.2.1`.
+- [ ] `HANDOFF_MANIFEST.json` has `operator_version = 1.2.2`.
 - [ ] `source_commit` equals `expected_checkout_head`.
 - [ ] The verified checkout HEAD equals `expected_checkout_head`.
 - [ ] The verified checkout is the exact Git top-level and is clean.
