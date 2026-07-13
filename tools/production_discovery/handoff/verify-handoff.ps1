@@ -87,7 +87,7 @@ if ([int]$Manifest.schema_version -ne 1) {
 if ([string]$Manifest.handoff_version -ne "1.2.2") {
     throw "Unexpected handoff version: $($Manifest.handoff_version)"
 }
-if ([string]$Manifest.operator_version -ne "1.2.1") {
+if ([string]$Manifest.operator_version -ne "1.2.2") {
     throw "Unexpected operator version: $($Manifest.operator_version)"
 }
 $ExpectedHead = ([string]$Manifest.expected_checkout_head).ToLowerInvariant()
@@ -132,7 +132,7 @@ foreach ($Property in $PayloadProperties) {
 
 $BundleName = [string]$Manifest.operator_bundle.name
 Assert-SafeRelativeFilename -Name $BundleName
-if ($BundleName -ne "moomoo_production_discovery_operator_v4_v1.2.1.zip") {
+if ($BundleName -ne "moomoo_production_discovery_operator_v4_v1.2.2.zip") {
     throw "Unexpected operator bundle name: $BundleName"
 }
 $BundlePath = Join-Path $Root $BundleName
@@ -174,7 +174,7 @@ try {
         throw "Operator bundle manifest or checksums are missing"
     }
     $OperatorManifest = Get-Content -LiteralPath $OperatorManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ([string]$OperatorManifest.operator_version -ne "1.2.1") {
+    if ([string]$OperatorManifest.operator_version -ne "1.2.2") {
         throw "Operator bundle manifest version mismatch"
     }
     if (([string]$OperatorManifest.source_commit).ToLowerInvariant() -ne $ExpectedHead) {
