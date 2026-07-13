@@ -67,7 +67,7 @@ def confirmed_human_payload() -> dict[str, Any]:
 def operator_result() -> dict[str, Any]:
     return {
         "report_type": "moomoo_discovery_operator_result",
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "status": "completed_readonly_discovery",
         "operator_exit_code": 0,
         "powershell_exit_code": 0,
@@ -124,7 +124,7 @@ def release_manifest(candidate: bool = True) -> dict[str, Any]:
     return {
         "report_type": "moomoo_discovery_release_manifest",
         "release_format_version": 1,
-        "operator_version": "1.2.1",
+        "operator_version": "1.2.2",
         "source_commit": "a" * 40,
         "source_ref": source_ref,
         "source_event": "push" if candidate else "pull_request",
@@ -137,7 +137,7 @@ def release_manifest(candidate: bool = True) -> dict[str, Any]:
         ),
         "operator_bundle": {
             "filename": (
-                "moomoo_production_discovery_operator_v4_v1.2.1.zip"
+                "moomoo_production_discovery_operator_v4_v1.2.2.zip"
             ),
             "sha256": "b" * 64,
             "manifest_source_commit": "a" * 40,

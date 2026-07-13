@@ -18,7 +18,7 @@ EXPECTED_AUTHORIZATION = {
     "production_drill_authorized": False,
     "cutover_authorized": False,
 }
-OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.1.zip"
+OPERATOR_ZIP = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
 RELEASE_VERIFIER = "compare_moomoo_discovery_releases.py"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -33,6 +33,7 @@ EXPECTED_OPERATOR_SOURCE_MEMBERS = {
     "moomoo_operator_review.py",
     "moomoo_operator_cli.py",
     "test_moomoo_discovery_operator.py",
+    "test_moomoo_operator_common_errors.py",
     "test_bundle_builder.py",
     "run_moomoo_discovery_operator_tests.ps1",
     "validate_moomoo_discovery_operator.py",
@@ -201,9 +202,9 @@ def inspect_operator_bundle(
             result["errors"].append(
                 "nested operator manifest report_type is invalid"
             )
-        if manifest.get("operator_version") != "1.2.1":
+        if manifest.get("operator_version") != "1.2.2":
             result["errors"].append(
-                "nested operator version is not 1.2.1"
+                "nested operator version is not 1.2.2"
             )
         if manifest.get("source_commit") != expected_commit:
             result["errors"].append(
@@ -308,7 +309,7 @@ def inspect_release(path: Path) -> dict[str, Any]:
             result["errors"].append(
                 "unexpected release format version"
             )
-        if manifest.get("operator_version") != "1.2.1":
+        if manifest.get("operator_version") != "1.2.2":
             result["errors"].append("unexpected operator version")
         if manifest.get("source_bytes") != "git_blob":
             result["errors"].append(

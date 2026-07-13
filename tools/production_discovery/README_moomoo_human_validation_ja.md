@@ -35,7 +35,7 @@ release ZIPを展開した後も元のZIPを保持し、同梱verifierで検証�
 
 ```powershell
 python .\compare_moomoo_discovery_releases.py `
-  --left .\moomoo_production_discovery_release_v1.2.1.zip `
+  --left .\moomoo_production_discovery_release_v1.2.2.zip `
   --output .\release-verification.json
 ```
 
