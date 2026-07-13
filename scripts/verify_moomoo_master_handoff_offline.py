@@ -24,6 +24,13 @@ OPERATOR_BUNDLE_NAME = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
 EXPECTED_REMOTE = "https://github.com/kaenozu/moomoo-jp-momentum.git"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+MIB = 1024 * 1024
+MAX_INPUT_BYTES = 10 * MIB
+MAX_HANDOFF_BYTES = 5 * MIB
+MAX_OPERATOR_BYTES = 5 * MIB
+MAX_MEMBER_BYTES = 2 * MIB
+MAX_TOTAL_UNCOMPRESSED_BYTES = 20 * MIB
+MAX_COMPRESSION_RATIO = 100.0
 AUTHORIZATION = {
     "production_readiness": "BLOCKED",
     "preflight_authorized": False,
@@ -98,10 +105,22 @@ def validate_expected_digest(value: str | None, label: str) -> str | None:
 
 
 def validate_zip_infos(
-    infos: list[zipfile.ZipInfo], label: str
+    infos: list[zipfile.ZipInfo],
+    label: str,
+    *,
+    max_members: int,
+    max_member_bytes: int,
+    max_total_uncompressed_bytes: int = MAX_TOTAL_UNCOMPRESSED_BYTES,
+    max_compression_ratio: float = MAX_COMPRESSION_RATIO,
 ) -> dict[str, zipfile.ZipInfo]:
+    if len(infos) > max_members:
+        raise VerificationError(
+            f"{label} contains too many members: {len(infos)} > {max_members}"
+        )
+
     result: dict[str, zipfile.ZipInfo] = {}
     seen_casefold: dict[str, str] = {}
+    total_uncompressed = 0
     for info in infos:
         name = info.filename
         normalized = name.replace("\\", "/")
@@ -117,6 +136,23 @@ def validate_zip_infos(
         )
         if unsafe:
             raise VerificationError(f"{label} contains unsafe entry: {name!r}")
+        if info.file_size > max_member_bytes:
+            raise VerificationError(
+                f"{label} member is too large: {name!r} "
+                f"{info.file_size} > {max_member_bytes}"
+            )
+        total_uncompressed += info.file_size
+        if total_uncompressed > max_total_uncompressed_bytes:
+            raise VerificationError(
+                f"{label} uncompressed size exceeds limit: "
+                f"{total_uncompressed} > {max_total_uncompressed_bytes}"
+            )
+        ratio = info.file_size / max(info.compress_size, 1)
+        if ratio > max_compression_ratio:
+            raise VerificationError(
+                f"{label} compression ratio exceeds limit for {name!r}: "
+                f"{ratio:.1f} > {max_compression_ratio:.1f}"
+            )
         key = normalized.casefold()
         if key in seen_casefold:
             raise VerificationError(
@@ -128,10 +164,26 @@ def validate_zip_infos(
     return result
 
 
-def open_verified_zip(data: bytes, label: str) -> tuple[zipfile.ZipFile, dict[str, zipfile.ZipInfo]]:
+def open_verified_zip(
+    data: bytes,
+    label: str,
+    *,
+    max_archive_bytes: int,
+    max_members: int,
+    max_member_bytes: int,
+) -> tuple[zipfile.ZipFile, dict[str, zipfile.ZipInfo]]:
+    if len(data) > max_archive_bytes:
+        raise VerificationError(
+            f"{label} exceeds compressed size limit: {len(data)} > {max_archive_bytes}"
+        )
     try:
         archive = zipfile.ZipFile(io.BytesIO(data), "r")
-        infos = validate_zip_infos(archive.infolist(), label)
+        infos = validate_zip_infos(
+            archive.infolist(),
+            label,
+            max_members=max_members,
+            max_member_bytes=max_member_bytes,
+        )
         bad_member = archive.testzip()
         if bad_member is not None:
             archive.close()
@@ -211,7 +263,13 @@ def verify_operator_bundle(
     expected_source_commit: str,
     require_master: bool,
 ) -> dict[str, Any]:
-    archive, infos = open_verified_zip(data, "nested operator ZIP")
+    archive, infos = open_verified_zip(
+        data,
+        "nested operator ZIP",
+        max_archive_bytes=MAX_OPERATOR_BYTES,
+        max_members=len(OPERATOR_MEMBERS),
+        max_member_bytes=MAX_MEMBER_BYTES,
+    )
     try:
         require_exact_members(set(infos), OPERATOR_MEMBERS, "nested operator ZIP")
         verify_checksum_coverage(
@@ -261,7 +319,13 @@ def verify_operator_bundle(
 
 
 def unwrap_handoff(input_data: bytes) -> tuple[bytes, dict[str, Any]]:
-    archive, infos = open_verified_zip(input_data, "input ZIP")
+    archive, infos = open_verified_zip(
+        input_data,
+        "input ZIP",
+        max_archive_bytes=MAX_INPUT_BYTES,
+        max_members=len(HANDOFF_MEMBERS),
+        max_member_bytes=MAX_HANDOFF_BYTES,
+    )
     try:
         names = set(infos)
         if names == HANDOFF_MEMBERS:
@@ -291,6 +355,11 @@ def verify_handoff(
 ) -> dict[str, Any]:
     if not input_path.is_file():
         raise VerificationError(f"input file does not exist: {input_path}")
+    input_size = input_path.stat().st_size
+    if input_size > MAX_INPUT_BYTES:
+        raise VerificationError(
+            f"input file exceeds size limit: {input_size} > {MAX_INPUT_BYTES}"
+        )
     expected_input_sha256 = validate_expected_digest(
         expected_input_sha256, "expected input SHA-256"
     )
@@ -315,7 +384,13 @@ def verify_handoff(
             f"handoff SHA-256 mismatch: {handoff_sha256} != {expected_handoff_sha256}"
         )
 
-    archive, infos = open_verified_zip(handoff_data, "handoff ZIP")
+    archive, infos = open_verified_zip(
+        handoff_data,
+        "handoff ZIP",
+        max_archive_bytes=MAX_HANDOFF_BYTES,
+        max_members=len(HANDOFF_MEMBERS),
+        max_member_bytes=MAX_OPERATOR_BYTES,
+    )
     try:
         require_exact_members(set(infos), HANDOFF_MEMBERS, "handoff ZIP")
         verify_checksum_coverage(
@@ -405,6 +480,14 @@ def verify_handoff(
             "handoff_member_count": len(infos),
             "operator": operator_report,
             "authorization": AUTHORIZATION,
+            "resource_limits": {
+                "max_input_bytes": MAX_INPUT_BYTES,
+                "max_handoff_bytes": MAX_HANDOFF_BYTES,
+                "max_operator_bytes": MAX_OPERATOR_BYTES,
+                "max_member_bytes": MAX_MEMBER_BYTES,
+                "max_total_uncompressed_bytes": MAX_TOTAL_UNCOMPRESSED_BYTES,
+                "max_compression_ratio": MAX_COMPRESSION_RATIO,
+            },
             "production_execution_performed": False,
         }
     finally:

@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -220,6 +221,50 @@ class OfflineHandoffVerifierTests(unittest.TestCase):
             archive.writestr("readme_first.md", b"collision")
         with self.assertRaises(verifier.VerificationError):
             self.verify_bytes(output.getvalue())
+
+    def test_rejects_oversized_input_before_zip_parsing(self) -> None:
+        with mock.patch.object(verifier, "MAX_INPUT_BYTES", 100):
+            with self.assertRaisesRegex(verifier.VerificationError, "input file exceeds"):
+                self.verify_bytes(b"x" * 101)
+
+    def test_rejects_oversized_wrapper_member(self) -> None:
+        handoff = self.make_handoff()
+        wrapper = self.make_zip(
+            {"moomoo-readonly-discovery-handoff-v1.2.2.zip": handoff}
+        )
+        with mock.patch.object(verifier, "MAX_HANDOFF_BYTES", len(handoff) - 1):
+            with self.assertRaisesRegex(verifier.VerificationError, "member is too large"):
+                self.verify_bytes(wrapper)
+
+    def test_rejects_oversized_nested_operator(self) -> None:
+        operator = self.make_operator()
+        handoff = self.make_handoff(operator=operator)
+        with mock.patch.object(verifier, "MAX_OPERATOR_BYTES", len(operator) - 1):
+            with self.assertRaisesRegex(verifier.VerificationError, "member is too large"):
+                self.verify_bytes(handoff)
+
+    def test_rejects_excessive_compression_ratio(self) -> None:
+        compressed = self.make_zip({"payload.txt": b"A" * 10000})
+        with mock.patch.object(verifier, "MAX_COMPRESSION_RATIO", 2.0):
+            with self.assertRaisesRegex(verifier.VerificationError, "compression ratio"):
+                verifier.open_verified_zip(
+                    compressed,
+                    "ratio test",
+                    max_archive_bytes=len(compressed),
+                    max_members=1,
+                    max_member_bytes=20000,
+                )
+
+    def test_rejects_resource_member_count_overflow(self) -> None:
+        data = self.make_zip({"a.txt": b"a", "b.txt": b"b"})
+        with self.assertRaisesRegex(verifier.VerificationError, "too many members"):
+            verifier.open_verified_zip(
+                data,
+                "member count test",
+                max_archive_bytes=len(data),
+                max_members=1,
+                max_member_bytes=10,
+            )
 
     def test_cli_refuses_to_overwrite_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
