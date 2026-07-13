@@ -27,7 +27,21 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run fast tests
-        run: python -m pytest tests/ -m "not slow" -q
+        run: |
+          set +e
+          python -m pytest tests/ -m "not slow" -q > "$RUNNER_TEMP/pytest.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/pytest.log"
+          exit "$status"
+
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: ${{ runner.temp }}/pytest.log
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Parse recovery runbook PowerShell
         shell: pwsh
