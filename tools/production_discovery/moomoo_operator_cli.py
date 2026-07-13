@@ -10,9 +10,7 @@ from typing import Any, Sequence
 
 from moomoo_operator_common import (
     DEFAULT_EXPECTED_REMOTE,
-    DISCOVERY_FILENAME,
     EXPECTED_BUNDLE_FILE_SHA256,
-    EXPECTED_DISCOVERY_SHA256,
     EXPECTED_GATE_SHA256,
     GATE_FILENAME,
     VERSION,
@@ -28,7 +26,10 @@ from moomoo_operator_common import (
 from moomoo_operator_review import markdown_summary, review_payload
 
 
-def run_process(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+def run_process(
+    args: Sequence[str],
+    cwd: Path,
+) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         list(args),
         cwd=str(cwd),
@@ -46,7 +47,28 @@ def make_evidence_dir(output_root: Path) -> Path:
     return evidence_dir
 
 
-def manifest_payload(args: argparse.Namespace, evidence_dir: Path, bundle_dir: Path) -> dict[str, Any]:
+def validate_runtime_assertion_args(args: argparse.Namespace) -> None:
+    has_directories = bool(args.production_working_directory)
+    has_source = bool(args.production_working_directory_source)
+    has_evidence = bool(args.production_working_directory_evidence)
+    if has_directories and not (has_source and has_evidence):
+        raise OperatorError(
+            "--production-working-directory requires both "
+            "--production-working-directory-source and "
+            "--production-working-directory-evidence"
+        )
+    if not has_directories and (has_source or has_evidence):
+        raise OperatorError(
+            "runtime source/evidence arguments require at least one "
+            "--production-working-directory"
+        )
+
+
+def manifest_payload(
+    args: argparse.Namespace,
+    evidence_dir: Path,
+    bundle_dir: Path,
+) -> dict[str, Any]:
     return {
         "report_type": "moomoo_discovery_operator_manifest",
         "operator_version": VERSION,
@@ -58,7 +80,20 @@ def manifest_payload(args: argparse.Namespace, evidence_dir: Path, bundle_dir: P
         "expected_head": args.expected_head,
         "expected_remote": args.expected_remote,
         "config_search_roots": args.config_search_root,
-        "production_working_directory_candidates": args.production_working_directory,
+        "production_working_directory_candidates": (
+            args.production_working_directory
+        ),
+        "production_working_directory_assertion": {
+            "evidence_class": (
+                "human_asserted"
+                if args.production_working_directory
+                else None
+            ),
+            "source": args.production_working_directory_source,
+            "evidence_reference": (
+                args.production_working_directory_evidence
+            ),
+        },
         "safety": {
             "sqlite_connection_performed": False,
             "writer_state_changed": False,
@@ -70,19 +105,51 @@ def manifest_payload(args: argparse.Namespace, evidence_dir: Path, bundle_dir: P
     }
 
 
+def blocked_result(
+    error: str,
+    powershell_exit_code: int,
+) -> dict[str, Any]:
+    return {
+        "report_type": "moomoo_discovery_operator_result",
+        "operator_version": VERSION,
+        "status": "blocked",
+        "operator_exit_code": 1,
+        "powershell_exit_code": powershell_exit_code,
+        "validation_status": "BLOCKED",
+        "machine_validation_status": "BLOCKED",
+        "human_validation_status": "PENDING",
+        "operational_validation_status": "BLOCKED",
+        "production_readiness": "BLOCKED",
+        "preflight_authorized": False,
+        "production_drill_authorized": False,
+        "cutover_authorized": False,
+        "evidence_complete": False,
+        "error": error,
+    }
+
+
 def run_command(args: argparse.Namespace) -> int:
+    validate_runtime_assertion_args(args)
     bundle_dir = Path(args.bundle_dir).resolve()
     output_root = Path(args.output_root).resolve()
     repo_path = Path(args.repo_path).resolve(strict=False)
-    protected_path = Path(args.protected_checkout_path).resolve(strict=False)
+    protected_path = Path(
+        args.protected_checkout_path
+    ).resolve(strict=False)
     config_search_roots = [
-        str(Path(value).resolve(strict=False)) for value in args.config_search_root
+        str(Path(value).resolve(strict=False))
+        for value in args.config_search_root
     ]
     runtime_directories = [
         str(Path(value).resolve(strict=False))
         for value in args.production_working_directory
     ]
-    validate_output_root(output_root, bundle_dir, repo_path, protected_path)
+    validate_output_root(
+        output_root,
+        bundle_dir,
+        repo_path,
+        protected_path,
+    )
 
     gate_path = bundle_dir / GATE_FILENAME
     expected_files = dict(EXPECTED_BUNDLE_FILE_SHA256)
@@ -90,7 +157,9 @@ def run_command(args: argparse.Namespace) -> int:
     for name, expected_hash in expected_files.items():
         path = bundle_dir / name
         if not path.is_file():
-            raise OperatorError(f"Required bundle file is missing: {path}")
+            raise OperatorError(
+                f"Required bundle file is missing: {path}"
+            )
         actual_hash = sha256_file(path)
         if actual_hash != expected_hash:
             raise OperatorError(
@@ -99,7 +168,10 @@ def run_command(args: argparse.Namespace) -> int:
             )
 
     evidence_dir = make_evidence_dir(output_root)
-    write_json(evidence_dir / "00-manifest.json", manifest_payload(args, evidence_dir, bundle_dir))
+    write_json(
+        evidence_dir / "00-manifest.json",
+        manifest_payload(args, evidence_dir, bundle_dir),
+    )
 
     ps_args = [
         args.powershell,
@@ -110,7 +182,11 @@ def run_command(args: argparse.Namespace) -> int:
         "-File",
         str(gate_path),
         "-ExpectedFileHashesJson",
-        json.dumps(EXPECTED_BUNDLE_FILE_SHA256, ensure_ascii=False, sort_keys=True),
+        json.dumps(
+            EXPECTED_BUNDLE_FILE_SHA256,
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
         "-RunDiscovery",
         "-RepoPath",
         str(repo_path),
@@ -127,41 +203,57 @@ def run_command(args: argparse.Namespace) -> int:
     ]
 
     completed = run_process(ps_args, bundle_dir)
-    (evidence_dir / "01-discovery-stdout.bin").write_bytes(completed.stdout)
-    (evidence_dir / "01-discovery-stderr.bin").write_bytes(completed.stderr)
-
-    try:
-        payload = load_json_bytes(completed.stdout, "PowerShell stdout")
-    except OperatorError as exc:
-        result = {
-            "report_type": "moomoo_discovery_operator_result",
-            "operator_version": VERSION,
-            "status": "blocked",
-            "operator_exit_code": 1,
-            "validation_status": "BLOCKED",
-            "production_readiness": "BLOCKED",
-            "preflight_authorized": False,
-            "production_drill_authorized": False,
-            "cutover_authorized": False,
-            "evidence_complete": False,
-            "error": str(exc),
-            "powershell_exit_code": completed.returncode,
-        }
-        write_json(evidence_dir / "05-operator-result.json", result)
-        return 1
-
-    write_json(evidence_dir / "01-gated-discovery.json", payload)
-    review = review_payload(payload, sha256_file(evidence_dir / "01-gated-discovery.json"))
-    write_json(evidence_dir / "02-discovery-review.json", review)
-    write_json(evidence_dir / "03-discovery-redacted.json", redact_payload(payload))
-    (evidence_dir / "04-discovery-summary.md").write_text(
-        markdown_summary(review), encoding="utf-8", newline="\n"
+    (evidence_dir / "01-discovery-stdout.bin").write_bytes(
+        completed.stdout
+    )
+    (evidence_dir / "01-discovery-stderr.bin").write_bytes(
+        completed.stderr
     )
 
-    correction_required = review["validation_status"] in {
-        "CORRECTION_REQUIRED",
-        "INCONCLUSIVE",
-    }
+    try:
+        payload = load_json_bytes(
+            completed.stdout,
+            "PowerShell stdout",
+        )
+    except OperatorError as exc:
+        write_json(
+            evidence_dir / "05-operator-result.json",
+            blocked_result(str(exc), completed.returncode),
+        )
+        return 1
+
+    write_json(
+        evidence_dir / "01-gated-discovery.json",
+        payload,
+    )
+    review = review_payload(
+        payload,
+        sha256_file(
+            evidence_dir / "01-gated-discovery.json"
+        ),
+    )
+    write_json(
+        evidence_dir / "02-discovery-review.json",
+        review,
+    )
+    write_json(
+        evidence_dir / "03-discovery-redacted.json",
+        redact_payload(payload),
+    )
+    (
+        evidence_dir / "04-discovery-summary.md"
+    ).write_text(
+        markdown_summary(review),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    correction_required = (
+        review["machine_validation_status"]
+        != "PASS"
+        or review["operational_validation_status"]
+        == "CONFLICT"
+    )
     operator_exit_code = 2 if correction_required else 0
     status = (
         "completed_with_corrections_required"
@@ -181,7 +273,10 @@ def run_command(args: argparse.Namespace) -> int:
         "03-discovery-redacted.json",
         "04-discovery-summary.md",
     }
-    evidence_complete = all((evidence_dir / name).exists() for name in required_names)
+    evidence_complete = all(
+        (evidence_dir / name).exists()
+        for name in required_names
+    )
     result = {
         "report_type": "moomoo_discovery_operator_result",
         "operator_version": VERSION,
@@ -190,6 +285,15 @@ def run_command(args: argparse.Namespace) -> int:
         "operator_exit_code": operator_exit_code,
         "powershell_exit_code": completed.returncode,
         "validation_status": review["validation_status"],
+        "machine_validation_status": review[
+            "machine_validation_status"
+        ],
+        "human_validation_status": review[
+            "human_validation_status"
+        ],
+        "operational_validation_status": review[
+            "operational_validation_status"
+        ],
         "production_readiness": "BLOCKED",
         "preflight_authorized": False,
         "production_drill_authorized": False,
@@ -198,53 +302,132 @@ def run_command(args: argparse.Namespace) -> int:
         "evidence_directory": str(evidence_dir),
         "next_action": review["next_action"],
     }
-    write_json(evidence_dir / "05-operator-result.json", result)
+    write_json(
+        evidence_dir / "05-operator-result.json",
+        result,
+    )
     return operator_exit_code
 
 
 def review_command(args: argparse.Namespace) -> int:
     input_path = Path(args.input).resolve()
     payload = load_json_file(input_path)
-    review = review_payload(payload, sha256_file(input_path))
+    review = review_payload(
+        payload,
+        sha256_file(input_path),
+    )
     if args.output:
-        write_json(Path(args.output).resolve(), review)
+        write_json(
+            Path(args.output).resolve(),
+            review,
+        )
     else:
-        print(json.dumps(review, ensure_ascii=False, indent=2))
-    return 2 if review["validation_status"] != "PASS" else 0
+        print(
+            json.dumps(
+                review,
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    return (
+        2
+        if (
+            review["machine_validation_status"]
+            != "PASS"
+            or review["operational_validation_status"]
+            == "CONFLICT"
+        )
+        else 0
+    )
 
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", action="version", version=VERSION)
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=VERSION,
+    )
+    sub = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
 
-    run = sub.add_parser("run", help="Run gated read-only discovery and retain evidence")
+    run = sub.add_parser(
+        "run",
+        help="Run gated read-only discovery and retain evidence",
+    )
     run.add_argument("--bundle-dir", required=True)
     run.add_argument("--output-root", required=True)
     run.add_argument("--repo-path", required=True)
-    run.add_argument("--protected-checkout-path", required=True)
+    run.add_argument(
+        "--protected-checkout-path",
+        required=True,
+    )
     run.add_argument("--expected-head", required=True)
-    run.add_argument("--expected-remote", default=DEFAULT_EXPECTED_REMOTE)
-    run.add_argument("--config-search-root", action="append", required=True)
-    run.add_argument("--production-working-directory", action="append", default=[])
-    run.add_argument("--powershell", default="powershell.exe")
+    run.add_argument(
+        "--expected-remote",
+        default=DEFAULT_EXPECTED_REMOTE,
+    )
+    run.add_argument(
+        "--config-search-root",
+        action="append",
+        required=True,
+    )
+    run.add_argument(
+        "--production-working-directory",
+        action="append",
+        default=[],
+    )
+    run.add_argument(
+        "--production-working-directory-source",
+        choices=[
+            "manual-command",
+            "startup-script",
+            "service-runbook",
+            "scheduled-task-review",
+            "other-direct-evidence",
+        ],
+    )
+    run.add_argument(
+        "--production-working-directory-evidence",
+        help=(
+            "Redacted reference describing the direct evidence "
+            "supporting the asserted runtime directory."
+        ),
+    )
+    run.add_argument(
+        "--powershell",
+        default="powershell.exe",
+    )
     run.set_defaults(func=run_command)
 
-    review = sub.add_parser("review", help="Review a retained gated discovery JSON")
+    review = sub.add_parser(
+        "review",
+        help="Review a retained gated discovery JSON",
+    )
     review.add_argument("--input", required=True)
     review.add_argument("--output")
     review.set_defaults(func=review_command)
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
     except OperatorError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(
+            f"ERROR: {exc}",
+            file=sys.stderr,
+        )
         return 1
     except KeyboardInterrupt:
-        print("ERROR: interrupted", file=sys.stderr)
+        print(
+            "ERROR: interrupted",
+            file=sys.stderr,
+        )
         return 130
