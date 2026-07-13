@@ -1,6 +1,12 @@
 name: apply operator v1.2.2 split
 
 on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - scripts/_apply_operator_v1_2_2_split.py
+      - .github/workflows/_apply-operator-v1.2.2-split.yml
   push:
     branches:
       - agent/operator-v1.2.2-windows-hardening
@@ -13,6 +19,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/operator-v1.2.2-windows-hardening'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
