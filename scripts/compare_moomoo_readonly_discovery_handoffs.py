@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 HANDOFF_VERSION = "1.2.2"
-OPERATOR_VERSION = "1.2.1"
+OPERATOR_VERSION = "1.2.2"
+OPERATOR_BUNDLE_NAME = "moomoo_production_discovery_operator_v4_v1.2.2.zip"
 AUTHORIZATION = {
     "production_readiness": "BLOCKED",
     "preflight_authorized": False,
@@ -116,7 +117,7 @@ def inspect_handoff(path: Path) -> dict[str, Any]:
         "OPERATOR_README_ORIGINAL.md",
         "run-readonly-discovery.ps1",
         "verify-handoff.ps1",
-        "moomoo_production_discovery_operator_v4_v1.2.1.zip",
+        OPERATOR_BUNDLE_NAME,
     }
     missing = sorted(required - set(members))
     if missing:
@@ -188,9 +189,7 @@ def inspect_handoff(path: Path) -> dict[str, Any]:
             result["errors"].append("operator_bundle manifest is missing")
         else:
             name = bundle.get("name")
-            if name != (
-                "moomoo_production_discovery_operator_v4_v1.2.1.zip"
-            ):
+            if name != OPERATOR_BUNDLE_NAME:
                 result["errors"].append("unexpected operator bundle name")
             bundle_data = members.get(str(name))
             if bundle_data is None:
