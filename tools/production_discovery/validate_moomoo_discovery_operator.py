@@ -81,7 +81,7 @@ def validate_operator() -> dict[str, Any]:
             }
         )
     required_tokens = [
-        'VERSION = "1.2.1"',
+        'VERSION = "1.2.2"',
         "machine_validation_status",
         "human_validation_status",
         "operational_validation_status",
