@@ -26,6 +26,15 @@ def base_payload() -> dict:
             "parser_error_count": 0,
             "hash_matches": True,
             "actual_sha256": discovery_hash,
+            "file_checks": [
+                {
+                    "name": name,
+                    "actual_sha256": file_hash,
+                    "hash_matches": True,
+                    "parser_passed": True,
+                }
+                for name, file_hash in operator.EXPECTED_BUNDLE_FILE_SHA256.items()
+            ],
             "discovery_executed": True,
             "powershell": {"version": "5.1", "edition": "Desktop"},
         },
