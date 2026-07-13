@@ -28,7 +28,8 @@ def _create_empty_virtual_trade_db(path: Path) -> None:
 
 
 def _logical_snapshot(path: Path) -> dict[str, object]:
-    with sqlite3.connect(path) as connection:
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as connection:
         quick = [row[0] for row in connection.execute("PRAGMA quick_check")]
         tables = {
             str(row[0])
