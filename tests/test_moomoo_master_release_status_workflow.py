@@ -20,14 +20,15 @@ def load_workflow() -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def test_master_release_status_workflow_contract() -> None:
+def test_master_artifact_status_workflow_contract() -> None:
     workflow = load_workflow()
     trigger = workflow["on"]
     assert isinstance(trigger, dict)
     workflow_run = trigger["workflow_run"]
     assert isinstance(workflow_run, dict)
     assert workflow_run["workflows"] == [
-        "moomoo discovery master-bound release"
+        "moomoo discovery master-bound release",
+        "moomoo handoff Windows validation",
     ]
     assert workflow_run["types"] == ["completed"]
 
@@ -52,5 +53,8 @@ def test_master_release_status_workflow_contract() -> None:
     assert "createCommitStatus" in script
     assert "sha: run.head_sha" in script
     assert "target_url: run.html_url" in script
-    assert "context: 'moomoo/master-release'" in script
+    assert "run.name === 'moomoo handoff Windows validation'" in script
+    assert "'moomoo/master-handoff'" in script
+    assert "'moomoo/master-release'" in script
+    assert "context: statusContext" in script
     assert "run.conclusion === 'success'" in script

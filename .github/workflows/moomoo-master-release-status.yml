@@ -1,9 +1,10 @@
-name: publish moomoo master release status
+name: publish moomoo master artifact status
 
 on:
   workflow_run:
     workflows:
       - moomoo discovery master-bound release
+      - moomoo handoff Windows validation
     types:
       - completed
 
@@ -13,7 +14,7 @@ permissions:
 
 jobs:
   publish-master-release-status:
-    name: Publish master release commit status
+    name: Publish master artifact commit status
     if: >-
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'master'
@@ -26,18 +27,29 @@ jobs:
           script: |
             const run = context.payload.workflow_run;
             const succeeded = run.conclusion === 'success';
+            const isHandoff =
+              run.name === 'moomoo handoff Windows validation';
+            const statusContext = isHandoff
+              ? 'moomoo/master-handoff'
+              : 'moomoo/master-release';
+            const successDescription = isHandoff
+              ? 'Master handoff built and cross-shell verified'
+              : 'Master release candidate built and cross-shell verified';
+            const failureDescription = isHandoff
+              ? 'Master handoff validation failed; inspect workflow run'
+              : 'Master release validation failed; inspect workflow run';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: run.head_sha,
               state: succeeded ? 'success' : 'failure',
               target_url: run.html_url,
-              context: 'moomoo/master-release',
+              context: statusContext,
               description: succeeded
-                ? 'Master release candidate built and cross-shell verified'
-                : 'Master release validation failed; inspect workflow run',
+                ? successDescription
+                : failureDescription,
             });
             core.info(
-              `Published ${succeeded ? 'success' : 'failure'} for ` +
-              `${run.head_sha} from run ${run.id}`
+              `Published ${succeeded ? 'success' : 'failure'} ` +
+              `${statusContext} for ${run.head_sha} from run ${run.id}`
             );
