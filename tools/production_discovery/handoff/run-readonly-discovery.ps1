@@ -327,6 +327,7 @@ try {
 
     $EvidenceDirectory = $EvidenceDirectories[0].FullName
     $ResultPath = Join-Path $EvidenceDirectory "05-operator-result.json"
+    $ReviewPath = Join-Path $EvidenceDirectory "02-discovery-review.json"
     $RedactedPath = Join-Path $EvidenceDirectory "03-discovery-redacted.json"
     $SummaryPath = Join-Path $EvidenceDirectory "04-discovery-summary.md"
     foreach ($RequiredPath in @($ResultPath, $RedactedPath, $SummaryPath)) {
@@ -336,6 +337,20 @@ try {
     }
 
     $Result = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($OperatorExitCode -ne 0 -and (Test-Path -LiteralPath $ReviewPath -PathType Leaf)) {
+        $Review = Get-Content -LiteralPath $ReviewPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $BlockingFindings = @(
+            $Review.findings | Where-Object {
+                [string]$_.status -in @("FAIL", "CONFLICT")
+            }
+        )
+        if ($BlockingFindings.Count -ne 0) {
+            Write-Host "Blocking discovery findings:"
+            foreach ($Finding in $BlockingFindings) {
+                Write-Host "  $($Finding.status) / $($Finding.severity) / $($Finding.code): $($Finding.message)"
+            }
+        }
+    }
     if ([string]$Result.production_readiness -ne "BLOCKED" -or
         [bool]$Result.preflight_authorized -or
         [bool]$Result.production_drill_authorized -or
