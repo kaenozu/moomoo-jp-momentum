@@ -235,7 +235,10 @@ $ShimPath = Join-Path $Root "handoff_test_python_shim.py"
 try {
     [IO.Directory]::CreateDirectory($TempRoot) | Out-Null
     Expand-Archive -LiteralPath $HandoffZip -DestinationPath $Package -Force
-    New-EmptyDirectory -Path $Protected | Out-Null
+    $Protected = New-CheckoutClone `
+        -Path $Protected `
+        -Commit $ExpectedHead `
+        -Remote $ExpectedRemote
     New-EmptyDirectory -Path (Join-Path $Runtime "data") | Out-Null
     New-EmptyDirectory -Path $Output | Out-Null
     [IO.File]::WriteAllBytes(
