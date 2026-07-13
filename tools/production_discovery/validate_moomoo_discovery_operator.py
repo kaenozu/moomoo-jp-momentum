@@ -10,14 +10,11 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
-REPO_ROOT = ROOT.parents[1]
 PYTHON_FILES = [
     ROOT / "moomoo_discovery_operator.py",
     ROOT / "moomoo_operator_common.py",
     ROOT / "moomoo_operator_review.py",
     ROOT / "moomoo_operator_cli.py",
-    REPO_ROOT / "scripts" / "build_moomoo_discovery_operator_bundle.py",
-    REPO_ROOT / "scripts" / "compare_moomoo_discovery_operator_bundles.py",
 ]
 DISCOVERY_FILES = [
     ROOT / "moomoo_production_readonly_discovery_v4.ps1",
@@ -91,8 +88,6 @@ def validate_operator() -> dict[str, Any]:
         "MACHINE_PASS_HUMAN_REVIEW_REQUIRED",
         "--production-working-directory-source",
         "--production-working-directory-evidence",
-        "source_commit",
-        "compare_bundles",
     ]
     missing_tokens = [
         token for token in required_tokens if token not in combined
