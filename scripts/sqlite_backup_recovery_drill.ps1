@@ -5,6 +5,8 @@ param(
 
     [string]$ProductionConfig = ".\config.yaml",
 
+    [string]$ProductionWorkingDirectory = "",
+
     [Parameter(Mandatory = $true)]
     [string]$EvidenceDir,
 
@@ -29,7 +31,12 @@ $ErrorActionPreference = "Stop"
 function Get-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    return [IO.Path]::GetFullPath($Path).TrimEnd(
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    if ($fullPath -eq $root) {
+        return $root
+    }
+    return $fullPath.TrimEnd(
         [IO.Path]::DirectorySeparatorChar,
         [IO.Path]::AltDirectorySeparatorChar
     )
@@ -42,7 +49,9 @@ function Assert-DifferentPath {
         [Parameter(Mandatory = $true)][string]$Message
     )
 
-    if ((Get-NormalizedPath $Left) -eq (Get-NormalizedPath $Right)) {
+    $leftPath = Get-NormalizedPath $Left
+    $rightPath = Get-NormalizedPath $Right
+    if ($leftPath.Equals($rightPath, [StringComparison]::OrdinalIgnoreCase)) {
         throw $Message
     }
 }
@@ -57,7 +66,7 @@ function Assert-OutsideRepository {
     $root = Get-NormalizedPath $RepositoryRoot
     $prefix = $root + [IO.Path]::DirectorySeparatorChar
     if (
-        $candidate -eq $root -or
+        $candidate.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
         $candidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
     ) {
         throw "path must be outside the repository: $candidate"
@@ -74,7 +83,7 @@ function Invoke-PythonJson {
     $raw = & $Python @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     if ($LogPath) {
-        $raw | Set-Content -Encoding utf8 $LogPath
+        $raw | Set-Content -Encoding utf8 -LiteralPath $LogPath
     }
     if ($exitCode -ne 0) {
         throw "$FailureMessage (exit=$exitCode): $($raw -join '`n')"
@@ -82,19 +91,38 @@ function Invoke-PythonJson {
     return (($raw -join "`n") | ConvertFrom-Json)
 }
 
+if ($PreflightOnly -and $ConfirmProductionExecution) {
+    throw "choose exactly one mode: -PreflightOnly or -ConfirmProductionExecution"
+}
+
 $InvocationDirectory = Get-NormalizedPath (Get-Location).Path
 $repoRootRaw = & git -C $PSScriptRoot rev-parse --show-toplevel 2>&1
 $repoRootExit = $LASTEXITCODE
-if ($repoRootExit -ne 0) { throw ($repoRootRaw -join "`n") }
+if ($repoRootExit -ne 0) {
+    throw ($repoRootRaw -join "`n")
+}
 $RepoRoot = Get-NormalizedPath (($repoRootRaw -join "").Trim())
 
 if ([IO.Path]::IsPathRooted($ProductionConfig)) {
-    $ProductionConfig = (Resolve-Path $ProductionConfig).Path
+    $ProductionConfig = (Resolve-Path -LiteralPath $ProductionConfig).Path
 } else {
     $ProductionConfig = (
-        Resolve-Path (Join-Path $RepoRoot $ProductionConfig)
+        Resolve-Path -LiteralPath (Join-Path $RepoRoot $ProductionConfig)
     ).Path
 }
+
+if ([string]::IsNullOrWhiteSpace($ProductionWorkingDirectory)) {
+    $ProductionWorkingDirectory = $RepoRoot
+} elseif (-not [IO.Path]::IsPathRooted($ProductionWorkingDirectory)) {
+    $ProductionWorkingDirectory = Join-Path $RepoRoot $ProductionWorkingDirectory
+}
+if (-not (Test-Path -LiteralPath $ProductionWorkingDirectory -PathType Container)) {
+    throw "production working directory does not exist: $ProductionWorkingDirectory"
+}
+$ProductionWorkingDirectory = Get-NormalizedPath (
+    (Resolve-Path -LiteralPath $ProductionWorkingDirectory).Path
+)
+
 if (-not [IO.Path]::IsPathRooted($EvidenceDir)) {
     $EvidenceDir = Join-Path $InvocationDirectory $EvidenceDir
 }
@@ -107,15 +135,21 @@ if (-not [IO.Path]::IsPathRooted($RestorePath)) {
 $EvidenceDir = Get-NormalizedPath $EvidenceDir
 $SecondaryDir = Get-NormalizedPath $SecondaryDir
 $RestorePath = Get-NormalizedPath $RestorePath
+
 Set-Location -LiteralPath $RepoRoot
 
 if ($ExpectedHead -like "<*") {
     throw "replace ExpectedHead with the explicitly approved Git SHA"
 }
+if ($ExpectedHead -notmatch "^[0-9a-fA-F]{40}$") {
+    throw "ExpectedHead must be an exact 40-character Git SHA"
+}
 
 $headRaw = & git -C $RepoRoot rev-parse HEAD 2>&1
 $headExit = $LASTEXITCODE
-if ($headExit -ne 0) { throw ($headRaw -join "`n") }
+if ($headExit -ne 0) {
+    throw ($headRaw -join "`n")
+}
 $HeadSha = ($headRaw -join "").Trim()
 if ($HeadSha -ne $ExpectedHead) {
     throw "HEAD differs from approved SHA: expected=$ExpectedHead actual=$HeadSha"
@@ -123,12 +157,19 @@ if ($HeadSha -ne $ExpectedHead) {
 
 $statusRaw = & git -C $RepoRoot status --porcelain 2>&1
 $statusExit = $LASTEXITCODE
-if ($statusExit -ne 0) { throw ($statusRaw -join "`n") }
-if ($statusRaw) { throw "working tree is not clean" }
+if ($statusExit -ne 0) {
+    throw ($statusRaw -join "`n")
+}
+if ($statusRaw) {
+    throw "working tree is not clean"
+}
 
 Assert-OutsideRepository $EvidenceDir $RepoRoot
 Assert-OutsideRepository $SecondaryDir $RepoRoot
 Assert-OutsideRepository $RestorePath $RepoRoot
+Assert-DifferentPath $EvidenceDir $SecondaryDir "evidence and secondary paths are equal"
+Assert-DifferentPath $EvidenceDir $RestorePath "evidence and restore paths are equal"
+Assert-DifferentPath $SecondaryDir $RestorePath "secondary and restore paths are equal"
 
 $ConfigInfoScript = @'
 from pathlib import Path
@@ -137,19 +178,43 @@ import json
 import sys
 
 config_path = Path(sys.argv[1]).resolve()
+working_directory = Path(sys.argv[2]).resolve()
+if not working_directory.is_dir():
+    raise SystemExit(f"production working directory not found: {working_directory}")
+
 config = Config(str(config_path))
+
+def resolve_runtime_path(value):
+    path = Path(str(value))
+    if not path.is_absolute():
+        path = working_directory / path
+    return path.resolve()
+
+database_path_setting = str(config.database_path)
+backup_directory_setting = str(
+    config.get("database_backup.directory", "backups")
+)
+
 print(json.dumps({
     "config_path": str(config_path),
-    "database_path": str(Path(config.database_path).resolve()),
+    "production_working_directory": str(working_directory),
+    "database_path_setting": database_path_setting,
+    "database_path": str(resolve_runtime_path(database_path_setting)),
     "database_backup_enabled": config.get("database_backup.enabled", False),
-    "database_backup_directory": str(Path(config.get("database_backup.directory", "backups")).resolve()),
+    "database_backup_directory_setting": backup_directory_setting,
+    "database_backup_directory": str(
+        resolve_runtime_path(backup_directory_setting)
+    ),
     "cycle_control_enabled": config.get("cycle_control.enabled", False),
 }, ensure_ascii=False))
 '@
 
-$configInfoRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1
+$configInfoRaw = $ConfigInfoScript | & $Python - `
+    $ProductionConfig $ProductionWorkingDirectory 2>&1
 $configInfoExit = $LASTEXITCODE
-if ($configInfoExit -ne 0) { throw ($configInfoRaw -join "`n") }
+if ($configInfoExit -ne 0) {
+    throw ($configInfoRaw -join "`n")
+}
 $ConfigInfo = ($configInfoRaw -join "`n") | ConvertFrom-Json
 
 $LiveDb = Get-NormalizedPath ([string]$ConfigInfo.database_path)
@@ -173,7 +238,9 @@ with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
 
 $journalRaw = $JournalModeScript | & $Python - $LiveDb 2>&1
 $journalExit = $LASTEXITCODE
-if ($journalExit -ne 0) { throw ($journalRaw -join "`n") }
+if ($journalExit -ne 0) {
+    throw ($journalRaw -join "`n")
+}
 $JournalMode = ($journalRaw -join "").Trim()
 $ProductionConfigHash = (
     Get-FileHash -Algorithm SHA256 -LiteralPath $ProductionConfig
@@ -188,9 +255,16 @@ $Preflight = [pscustomobject]@{
     head_sha = $HeadSha
     production_config_path = $ProductionConfig
     production_config_sha256 = $ProductionConfigHash
+    production_working_directory = $ProductionWorkingDirectory
+    configured_database_path = $ConfigInfo.database_path_setting
     live_db = $LiveDb
+    configured_backup_directory_setting = (
+        $ConfigInfo.database_backup_directory_setting
+    )
     configured_backup_directory = $ConfiguredBackupDir
-    production_database_backup_enabled = $ConfigInfo.database_backup_enabled
+    production_database_backup_enabled = (
+        $ConfigInfo.database_backup_enabled
+    )
     production_cycle_control_enabled = $ConfigInfo.cycle_control_enabled
     evidence_directory = $EvidenceDir
     secondary_directory = $SecondaryDir
@@ -226,10 +300,14 @@ New-Item -ItemType Directory -Path $EvidenceDir | Out-Null
 New-Item -ItemType Directory -Path (Split-Path $RestorePath -Parent) -Force |
     Out-Null
 $Preflight | ConvertTo-Json -Depth 6 |
-    Set-Content -Encoding utf8 "$EvidenceDir\00-preflight.json"
+    Set-Content -Encoding utf8 -LiteralPath "$EvidenceDir\00-preflight.json"
 
-$PrimaryDrillDir = Get-NormalizedPath (Join-Path $EvidenceDir "primary-backup")
-$DrillConfig = Get-NormalizedPath (Join-Path $EvidenceDir "drill-config.yaml")
+$PrimaryDrillDir = Get-NormalizedPath (
+    Join-Path $EvidenceDir "primary-backup"
+)
+$DrillConfig = Get-NormalizedPath (
+    Join-Path $EvidenceDir "drill-config.yaml"
+)
 Assert-OutsideRepository $PrimaryDrillDir $RepoRoot
 Assert-OutsideRepository $DrillConfig $RepoRoot
 
@@ -266,7 +344,9 @@ out_path.write_text(
 $buildRaw = $BuildDrillConfigScript | & $Python - `
     $ProductionConfig $LiveDb $PrimaryDrillDir $DrillConfig 2>&1
 $buildExit = $LASTEXITCODE
-if ($buildExit -ne 0) { throw ($buildRaw -join "`n") }
+if ($buildExit -ne 0) {
+    throw ($buildRaw -join "`n")
+}
 if (-not (Test-Path -LiteralPath $DrillConfig -PathType Leaf)) {
     throw "isolated drill config was not created"
 }
@@ -368,7 +448,12 @@ with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
         "open_positions": positions,
     }
 
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+print(json.dumps(
+    payload,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+))
 '@
 
 function Write-DbSnapshot {
@@ -379,9 +464,11 @@ function Write-DbSnapshot {
 
     $snapshotRaw = $SnapshotScript | & $Python - $DbPath $Strategy 2>&1
     $snapshotExit = $LASTEXITCODE
-    if ($snapshotExit -ne 0) { throw ($snapshotRaw -join "`n") }
+    if ($snapshotExit -ne 0) {
+        throw ($snapshotRaw -join "`n")
+    }
     ($snapshotRaw -join "`n").Trim() |
-        Set-Content -Encoding utf8 $OutputPath
+        Set-Content -Encoding utf8 -LiteralPath $OutputPath
 }
 
 Write-DbSnapshot $LiveDb "$EvidenceDir\10-live-before.json"
@@ -520,9 +607,15 @@ if ([int]$RestoreResult.integrity_errors -ne 0) {
 
 Write-DbSnapshot $LiveDb "$EvidenceDir\50-live-after.json"
 Write-DbSnapshot $RestorePath "$EvidenceDir\51-restored.json"
-$LiveBeforeText = (Get-Content -Raw "$EvidenceDir\10-live-before.json").Trim()
-$LiveAfterText = (Get-Content -Raw "$EvidenceDir\50-live-after.json").Trim()
-$RestoredText = (Get-Content -Raw "$EvidenceDir\51-restored.json").Trim()
+$LiveBeforeText = (
+    Get-Content -Raw -LiteralPath "$EvidenceDir\10-live-before.json"
+).Trim()
+$LiveAfterText = (
+    Get-Content -Raw -LiteralPath "$EvidenceDir\50-live-after.json"
+).Trim()
+$RestoredText = (
+    Get-Content -Raw -LiteralPath "$EvidenceDir\51-restored.json"
+).Trim()
 if ($LiveBeforeText -ne $LiveAfterText) {
     throw "live logical state changed"
 }
@@ -549,7 +642,9 @@ if ($LiveWalHashBefore -ne $LiveWalHashAfter) {
     throw "live WAL hash changed"
 }
 
-$CorruptDir = Get-NormalizedPath (Join-Path $EvidenceDir "corrupt-test")
+$CorruptDir = Get-NormalizedPath (
+    Join-Path $EvidenceDir "corrupt-test"
+)
 $CorruptBackup = Get-NormalizedPath (
     Join-Path $CorruptDir (Split-Path $SecondaryBackup -Leaf)
 )
@@ -574,7 +669,9 @@ with path.open("ab") as handle:
 '@
 $corruptRaw = $CorruptScript | & $Python - $CorruptBackup 2>&1
 $corruptExit = $LASTEXITCODE
-if ($corruptExit -ne 0) { throw ($corruptRaw -join "`n") }
+if ($corruptExit -ne 0) {
+    throw ($corruptRaw -join "`n")
+}
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
@@ -583,7 +680,8 @@ try {
         --config $DrillConfig verify $CorruptBackup 2>&1
     $CorruptVerifyExit = $LASTEXITCODE
     $corruptVerifyRaw |
-        Set-Content -Encoding utf8 "$EvidenceDir\60-corrupt-verify-output.txt"
+        Set-Content -Encoding utf8 `
+            -LiteralPath "$EvidenceDir\60-corrupt-verify-output.txt"
     if ($CorruptVerifyExit -eq 0) {
         throw "corrupted copy accepted by verify"
     }
@@ -594,7 +692,8 @@ try {
         --strategy $Strategy --dry-run 2>&1
     $CorruptRestoreExit = $LASTEXITCODE
     $corruptRestoreRaw |
-        Set-Content -Encoding utf8 "$EvidenceDir\61-corrupt-restore-output.txt"
+        Set-Content -Encoding utf8 `
+            -LiteralPath "$EvidenceDir\61-corrupt-restore-output.txt"
     if ($CorruptRestoreExit -eq 0) {
         throw "corrupted copy accepted by restore dry-run"
     }
@@ -611,18 +710,32 @@ if (
 ) {
     throw "production config changed during drill"
 }
-$finalConfigRaw = $ConfigInfoScript | & $Python - $ProductionConfig 2>&1
+
+$finalConfigRaw = $ConfigInfoScript | & $Python - `
+    $ProductionConfig $ProductionWorkingDirectory 2>&1
 $finalConfigExit = $LASTEXITCODE
-if ($finalConfigExit -ne 0) { throw ($finalConfigRaw -join "`n") }
+if ($finalConfigExit -ne 0) {
+    throw ($finalConfigRaw -join "`n")
+}
 $FinalConfigInfo = ($finalConfigRaw -join "`n") | ConvertFrom-Json
 if ((Get-NormalizedPath ([string]$FinalConfigInfo.database_path)) -ne $LiveDb) {
-    throw "production database.path changed"
+    throw "production database.path resolution changed"
+}
+if (
+    (Get-NormalizedPath (
+        [string]$FinalConfigInfo.production_working_directory
+    )) -ne $ProductionWorkingDirectory
+) {
+    throw "production working directory changed"
 }
 
 $FinalResult = [pscustomobject]@{
     status = "pending_operator_review"
     head_sha = $HeadSha
     production_config_sha256 = $ProductionConfigHash
+    production_working_directory = $ProductionWorkingDirectory
+    configured_database_path = $ConfigInfo.database_path_setting
+    live_db = $LiveDb
     drill_config_sha256 = $DrillConfigHash
     backup_path = $BackupPath
     backup_sha256 = $BackupHash
@@ -645,5 +758,5 @@ $FinalResult = [pscustomobject]@{
     completed_at = (Get-Date).ToString("o")
 }
 $FinalResult | ConvertTo-Json -Depth 6 |
-    Set-Content -Encoding utf8 "$EvidenceDir\70-final-result.json"
+    Set-Content -Encoding utf8 -LiteralPath "$EvidenceDir\70-final-result.json"
 $FinalResult | ConvertTo-Json -Depth 6
