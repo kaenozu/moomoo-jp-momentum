@@ -49,6 +49,18 @@ python .\compare_moomoo_discovery_releases.py `
 
 `release_candidate=true`、`source_ref=refs/heads/master`、`source_event=push`の組み合わせだけがmaster由来候補です。PRや手動buildは`VALIDATION_ONLY`です。
 
+### Master release runの特定
+
+masterへのpushでrelease workflowが完了すると、対象commitへ`moomoo/master-release`というcommit statusが付与されます。statusのtarget URLは、そのrelease packageを生成した正確なGitHub Actions runを指します。
+
+`success`はWindows PowerShell 5.1／PowerShell 7のbuildとcross-shell比較が成功したことだけを示します。本番環境の同定、human validation、preflight、backup／restore、cutoverの承認を意味しません。
+
+正式候補として使用するartifactは、statusが指すrun内の次の名前です。
+
+```text
+moomoo-discovery-release-canonical-<master commit SHA>
+```
+
 ## 入力
 
 1. `human-validation.template.json`をコピーし、各checkへ事実と証拠参照を記入する
