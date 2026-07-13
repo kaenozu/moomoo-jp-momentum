@@ -3,11 +3,10 @@ name: moomoo discovery master-bound release
 on:
   pull_request:
     paths:
-      - "tools/production_discovery/human-validation.schema.json"
-      - "tools/production_discovery/human-validation.template.json"
-      - "tools/production_discovery/validate_moomoo_human_validation.py"
-      - "tools/production_discovery/README_moomoo_human_validation_ja.md"
+      - "tools/production_discovery/**"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
       - "scripts/build_moomoo_discovery_release.py"
+      - "scripts/compare_moomoo_discovery_operator_bundles.py"
       - "scripts/compare_moomoo_discovery_releases.py"
       - "tests/test_moomoo_human_validation.py"
       - "tests/test_moomoo_discovery_release.py"
@@ -75,9 +74,9 @@ jobs:
       - name: Compare same-shell releases
         shell: cmd
         run: |
-          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.1.zip" --right "%RUNNER_TEMP%\release-ps5-b\moomoo_production_discovery_release_v1.2.1.zip" --output "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.log" 2>&1
+          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.2.zip" --right "%RUNNER_TEMP%\release-ps5-b\moomoo_production_discovery_release_v1.2.2.zip" --output "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps5-diagnostics\same-shell-comparison.log" 2>&1
           if errorlevel 1 exit /b 1
-          copy /Y "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.1.zip" "%RUNNER_TEMP%\release-ps5-artifact\moomoo_production_discovery_release_v1.2.1.zip"
+          copy /Y "%RUNNER_TEMP%\release-ps5-a\moomoo_production_discovery_release_v1.2.2.zip" "%RUNNER_TEMP%\release-ps5-artifact\moomoo_production_discovery_release_v1.2.2.zip"
           if errorlevel 1 exit /b 1
       - name: Verify repository remains clean
         shell: powershell
@@ -92,15 +91,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-release-v1.2.1-diagnostics-powershell5
+          name: moomoo-release-v1.2.2-diagnostics-powershell5
           path: ${{ runner.temp }}/release-ps5-diagnostics
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 5.1 release
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-release-v1.2.1-powershell5
-          path: ${{ runner.temp }}/release-ps5-artifact/moomoo_production_discovery_release_v1.2.1.zip
+          name: moomoo-discovery-release-v1.2.2-powershell5
+          path: ${{ runner.temp }}/release-ps5-artifact/moomoo_production_discovery_release_v1.2.2.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -147,9 +146,9 @@ jobs:
       - name: Compare same-shell releases
         shell: cmd
         run: |
-          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.1.zip" --right "%RUNNER_TEMP%\release-ps7-b\moomoo_production_discovery_release_v1.2.1.zip" --output "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.log" 2>&1
+          python .\scripts\compare_moomoo_discovery_releases.py --left "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.2.zip" --right "%RUNNER_TEMP%\release-ps7-b\moomoo_production_discovery_release_v1.2.2.zip" --output "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.json" > "%RUNNER_TEMP%\release-ps7-diagnostics\same-shell-comparison.log" 2>&1
           if errorlevel 1 exit /b 1
-          copy /Y "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.1.zip" "%RUNNER_TEMP%\release-ps7-artifact\moomoo_production_discovery_release_v1.2.1.zip"
+          copy /Y "%RUNNER_TEMP%\release-ps7-a\moomoo_production_discovery_release_v1.2.2.zip" "%RUNNER_TEMP%\release-ps7-artifact\moomoo_production_discovery_release_v1.2.2.zip"
           if errorlevel 1 exit /b 1
       - name: Verify repository remains clean
         shell: pwsh
@@ -164,15 +163,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-release-v1.2.1-diagnostics-powershell7
+          name: moomoo-release-v1.2.2-diagnostics-powershell7
           path: ${{ runner.temp }}/release-ps7-diagnostics
           if-no-files-found: warn
           retention-days: 14
       - name: Upload PowerShell 7 release
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-discovery-release-v1.2.1-powershell7
-          path: ${{ runner.temp }}/release-ps7-artifact/moomoo_production_discovery_release_v1.2.1.zip
+          name: moomoo-discovery-release-v1.2.2-powershell7
+          path: ${{ runner.temp }}/release-ps7-artifact/moomoo_production_discovery_release_v1.2.2.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -191,23 +190,23 @@ jobs:
           python-version: "3.11"
       - uses: actions/download-artifact@v4
         with:
-          name: moomoo-discovery-release-v1.2.1-powershell5
+          name: moomoo-discovery-release-v1.2.2-powershell5
           path: artifacts/powershell5
       - uses: actions/download-artifact@v4
         with:
-          name: moomoo-discovery-release-v1.2.1-powershell7
+          name: moomoo-discovery-release-v1.2.2-powershell7
           path: artifacts/powershell7
       - name: Compare releases byte for byte
         run: >-
           python ./scripts/compare_moomoo_discovery_releases.py
-          --left ./artifacts/powershell5/moomoo_production_discovery_release_v1.2.1.zip
-          --right ./artifacts/powershell7/moomoo_production_discovery_release_v1.2.1.zip
+          --left ./artifacts/powershell5/moomoo_production_discovery_release_v1.2.2.zip
+          --right ./artifacts/powershell7/moomoo_production_discovery_release_v1.2.2.zip
           --output ./cross-shell-release-comparison.json
       - name: Upload cross-shell comparison
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: moomoo-release-v1.2.1-cross-shell-comparison
+          name: moomoo-release-v1.2.2-cross-shell-comparison
           path: cross-shell-release-comparison.json
           if-no-files-found: error
           retention-days: 30
@@ -215,7 +214,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: moomoo-discovery-release-canonical-${{ github.sha }}
-          path: artifacts/powershell7/moomoo_production_discovery_release_v1.2.1.zip
+          path: artifacts/powershell7/moomoo_production_discovery_release_v1.2.2.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -237,4 +236,4 @@ jobs:
       - name: Create artifact attestation
         uses: actions/attest@v4
         with:
-          subject-path: release/moomoo_production_discovery_release_v1.2.1.zip
+          subject-path: release/moomoo_production_discovery_release_v1.2.2.zip
