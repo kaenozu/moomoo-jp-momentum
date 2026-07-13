@@ -100,6 +100,8 @@ $gatePassed = (-not $gateError -and $allHashesMatch -and $allParsersPassed)
 
 $discovery = $null
 $discoveryError = $null
+$discoveryWarnings = @()
+$discoveryInformation = @()
 if ($RunDiscovery -and $gatePassed) {
     try {
         $raw = & $DiscoveryScriptPath `
@@ -108,7 +110,11 @@ if ($RunDiscovery -and $gatePassed) {
             -ExpectedHead $ExpectedHead `
             -ExpectedRemote $ExpectedRemote `
             -ConfigSearchRoots $ConfigSearchRoots `
-            -ProductionWorkingDirectoryCandidates $ProductionWorkingDirectoryCandidates
+            -ProductionWorkingDirectoryCandidates $ProductionWorkingDirectoryCandidates `
+            -WarningVariable +discoveryWarnings `
+            -WarningAction SilentlyContinue `
+            -InformationVariable +discoveryInformation `
+            -InformationAction SilentlyContinue
         $discovery = ($raw -join "`n") | ConvertFrom-Json
     } catch {
         $discoveryError = $_.Exception.Message
@@ -139,6 +145,12 @@ $result = [pscustomobject]@{
     }
     discovery = $discovery
     discovery_error = $discoveryError
+    discovery_diagnostics = [pscustomobject]@{
+        warning_count = @($discoveryWarnings).Count
+        warnings = @($discoveryWarnings | ForEach-Object { [string]$_ })
+        information_count = @($discoveryInformation).Count
+        information = @($discoveryInformation | ForEach-Object { [string]$_ })
+    }
     authorization = [pscustomobject]@{
         production_readiness = "BLOCKED"
         preflight_authorized = $false
