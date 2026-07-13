@@ -192,3 +192,119 @@ jobs:
           test ! -d logs || { echo "ERROR: logs/ was created"; exit 1; }
           test ! -d reports || { echo "ERROR: reports/ was created"; exit 1; }
           echo "OK: No artifacts created"
+
+  apply-handoff:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'agent/verified-readonly-handoff-v2'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/verified-readonly-handoff-v2
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Repair applicator and restore workflow contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/_apply_verified_handoff_split.py')
+          text = path.read_text(encoding='utf-8')
+
+          docs_start = text.index('def patch_docs() -> None:')
+          docs_end = text.index('\ndef main() -> None:', docs_start)
+          docs = '''def patch_docs() -> None:
+              for relative in [
+                  "tools/production_discovery/handoff/README_FIRST.md",
+                  "tools/production_discovery/handoff/LOCAL_AGENT_PROMPT.md",
+              ]:
+                  path = ROOT / relative
+                  text = path.read_text(encoding="utf-8-sig").replace("\\r\\n", "\\n")
+                  marker = "handoff version"
+                  if marker not in text.lower():
+                      text += (
+                          "\\n## Version contract\\n\\n"
+                          "- operator version: `1.2.2`\\n"
+                          "- handoff package version: `1.2.2`\\n"
+                          "- handoff format version: `1`\\n"
+                          "\\nこれらは別々のversion軸です。機械検証PASSでもpreflightは承認されません。\\n"
+                      )
+                  path.write_text(text, encoding="utf-8", newline="\\n")
+          '''
+          text = text[:docs_start] + docs + text[docs_end:]
+
+          validation_start = text.index('    run(\\n        sys.executable,')
+          validation_end = text.index(
+              '    run(sys.executable, "scripts/test_moomoo_readonly_discovery_handoff_builder.py", "-v")',
+              validation_start,
+          )
+          validation = '''    run(
+                  sys.executable,
+                  "-m",
+                  "py_compile",
+                  "scripts/build_moomoo_readonly_discovery_handoff.py",
+                  "scripts/compare_moomoo_readonly_discovery_handoffs.py",
+                  "scripts/test_moomoo_readonly_discovery_handoff_builder.py",
+                  "tools/production_discovery/handoff_test_python_shim.py",
+              )
+          '''
+          text = text[:validation_start] + validation + text[validation_end:]
+
+          comparer_end = '''    path.write_text(text, encoding="utf-8", newline="\\n")
+
+
+def safe_extract_function'''
+          comparer_replacement = '''    text = replace_once(
+                  text,
+                  "except (OSError, zipfile.BadZipFile) as exc:",
+                  "except (OSError, ValueError, zipfile.BadZipFile) as exc:",
+                  "comparer unsafe ZIP error handling",
+              )
+              path.write_text(text, encoding="utf-8", newline="\\n")
+
+
+def safe_extract_function'''
+          if comparer_end not in text:
+              raise RuntimeError('Could not locate comparer function end')
+          text = text.replace(comparer_end, comparer_replacement, 1)
+
+          cleanup_marker = '(ROOT / ".github/workflows/_apply-verified-handoff-split.yml").unlink()'
+          cleanup_replacement = (
+              cleanup_marker
+              + '\n    (ROOT / "scripts/_verified_handoff_trigger.txt").unlink()'
+              + '\n    (ROOT / ".github/workflows/tests.yml").write_bytes('
+              + '\n        subprocess.run('
+              + '\n            ["git", "show", "origin/master:.github/workflows/tests.yml"],'
+              + '\n            cwd=ROOT, check=True, stdout=subprocess.PIPE'
+              + '\n        ).stdout'
+              + '\n    )'
+          )
+          if cleanup_marker not in text:
+              raise RuntimeError('Could not locate applicator cleanup block')
+          text = text.replace(cleanup_marker, cleanup_replacement, 1)
+          text = text.replace(
+              'HEAD:agent/verified-readonly-handoff',
+              'HEAD:agent/verified-readonly-handoff-v2',
+          )
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+          python -m py_compile scripts/_apply_verified_handoff_split.py
+      - name: Apply handoff and push
+        shell: bash
+        run: |
+          set +e
+          python scripts/_apply_verified_handoff_split.py 2>&1 | tee "$RUNNER_TEMP/handoff-applicator.log"
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Upload applicator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-handoff-applicator-diagnostics
+          path: ${{ runner.temp }}/handoff-applicator.log
+          if-no-files-found: warn
+          retention-days: 7
