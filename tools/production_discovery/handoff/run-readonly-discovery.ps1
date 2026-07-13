@@ -287,7 +287,7 @@ try {
         "--repo-path", $VerifiedCheckout,
         "--protected-checkout-path", $ProtectedCheckout,
         "--expected-head", $ExpectedHead,
-        "--expected-remote", $ExpectedRemote,
+        "--expected-remote", $ActualRemote,
         "--production-working-directory-source", $ProductionWorkingDirectorySource,
         "--production-working-directory-evidence", $ProductionWorkingDirectoryEvidence,
         "--powershell", $PowerShellExecutable
