@@ -47,11 +47,11 @@ jobs:
           pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/sqlite_backup_recovery_drill.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
           pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("tests/run_database_backup_drill_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
 
-      - name: Commit fixes and remove one-time workflows
+      - name: Commit non-workflow fixes
         run: |
-          git rm .github/workflows/apply-final-review-fixes.yml .github/workflows/apply-final-review-fixes-runner.yml .github/workflows/apply-final-review-fixes-pr.yml
+          git checkout -- .github/workflows/windows-recovery-drill.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/sqlite_backup_recovery_drill.ps1 tests/run_database_backup_drill_windows.ps1 .github/workflows/windows-recovery-drill.yml docs/sqlite-backup-recovery-drill.md
+          git add scripts/sqlite_backup_recovery_drill.ps1 tests/run_database_backup_drill_windows.ps1 docs/sqlite-backup-recovery-drill.md
           git commit -m "fix: anchor recovery drill to repository root"
           git push origin HEAD:agent/sqlite-backup-recovery-drill
