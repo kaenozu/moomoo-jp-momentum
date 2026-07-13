@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -9,9 +10,14 @@ WORKFLOW = ROOT / ".github" / "workflows" / "moomoo-master-release-status.yml"
 
 
 def load_workflow() -> dict[str, object]:
-    payload = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    assert isinstance(payload, dict)
-    return payload
+    raw = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    payload: dict[Any, Any] = dict(raw)
+    # PyYAML follows YAML 1.1 and may parse the GitHub Actions key `on`
+    # as boolean true. Normalize only that top-level compatibility case.
+    if "on" not in payload and True in payload:
+        payload["on"] = payload.pop(True)
+    return cast(dict[str, object], payload)
 
 
 def test_master_release_status_workflow_contract() -> None:
