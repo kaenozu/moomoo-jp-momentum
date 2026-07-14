@@ -111,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         reserves = _parse_float_list(args.cash_reserve_ratios)
         stop_losses = _parse_float_list(args.stop_loss_pcts)
         validate_grid(thresholds, positions, reserves, stop_losses)
+        if args.from_date and args.to_date and args.from_date > args.to_date:
+            raise ValueError("--from must be on or before --to")
 
         config, provenance = create_isolated_workspace(
             args.config,
