@@ -23,6 +23,7 @@ import yaml
 from src.backtest_runner import BacktestRunner
 from src.config import Config, load_config
 from src.scoring import Scorer
+from src.signals import SignalResult
 from src.strategies import BaseStrategy, StrategyRegistry, StrategyResult
 
 
@@ -153,7 +154,18 @@ def _register_scored_strategy(base_name: str, config: Config) -> str:
             benchmark_returns: dict | None = None,
         ) -> StrategyResult:
             result = self.delegate.evaluate(indicators, benchmark_returns)
-            score = float(self.scorer.score(indicators, result).total)
+            scoring_signal = SignalResult(
+                code=result.code,
+                name=result.name,
+                date=result.date,
+                signal_type=result.signal_type,
+                strategy_name=result.strategy_name,
+                score=float(result.score or 0.0),
+                reason=result.reason,
+                risk_warnings=[str(item) for item in result.risk_warnings],
+                price_at_signal=result.price_at_signal,
+            )
+            score = float(self.scorer.score(indicators, scoring_signal).total)
             result.score = score
             if result.signal_type == "BUY_CANDIDATE" and score < threshold:
                 result.signal_type = "WATCH"
@@ -405,15 +417,15 @@ def main(argv: list[str] | None = None) -> int:
         plan = build_capital_plan(config)
         run_strategy = _register_scored_strategy(args.strategy, config)
         runner = BacktestRunner(config)
-        runner.initial_cash = plan.active_cash
+        runner.initial_cash = int(round(plan.active_cash))
         runner.cash = plan.active_cash
         runner.max_total_positions = plan.max_positions
-        runner.max_position_amount = plan.max_position_amount
-        runner.slippage_bps = float(
-            config.get("virtual_trade.slippage_bps", 10)
+        runner.max_position_amount = int(round(plan.max_position_amount))
+        runner.slippage_bps = int(
+            round(float(config.get("virtual_trade.slippage_bps", 10)))
         )
-        runner.commission = float(
-            config.get("virtual_trade.commission", 0)
+        runner.commission = int(
+            round(float(config.get("virtual_trade.commission", 0)))
         )
         run_id = runner.run(run_strategy, start_date, end_date)
         provenance["workspace_database_sha256_after_run"] = _sha256(
