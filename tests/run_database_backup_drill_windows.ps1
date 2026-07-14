@@ -122,6 +122,40 @@ config_path.parent.mkdir(parents=True, exist_ok=True)
 with sqlite3.connect(db_path) as connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.executescript(CREATE_TABLES_SQL)
+    connection.execute(
+        "INSERT INTO symbols (code, name, role, tradable, type) "
+        "VALUES ('JP.7203', 'Toyota', 'trade_candidate', 1, 'stock')"
+    )
+    connection.execute(
+        "INSERT INTO daily_bars "
+        "(code, date, open, high, low, close, volume, turnover) "
+        "VALUES ('JP.7203', '2026-07-01', 100, 100, 100, 100, 1000, 100000)"
+    )
+    connection.execute(
+        "INSERT INTO virtual_orders "
+        "(id, strategy_name, code, side, quantity, order_type, status, "
+        "submitted_at, filled_at, fill_price) "
+        "VALUES (1, 'default', 'JP.7203', 'BUY', 1, 'MARKET_SIM', "
+        "'FILLED', '2026-07-01', '2026-07-01', 100)"
+    )
+    connection.execute(
+        "INSERT INTO virtual_fills "
+        "(id, order_id, strategy_name, code, side, quantity, price, "
+        "filled_at, fill_mode, commission) "
+        "VALUES (1, 1, 'default', 'JP.7203', 'BUY', 1, 100, "
+        "'2026-07-01', 'next_day_open', 0)"
+    )
+    connection.execute(
+        "INSERT INTO virtual_positions "
+        "(strategy_name, code, quantity, avg_cost, market_price, "
+        "market_value, unrealized_pl, realized_pl) "
+        "VALUES ('default', 'JP.7203', 1, 100, 100, 100, 0, 0)"
+    )
+    connection.execute(
+        "INSERT INTO virtual_equity_curve "
+        "(strategy_name, date, cash, position_value, total_equity, daily_return) "
+        "VALUES ('default', '2026-07-01', 149900, 100, 150000, 0)"
+    )
     connection.commit()
 
 payload = {
@@ -140,6 +174,7 @@ payload = {
         "enabled": True,
         "initial_cash": 150000,
         "commission": 0,
+        "portfolio_name": "default",
     },
 }
 config_path.write_text(
@@ -160,7 +195,7 @@ $BaseArguments = @(
     "-ExpectedHead", $HeadSha,
     "-ProductionConfig", $Config,
     "-ProductionWorkingDirectory", $ProductionWorkingDirectory,
-    "-Strategy", "momentum"
+    "-Portfolio", "default"
 )
 $RepoSubdirectory = Join-Path $RepoRoot "tests"
 
@@ -177,7 +212,7 @@ $missingContextResult = Invoke-DrillProcess -Arguments @(
     "-EvidenceDir", $MissingContextEvidence,
     "-SecondaryDir", $MissingContextSecondary,
     "-RestorePath", $MissingContextRestore,
-    "-Strategy", "momentum",
+    "-Portfolio", "default",
     "-PreflightOnly"
 )
 Assert-Failure $missingContextResult "missing-production-working-directory guard"
@@ -199,7 +234,7 @@ $wrongShaResult = Invoke-DrillProcess -Arguments @(
     "-EvidenceDir", $WrongShaEvidence,
     "-SecondaryDir", $WrongShaSecondary,
     "-RestorePath", $WrongShaRestore,
-    "-Strategy", "momentum",
+    "-Portfolio", "default",
     "-PreflightOnly"
 )
 Assert-Failure $wrongShaResult "wrong-SHA guard"

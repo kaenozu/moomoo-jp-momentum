@@ -16,6 +16,7 @@ from src.config import load_config
 from src.data_freshness import DataFreshnessGuard
 from src.performance import PerformanceEvaluator
 from src.trade_log import TradeLog
+from src.trading_identity import virtual_portfolio_name
 
 st.set_page_config(page_title="Moomoo Strategy Monitor", page_icon="📈", layout="wide")
 
@@ -280,10 +281,13 @@ def tab_virtual_trade():
     from src.virtual_trade import VirtualTradeManager
     st.header("仮想トレード")
     st.warning("これはアプリ内の仮想注文です。moomooには注文を送信しません。")
-    manager = VirtualTradeManager(load_config_cached())
+    config = load_config_cached()
+    portfolio = virtual_portfolio_name(config)
+    st.caption(f"仮想portfolio: {portfolio}")
+    manager = VirtualTradeManager(config)
     sub1, sub2, sub3, sub4 = st.tabs(["ポジション", "注文一覧", "約定一覧", "パフォーマンス"])
     with sub1:
-        positions = manager.get_positions()
+        positions = manager.get_positions(portfolio)
         if positions:
             st.dataframe(pd.DataFrame([p.__dict__ for p in positions]), use_container_width=True)
         else:
@@ -291,18 +295,18 @@ def tab_virtual_trade():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("売却候補生成"):
-                st.success(f"{len(manager.generate_exits('default'))}件の売却注文を生成しました")
+                st.success(f"{len(manager.generate_exits(portfolio))}件の売却注文を生成しました")
         with col2:
             if st.button("現在値更新"):
-                st.success(f"{manager.update_market_prices('default')}件のポジションを更新しました")
+                st.success(f"{manager.update_market_prices(portfolio)}件のポジションを更新しました")
     with sub2:
-        orders = manager.get_pending_orders()
+        orders = manager.get_pending_orders(portfolio)
         st.dataframe(pd.DataFrame([o.__dict__ for o in orders]) if orders else pd.DataFrame(), use_container_width=True)
     with sub3:
-        fills = manager.get_fills()
+        fills = manager.get_fills(portfolio)
         st.dataframe(pd.DataFrame([f.__dict__ for f in fills]) if fills else pd.DataFrame(), use_container_width=True)
     with sub4:
-        perf = manager.get_strategy_performance()
+        perf = manager.get_strategy_performance(portfolio)
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("現金", f"{perf['cash']:,.0f}円")
@@ -311,7 +315,7 @@ def tab_virtual_trade():
         with col3:
             st.metric("リターン", f"{perf['return_pct']:.2f}%")
         st.json(perf)
-        curve = manager.get_equity_curve()
+        curve = manager.get_equity_curve(portfolio)
         if curve:
             curve_df = pd.DataFrame(curve)
             st.line_chart(curve_df.sort_values("date").set_index("date")["total_equity"])
@@ -341,8 +345,10 @@ def tab_daily_ops():
         from virtual_order import show_performance
         from src.virtual_trade import VirtualTradeManager
         try:
-            manager = VirtualTradeManager(load_config_cached())
-            show_performance(manager, "default")
+            config = load_config_cached()
+            portfolio = virtual_portfolio_name(config)
+            manager = VirtualTradeManager(config)
+            show_performance(manager, portfolio)
             st.success("レポート出力完了")
         except Exception as e:
             st.error(f"レポート出力失敗: {e}")

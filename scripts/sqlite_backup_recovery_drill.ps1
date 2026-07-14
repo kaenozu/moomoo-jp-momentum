@@ -16,7 +16,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RestorePath,
 
-    [string]$Strategy = "momentum",
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Portfolio,
 
     [string]$Python = "python",
 
@@ -270,6 +272,7 @@ $Preflight = [pscustomobject]@{
     secondary_directory = $SecondaryDir
     restore_path = $RestorePath
     journal_mode = $JournalMode
+    virtual_portfolio = $Portfolio
     filesystem_space = @(
         Get-PSDrive -PSProvider FileSystem |
             Select-Object Name, Root, Used, Free
@@ -435,7 +438,7 @@ with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
         ]
 
     payload = {
-        "strategy": strategy,
+        "portfolio": strategy,
         "schema_version": int(
             connection.execute("PRAGMA user_version").fetchone()[0]
         ),
@@ -462,7 +465,7 @@ function Write-DbSnapshot {
         [Parameter(Mandatory = $true)][string]$OutputPath
     )
 
-    $snapshotRaw = $SnapshotScript | & $Python - $DbPath $Strategy 2>&1
+    $snapshotRaw = $SnapshotScript | & $Python - $DbPath $Portfolio 2>&1
     $snapshotExit = $LASTEXITCODE
     if ($snapshotExit -ne 0) {
         throw ($snapshotRaw -join "`n")
@@ -575,7 +578,7 @@ $DryRunResult = Invoke-PythonJson `
         "database_backup.py",
         "--config", $DrillConfig,
         "restore", $SecondaryBackup, $RestorePath,
-        "--strategy", $Strategy,
+        "--portfolio", $Portfolio,
         "--dry-run"
     ) `
     -FailureMessage "restore dry-run failed" `
@@ -593,7 +596,7 @@ $RestoreResult = Invoke-PythonJson `
         "database_backup.py",
         "--config", $DrillConfig,
         "restore", $SecondaryBackup, $RestorePath,
-        "--strategy", $Strategy
+        "--portfolio", $Portfolio
     ) `
     -FailureMessage "restore failed" `
     -LogPath "$EvidenceDir\41-restore-output.txt"
@@ -689,7 +692,7 @@ try {
     $corruptRestoreRaw = & $Python database_backup.py `
         --config $DrillConfig restore `
         $CorruptBackup $CorruptRestorePath `
-        --strategy $Strategy --dry-run 2>&1
+        --strategy $Portfolio --dry-run 2>&1
     $CorruptRestoreExit = $LASTEXITCODE
     $corruptRestoreRaw |
         Set-Content -Encoding utf8 `
@@ -736,6 +739,7 @@ $FinalResult = [pscustomobject]@{
     production_working_directory = $ProductionWorkingDirectory
     configured_database_path = $ConfigInfo.database_path_setting
     live_db = $LiveDb
+    virtual_portfolio = $Portfolio
     drill_config_sha256 = $DrillConfigHash
     backup_path = $BackupPath
     backup_sha256 = $BackupHash

@@ -345,9 +345,10 @@ class DatabaseBackupManager:
         backup_path: Path,
         destination_path: Path,
         *,
-        strategy_name: str = "momentum",
+        portfolio_name: str,
         as_of_date: str | None = None,
         dry_run: bool = False,
+        require_history: bool = False,
     ) -> RestoreResult:
         backup_path = backup_path.resolve()
         destination_path = destination_path.resolve()
@@ -367,7 +368,11 @@ class DatabaseBackupManager:
 
             checker = VirtualTradeIntegrityChecker(cast(Any, self.config))
             checker.db_path = candidate
-            return checker.run(strategy_name, as_of_date)
+            return checker.run(
+                portfolio_name,
+                as_of_date,
+                require_history=require_history,
+            )
 
         if dry_run:
             report = run_integrity(backup_path)

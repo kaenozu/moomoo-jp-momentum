@@ -110,7 +110,7 @@ streamlit run app.py
 
 ### アプリ内仮想トレード
 
-moomooには注文を送信しません。SQLite上で仮想注文・仮想約定・仮想ポジション・仮想cashを管理します。
+moomooには注文を送信しません。SQLite上で仮想注文・仮想約定・仮想ポジション・仮想cashを管理します。`signals.strategy_name`はシグナル生成アルゴリズム、`virtual_trade.portfolio_name`は仮想取引台帳を表し、別の識別子として扱います。
 
 ```bash
 python virtual_order.py --from-signals --date 2026-06-30
@@ -225,9 +225,9 @@ python database_backup.py --config config.yaml prune
 ```bash
 python database_backup.py --config config.yaml restore \
   backups/<backup>.sqlite3 data/recovery/moomoo-restored.db \
-  --strategy momentum --dry-run
+  --portfolio default --dry-run
 
 python database_backup.py --config config.yaml restore \
   backups/<backup>.sqlite3 data/recovery/moomoo-restored.db \
-  --strategy momentum
+  --portfolio default
 ```

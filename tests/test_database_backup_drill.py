@@ -24,6 +24,40 @@ def _create_empty_virtual_trade_db(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.executescript(CREATE_TABLES_SQL)
+        connection.execute(
+            "INSERT INTO symbols (code, name, role, tradable, type) "
+            "VALUES ('JP.7203', 'Toyota', 'trade_candidate', 1, 'stock')"
+        )
+        connection.execute(
+            "INSERT INTO daily_bars "
+            "(code, date, open, high, low, close, volume, turnover) "
+            "VALUES ('JP.7203', '2026-07-01', 100, 100, 100, 100, 1000, 100000)"
+        )
+        connection.execute(
+            "INSERT INTO virtual_orders "
+            "(id, strategy_name, code, side, quantity, order_type, status, "
+            "submitted_at, filled_at, fill_price) "
+            "VALUES (1, 'default', 'JP.7203', 'BUY', 1, 'MARKET_SIM', "
+            "'FILLED', '2026-07-01', '2026-07-01', 100)"
+        )
+        connection.execute(
+            "INSERT INTO virtual_fills "
+            "(id, order_id, strategy_name, code, side, quantity, price, "
+            "filled_at, fill_mode, commission) "
+            "VALUES (1, 1, 'default', 'JP.7203', 'BUY', 1, 100, "
+            "'2026-07-01', 'next_day_open', 0)"
+        )
+        connection.execute(
+            "INSERT INTO virtual_positions "
+            "(strategy_name, code, quantity, avg_cost, market_price, "
+            "market_value, unrealized_pl, realized_pl) "
+            "VALUES ('default', 'JP.7203', 1, 100, 100, 100, 0, 0)"
+        )
+        connection.execute(
+            "INSERT INTO virtual_equity_curve "
+            "(strategy_name, date, cash, position_value, total_equity, daily_return) "
+            "VALUES ('default', '2026-07-01', 149900, 100, 150000, 0)"
+        )
         connection.commit()
 
 
@@ -149,6 +183,20 @@ def test_isolated_backup_recovery_drill_end_to_end(tmp_path: Path, capsys) -> No
     )
     assert secondary_verify_exit == 0, secondary_verify_output
 
+    wrong_portfolio_exit, _ = _run_cli(
+        capsys,
+        "--config",
+        str(config_path),
+        "restore",
+        str(secondary_backup),
+        str(restore_path),
+        "--portfolio",
+        "momentum",
+        "--dry-run",
+    )
+    assert wrong_portfolio_exit != 0
+    assert not restore_path.exists()
+
     dry_run_exit, dry_run_output = _run_cli(
         capsys,
         "--config",
@@ -156,8 +204,8 @@ def test_isolated_backup_recovery_drill_end_to_end(tmp_path: Path, capsys) -> No
         "restore",
         str(secondary_backup),
         str(restore_path),
-        "--strategy",
-        "momentum",
+        "--portfolio",
+        "default",
         "--dry-run",
     )
     assert dry_run_exit == 0, dry_run_output
@@ -174,8 +222,8 @@ def test_isolated_backup_recovery_drill_end_to_end(tmp_path: Path, capsys) -> No
         "restore",
         str(secondary_backup),
         str(restore_path),
-        "--strategy",
-        "momentum",
+        "--portfolio",
+        "default",
     )
     assert restore_exit == 0, restore_output
     restore_result = json.loads(restore_output)
@@ -214,8 +262,8 @@ def test_isolated_backup_recovery_drill_end_to_end(tmp_path: Path, capsys) -> No
         "restore",
         str(corrupt_backup),
         str(corrupt_restore_path),
-        "--strategy",
-        "momentum",
+        "--portfolio",
+        "default",
         "--dry-run",
     )
     assert corrupt_restore_exit != 0

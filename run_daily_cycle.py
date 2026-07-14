@@ -44,6 +44,7 @@ from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
 from src.virtual_trade_integrity import IntegrityReport, VirtualTradeIntegrityChecker
+from src.trading_identity import virtual_portfolio_name
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +321,8 @@ def _run_cycle_core(
         "skip_reason": "",
     }
     config = load_config(config_path)
+    portfolio_name = virtual_portfolio_name(config)
+    results["virtual_portfolio"] = portfolio_name
     virtual_trade_enabled = _read_bool_setting(
         config,
         "virtual_trade.enabled",
@@ -448,7 +451,7 @@ def _run_cycle_core(
             if candidate.score < score_threshold:
                 continue
             order = manager.place_order(
-                strategy_name="default",
+                strategy_name=portfolio_name,
                 code=candidate.code,
                 side="BUY",
                 quantity=1,
@@ -460,20 +463,20 @@ def _run_cycle_core(
         results["virtual_orders"] = created
 
         manager = VirtualTradeManager(config)
-        fills = manager.process_fills("default", target_date)
+        fills = manager.process_fills(portfolio_name, target_date)
         results["fills"] = len(fills)
-        exits = manager.generate_exits("default", target_date)
+        exits = manager.generate_exits(portfolio_name, target_date)
         results["exits"] = len(exits)
         results["price_updates"] = manager.update_market_prices(
-            "default",
+            portfolio_name,
             target_date,
         )
-        manager.save_equity_curve("default", target_date)
+        manager.save_equity_curve(portfolio_name, target_date)
 
         if integrity_enabled:
             integrity_report = _run_virtual_trade_integrity_gate(
                 config,
-                "default",
+                portfolio_name,
                 target_date,
                 fail_on_warning=integrity_fail_on_warning,
             )

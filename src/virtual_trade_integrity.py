@@ -21,6 +21,7 @@ from typing import Any, Sequence
 
 from .config import Config
 from .market_calendar import is_trading_day
+from .trading_identity import virtual_portfolio_name
 
 
 @dataclass(frozen=True)
@@ -214,6 +215,65 @@ class VirtualTradeIntegrityChecker:
             )
             return False
         return True
+
+    @staticmethod
+    def _portfolio_inventory(
+        connection: sqlite3.Connection,
+    ) -> dict[str, dict[str, int]]:
+        inventory: dict[str, dict[str, int]] = {}
+        for table_name in (
+            "virtual_orders",
+            "virtual_fills",
+            "virtual_positions",
+            "virtual_equity_curve",
+        ):
+            rows = connection.execute(
+                f"SELECT strategy_name, COUNT(*) AS row_count "
+                f"FROM {table_name} GROUP BY strategy_name"
+            ).fetchall()
+            for row in rows:
+                name = str(row["strategy_name"])
+                inventory.setdefault(name, {})[table_name] = int(row["row_count"])
+        return inventory
+
+    def _validate_portfolio_selection(
+        self,
+        report: IntegrityReport,
+        inventory: dict[str, dict[str, int]],
+        portfolio_name: str,
+        *,
+        require_history: bool,
+    ) -> bool:
+        requested = inventory.get(portfolio_name, {})
+        requested_rows = sum(requested.values())
+        nonempty = {
+            name: counts
+            for name, counts in inventory.items()
+            if sum(counts.values()) > 0
+        }
+        report.checked["portfolio_count"] = len(nonempty)
+        report.checked["portfolio_rows"] = requested_rows
+        if requested_rows > 0:
+            return True
+        if nonempty:
+            self._add(
+                report,
+                "error",
+                "portfolio.empty_selection",
+                "指定portfolioに履歴がありませんが、別portfolioには履歴があります",
+                requested=portfolio_name,
+                available=nonempty,
+            )
+            return False
+        severity = "error" if require_history else "warning"
+        self._add(
+            report,
+            severity,
+            "portfolio.no_virtual_trade_history",
+            "仮想取引履歴がまだ存在しません",
+            requested=portfolio_name,
+        )
+        return not require_history
 
     def _load_fills(
         self,
@@ -667,6 +727,8 @@ class VirtualTradeIntegrityChecker:
         self,
         strategy_name: str,
         as_of_date: str | None = None,
+        *,
+        require_history: bool = False,
     ) -> IntegrityReport:
         report = IntegrityReport(strategy_name=strategy_name)
         if as_of_date is not None and self._parse_date(as_of_date) != as_of_date:
@@ -682,6 +744,14 @@ class VirtualTradeIntegrityChecker:
         try:
             with closing(self._connect_read_only()) as connection:
                 if not self._validate_schema(connection, report):
+                    return report
+                inventory = self._portfolio_inventory(connection)
+                if not self._validate_portfolio_selection(
+                    report,
+                    inventory,
+                    strategy_name,
+                    require_history=require_history,
+                ):
                     return report
                 has_commission = (
                     "commission"
@@ -754,7 +824,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="SQLite仮想取引データを読み取り専用で整合性検査する"
     )
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--strategy", default="momentum")
+    parser.add_argument(
+        "--portfolio",
+        "--strategy",
+        dest="portfolio_name",
+        default=None,
+        help="検査対象の仮想portfolio名（--strategyは互換alias）",
+    )
+    parser.add_argument(
+        "--require-history",
+        action="store_true",
+        help="仮想取引履歴が0件の場合もエラーにする",
+    )
     parser.add_argument("--as-of", default=None, dest="as_of_date")
     parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args(argv)
@@ -765,9 +846,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(str(error))
         return 2
 
+    portfolio = args.portfolio_name or virtual_portfolio_name(config)
     report = VirtualTradeIntegrityChecker(config).run(
-        args.strategy,
+        portfolio,
         args.as_of_date,
+        require_history=args.require_history,
     )
     if args.json_output:
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

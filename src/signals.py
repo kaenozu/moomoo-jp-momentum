@@ -18,6 +18,7 @@ from typing import Optional
 
 from .config import Config
 from .indicators import StockIndicators
+from .trading_identity import signal_strategy_name
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class SignalDetector:
 
     def __init__(self, config: Config):
         self.config = config
+        self.strategy_name = signal_strategy_name(config)
         self.screening_config = config.get("screening", {})
 
         self.min_turnover = self.screening_config.get("min_turnover", 1_000_000_000)
@@ -128,6 +130,7 @@ class SignalDetector:
             name=indicators.name,
             date=indicators.date,
             signal_type="EXCLUDE",
+            strategy_name=self.strategy_name,
             price_at_signal=indicators.close,
         )
 

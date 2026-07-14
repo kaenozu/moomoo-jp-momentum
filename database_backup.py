@@ -40,7 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     restore = subparsers.add_parser("restore", help="別パスへ復元して検証")
     restore.add_argument("backup_path", type=Path)
     restore.add_argument("destination_path", type=Path)
-    restore.add_argument("--strategy", default="momentum")
+    restore.add_argument(
+        "--portfolio",
+        "--strategy",
+        dest="portfolio_name",
+        required=True,
+        help="検証対象の仮想portfolio名（--strategyは互換alias）",
+    )
     restore.add_argument("--as-of", default=None, dest="as_of_date")
     restore.add_argument("--dry-run", action="store_true")
 
@@ -71,9 +77,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 manager.restore_backup(
                     args.backup_path,
                     args.destination_path,
-                    strategy_name=args.strategy,
+                    portfolio_name=args.portfolio_name,
                     as_of_date=args.as_of_date,
                     dry_run=args.dry_run,
+                    require_history=True,
                 )
             )
         elif args.command == "prune":
