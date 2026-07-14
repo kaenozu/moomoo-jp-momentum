@@ -113,6 +113,18 @@ def test_walk_forward_folds_use_complete_unseen_test_windows() -> None:
     assert folds[2].test_end == "D359"
 
 
+def test_walk_forward_folds_reject_overlapping_test_windows() -> None:
+    days = [f"D{index:03d}" for index in range(393)]
+
+    with pytest.raises(ValueError, match="do not overlap"):
+        build_walk_forward_folds(
+            days,
+            train_days=180,
+            test_days=60,
+            step_days=30,
+        )
+
+
 def test_realized_trade_pnls_match_partial_closes_fifo() -> None:
     rows = [
         {"code": "JP.1", "side": "BUY", "price": 100, "quantity": 10},
@@ -137,6 +149,21 @@ def test_training_selection_key_prefers_cash_matched_excess() -> None:
         min_closed_trades=10,
     ) > training_selection_key(
         weaker,
+        min_closed_trades=10,
+    )
+
+
+def test_training_selection_key_rewards_unbounded_profit_factor() -> None:
+    finite = _fold_report(1.0, profit_factor=2.0)
+    unbounded = _fold_report(1.0, profit_factor=0.0)
+    unbounded["performance"]["profit_factor"] = None
+    unbounded["performance"]["profit_factor_unbounded"] = True
+
+    assert training_selection_key(
+        unbounded,
+        min_closed_trades=10,
+    ) > training_selection_key(
+        finite,
         min_closed_trades=10,
     )
 
