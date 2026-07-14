@@ -222,6 +222,29 @@ Assert-PathsAbsent @(
     $MissingContextRestore
 )
 
+# Selecting an empty portfolio while another portfolio has history must fail
+# before any drill output path is created.
+$WrongPortfolioEvidence = Join-Path $Root "wrong portfolio evidence"
+$WrongPortfolioSecondary = Join-Path $Root "wrong portfolio secondary"
+$WrongPortfolioRestore = Join-Path $Root "wrong portfolio restore\restored.db"
+$wrongPortfolioResult = Invoke-DrillProcess -Arguments @(
+    "-File", $DrillScript,
+    "-ExpectedHead", $HeadSha,
+    "-ProductionConfig", $Config,
+    "-ProductionWorkingDirectory", $ProductionWorkingDirectory,
+    "-EvidenceDir", $WrongPortfolioEvidence,
+    "-SecondaryDir", $WrongPortfolioSecondary,
+    "-RestorePath", $WrongPortfolioRestore,
+    "-Portfolio", "momentum",
+    "-PreflightOnly"
+)
+Assert-Failure $wrongPortfolioResult "wrong-portfolio preflight guard"
+Assert-PathsAbsent @(
+    $WrongPortfolioEvidence,
+    $WrongPortfolioSecondary,
+    $WrongPortfolioRestore
+)
+
 # Wrong SHA must fail before any drill path is created.
 $WrongShaEvidence = Join-Path $Root "wrong sha evidence"
 $WrongShaSecondary = Join-Path $Root "wrong sha secondary"
