@@ -1,0 +1,33 @@
+name: temporary apply portfolio preflight inventory
+
+on:
+  push:
+    branches:
+      - agent/virtual-portfolio-identity
+    paths:
+      - scripts/_apply_portfolio_preflight_inventory.py
+      - .github/workflows/_apply-portfolio-preflight-inventory.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/virtual-portfolio-identity
+          fetch-depth: 0
+      - name: Apply and commit inventory
+        run: |
+          python scripts/_apply_portfolio_preflight_inventory.py
+          pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/sqlite_backup_recovery_drill.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+          pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("tests/run_database_backup_drill_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/sqlite_backup_recovery_drill.ps1 tests/run_database_backup_drill_windows.ps1
+          git commit -m "feat: inventory virtual portfolios during preflight"
+          git push origin HEAD:agent/virtual-portfolio-identity
