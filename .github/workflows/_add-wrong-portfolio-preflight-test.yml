@@ -1,0 +1,32 @@
+name: temporary add wrong portfolio preflight test
+
+on:
+  push:
+    branches:
+      - agent/virtual-portfolio-identity
+    paths:
+      - scripts/_add_wrong_portfolio_preflight_test.py
+      - .github/workflows/_add-wrong-portfolio-preflight-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/virtual-portfolio-identity
+          fetch-depth: 0
+      - name: Apply and commit test
+        run: |
+          python scripts/_add_wrong_portfolio_preflight_test.py
+          pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Automation.Language.Parser]::ParseFile("tests/run_database_backup_drill_windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/run_database_backup_drill_windows.ps1
+          git commit -m "test: reject wrong portfolio during preflight"
+          git push origin HEAD:agent/virtual-portfolio-identity
