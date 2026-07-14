@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "packet_type": "moomoo_readonly_discovery_execution_packet",
+  "packet_status": "BLOCKED_BEFORE_DISCOVERY",
+  "prepared_at": null,
+  "prepared_by": {
+    "name": null,
+    "role": null
+  },
+  "artifact": {
+    "workflow_run_id": null,
+    "artifact_id": null,
+    "artifact_name": "moomoo-readonly-discovery-handoff-v1.2.2",
+    "actions_wrapper_filename": null,
+    "actions_wrapper_expected_sha256": null,
+    "actions_wrapper_actual_sha256": null,
+    "handoff_filename": "moomoo-readonly-discovery-handoff-v1.2.2.zip",
+    "handoff_expected_sha256": null,
+    "handoff_actual_sha256": null,
+    "offline_verification_report": null,
+    "offline_verification_status": "PENDING",
+    "manifest_source_commit": null,
+    "manifest_source_ref": null,
+    "manifest_expected_checkout_head": null,
+    "manifest_expected_remote": null,
+    "nested_operator_filename": "moomoo_production_discovery_operator_v4_v1.2.2.zip",
+    "nested_operator_sha256": null
+  },
+  "target": {
+    "candidate_production_host": null,
+    "host_identity_status": "PENDING",
+    "host_identity_evidence_refs": []
+  },
+  "inputs": {
+    "verified_checkout": null,
+    "verified_checkout_head": null,
+    "verified_checkout_origin": null,
+    "verified_checkout_clean": null,
+    "verified_checkout_status": "PENDING",
+    "protected_checkout": null,
+    "protected_checkout_status": "PENDING",
+    "config_search_roots": [],
+    "config_search_roots_status": "PENDING",
+    "production_working_directories": [],
+    "production_working_directory_source": null,
+    "production_working_directory_evidence": null,
+    "production_working_directory_status": "PENDING",
+    "output_root": null,
+    "output_root_exists": null,
+    "output_root_empty": null,
+    "output_root_status": "PENDING"
+  },
+  "environment": {
+    "windows_version": null,
+    "powershell_executable": null,
+    "powershell_version": null,
+    "python_executable": null,
+    "python_version": null,
+    "pyyaml_version": null,
+    "git_version": null,
+    "environment_status": "PENDING"
+  },
+  "path_separation": {
+    "package_vs_verified_checkout": "PENDING",
+    "package_vs_protected_checkout": "PENDING",
+    "package_vs_output_root": "PENDING",
+    "verified_vs_protected_checkout": "PENDING",
+    "verified_checkout_vs_output_root": "PENDING",
+    "protected_checkout_vs_output_root": "PENDING",
+    "overall_status": "PENDING"
+  },
+  "authorization": {
+    "approval_record": null,
+    "approval_status": "NOT_APPROVED",
+    "approved_by": null,
+    "approved_at": null,
+    "authorized_scope": {
+      "verify_handoff_only": false,
+      "readonly_discovery_exactly_once": false,
+      "preflight": false,
+      "writer_operations": false,
+      "scheduled_task_service_startup_changes": false,
+      "backup_copy_restore_prune": false,
+      "cutover": false,
+      "opend_trade_context": false,
+      "real_order_api": false,
+      "issue_close": false
+    },
+    "required_fail_closed_boundary": {
+      "production_readiness": "BLOCKED",
+      "preflight_authorized": false,
+      "production_drill_authorized": false,
+      "cutover_authorized": false,
+      "separate_approval_required": true
+    }
+  },
+  "assessment": {
+    "confirmed_facts": [],
+    "unconfirmed_information": [],
+    "inferences": [],
+    "contradictions": [],
+    "conditions_and_scope_differences": [],
+    "corrections_required": [],
+    "blocking_reasons": [
+      "The template has not been completed and separately approved."
+    ]
+  },
+  "execution": {
+    "verify_handoff_executed": false,
+    "readonly_discovery_executed": false,
+    "readonly_discovery_process_exit_code": null,
+    "evidence_directory": null,
+    "shareable_evidence": {
+      "03-discovery-redacted.json": "NOT_CREATED",
+      "04-discovery-summary.md": "NOT_CREATED",
+      "05-operator-result.json": "NOT_CREATED"
+    },
+    "prohibited_operation_executed": false
+  }
+}

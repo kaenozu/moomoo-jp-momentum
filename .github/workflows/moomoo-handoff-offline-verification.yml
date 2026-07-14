@@ -1,0 +1,136 @@
+name: moomoo handoff offline verification
+
+on:
+  pull_request:
+    paths:
+      - "scripts/verify_moomoo_master_handoff_offline.py"
+      - "scripts/test_verify_moomoo_master_handoff_offline.py"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - "scripts/build_moomoo_readonly_discovery_handoff.py"
+      - "tools/production_discovery/handoff/**"
+      - ".github/workflows/moomoo-handoff-offline-verification.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "scripts/verify_moomoo_master_handoff_offline.py"
+      - "scripts/test_verify_moomoo_master_handoff_offline.py"
+      - "scripts/build_moomoo_discovery_operator_bundle.py"
+      - "scripts/build_moomoo_readonly_discovery_handoff.py"
+      - "tools/production_discovery/handoff/**"
+      - ".github/workflows/moomoo-handoff-offline-verification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  SOURCE_DATE_EPOCH: "1783900800"
+
+jobs:
+  linux-integration:
+    name: Linux offline verifier integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile and run verifier tests
+        run: |
+          python -m py_compile \
+            ./scripts/verify_moomoo_master_handoff_offline.py \
+            ./scripts/test_verify_moomoo_master_handoff_offline.py
+          python ./scripts/test_verify_moomoo_master_handoff_offline.py -v
+      - name: Build current operator and handoff
+        run: |
+          mkdir -p "$RUNNER_TEMP/operator" "$RUNNER_TEMP/handoff"
+          python ./scripts/build_moomoo_discovery_operator_bundle.py \
+            --output-dir "$RUNNER_TEMP/operator"
+          python ./scripts/build_moomoo_readonly_discovery_handoff.py \
+            --operator-bundle "$RUNNER_TEMP/operator/moomoo_production_discovery_operator_v4_v1.2.2.zip" \
+            --output-dir "$RUNNER_TEMP/handoff"
+      - name: Verify the generated inner handoff
+        shell: bash
+        run: |
+          extra=()
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            extra+=(--allow-validation-ref)
+          fi
+          python ./scripts/verify_moomoo_master_handoff_offline.py \
+            "$RUNNER_TEMP/handoff/moomoo-readonly-discovery-handoff-v1.2.2.zip" \
+            --expected-source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/inner-verification.json" \
+            "${extra[@]}"
+      - name: Build and verify a synthetic Actions wrapper
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          handoff = root / "handoff" / "moomoo-readonly-discovery-handoff-v1.2.2.zip"
+          wrapper = root / "moomoo-readonly-discovery-handoff-v1.2.2-actions-artifact.zip"
+          with zipfile.ZipFile(wrapper, "w", zipfile.ZIP_DEFLATED) as archive:
+              archive.write(handoff, handoff.name)
+          PY
+          extra=()
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            extra+=(--allow-validation-ref)
+          fi
+          python ./scripts/verify_moomoo_master_handoff_offline.py \
+            "$RUNNER_TEMP/moomoo-readonly-discovery-handoff-v1.2.2-actions-artifact.zip" \
+            --expected-source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/wrapper-verification.json" \
+            "${extra[@]}"
+      - name: Verify tracked repository unchanged
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git status --porcelain)"
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moomoo-handoff-offline-verification-reports
+          path: |
+            ${{ runner.temp }}/inner-verification.json
+            ${{ runner.temp }}/wrapper-verification.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-tests:
+    name: Windows verifier tests
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile and run verifier tests
+        shell: cmd
+        run: |
+          python -m py_compile .\scripts\verify_moomoo_master_handoff_offline.py .\scripts\test_verify_moomoo_master_handoff_offline.py
+          if errorlevel 1 exit /b 1
+          python .\scripts\test_verify_moomoo_master_handoff_offline.py -v
+          if errorlevel 1 exit /b 1
+      - name: Verify tracked repository unchanged
+        shell: pwsh
+        run: |
+          & git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified tracked files" }
+          & git diff --cached --exit-code
+          if ($LASTEXITCODE -ne 0) { throw "Validation modified the index" }
+          $Status = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0) { throw "git status failed" }
+          if ($Status.Count -ne 0) {
+            $Status | ForEach-Object { Write-Error $_ }
+            throw "Validation created repository artifacts"
+          }
