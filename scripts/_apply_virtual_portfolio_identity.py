@@ -567,7 +567,7 @@ replace_once(
 ''',
 )
 replace_all("scripts/sqlite_backup_recovery_drill.ps1", "$Strategy", "$Portfolio", minimum=2)
-replace_all("scripts/sqlite_backup_recovery_drill.ps1", '"--strategy", $Portfolio', '"--portfolio", $Portfolio', minimum=3)
+replace_all("scripts/sqlite_backup_recovery_drill.ps1", '"--strategy", $Portfolio', '"--portfolio", $Portfolio', minimum=2)
 replace_once(
     "scripts/sqlite_backup_recovery_drill.ps1",
     '''    journal_mode = $JournalMode
