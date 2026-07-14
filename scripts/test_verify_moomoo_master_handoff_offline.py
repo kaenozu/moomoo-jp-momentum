@@ -255,6 +255,27 @@ class OfflineHandoffVerifierTests(unittest.TestCase):
                     max_member_bytes=20000,
                 )
 
+    def test_open_verified_zip_closes_archive_on_validation_failure(self) -> None:
+        archive = mock.Mock()
+        archive.infolist.return_value = []
+        with (
+            mock.patch.object(verifier.zipfile, "ZipFile", return_value=archive),
+            mock.patch.object(
+                verifier,
+                "validate_zip_infos",
+                side_effect=verifier.VerificationError("invalid members"),
+            ),
+            self.assertRaisesRegex(verifier.VerificationError, "invalid members"),
+        ):
+            verifier.open_verified_zip(
+                b"not-read-by-fake",
+                "close test",
+                max_archive_bytes=100,
+                max_members=1,
+                max_member_bytes=10,
+            )
+        archive.close.assert_called_once_with()
+
     def test_rejects_resource_member_count_overflow(self) -> None:
         data = self.make_zip({"a.txt": b"a", "b.txt": b"b"})
         with self.assertRaisesRegex(verifier.VerificationError, "too many members"):

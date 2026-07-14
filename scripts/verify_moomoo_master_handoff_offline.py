@@ -82,14 +82,6 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def normalize_remote(value: str) -> str:
     normalized = value.strip().rstrip("/").casefold()
     return normalized[:-4] if normalized.endswith(".git") else normalized
@@ -178,6 +170,10 @@ def open_verified_zip(
         )
     try:
         archive = zipfile.ZipFile(io.BytesIO(data), "r")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise VerificationError(f"{label} is not a readable ZIP: {exc}") from exc
+
+    try:
         infos = validate_zip_infos(
             archive.infolist(),
             label,
@@ -186,13 +182,13 @@ def open_verified_zip(
         )
         bad_member = archive.testzip()
         if bad_member is not None:
-            archive.close()
             raise VerificationError(
                 f"{label} compressed data is corrupt: {bad_member}"
             )
         return archive, infos
-    except (OSError, zipfile.BadZipFile) as exc:
-        raise VerificationError(f"{label} is not a readable ZIP: {exc}") from exc
+    except Exception:
+        archive.close()
+        raise
 
 
 def require_exact_members(
@@ -522,10 +518,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         if args.output:
             output = Path(args.output).resolve()
-            if output.exists():
-                raise VerificationError(f"output already exists: {output}")
             output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_text(rendered, encoding="utf-8", newline="\n")
+            try:
+                with output.open("x", encoding="utf-8", newline="\n") as handle:
+                    handle.write(rendered)
+            except FileExistsError as exc:
+                raise VerificationError(f"output already exists: {output}") from exc
         print(rendered, end="")
         return 0
     except VerificationError as exc:
