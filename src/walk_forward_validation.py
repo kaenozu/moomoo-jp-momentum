@@ -247,7 +247,6 @@ def run_case(
     strategy_name = _register_scored_strategy(base_strategy, config)
     runner = BacktestRunner(config)
     runner.initial_cash = int(round(plan.active_cash))
-    runner.cash = plan.active_cash
     runner.max_total_positions = plan.max_positions
     runner.max_position_amount = int(round(plan.max_position_amount))
     runner.stop_loss_pct = parameters.stop_loss_pct
