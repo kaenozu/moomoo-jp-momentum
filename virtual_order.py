@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config import load_config
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
+from src.trading_identity import signal_strategy_name, virtual_portfolio_name
 
 
 def print_warning():
@@ -79,7 +80,13 @@ def show_performance(manager: VirtualTradeManager, strategy: str):
     print(f"  保有銘柄数: {perf['position_count']}")
 
 
-def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str):
+def from_signals(
+    manager: VirtualTradeManager,
+    config,
+    date: str,
+    portfolio: str,
+    signal_strategy: str,
+):
     from src.data_store import DataStore
     DataStore(config).sync_symbols_from_json(config.watchlist_file)
 
@@ -87,13 +94,13 @@ def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str)
     candidates = screener.screen_candidates(date=None if date == "latest" else date)
     vt_config = config.get("virtual_trade", {})
     score_threshold = vt_config.get("score_threshold_for_order", 70)
-    cash = manager.get_cash(strategy)
+    cash = manager.get_cash(portfolio)
     created = 0
 
     for c in candidates:
         if c.signal_type != "BUY_CANDIDATE":
             continue
-        if c.strategy_name != strategy:
+        if c.strategy_name != signal_strategy:
             continue
         if c.role != "trade_candidate" or not c.tradable:
             continue
@@ -102,7 +109,7 @@ def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str)
         if c.close and c.close > cash:
             continue
         order = manager.place_order(
-            strategy_name=strategy,
+            strategy_name=portfolio,
             code=c.code,
             side="BUY",
             quantity=1,
@@ -113,7 +120,10 @@ def from_signals(manager: VirtualTradeManager, config, date: str, strategy: str)
             created += 1
             cash -= c.close or 0
 
-    print(f"戦略 {strategy}: {created} 件の仮想注文を作成しました")
+    print(
+        f"シグナル戦略 {signal_strategy} → 仮想portfolio {portfolio}: "
+        f"{created} 件の仮想注文を作成しました"
+    )
 
 
 def main():
@@ -133,7 +143,18 @@ def main():
     parser.add_argument("--order-id", type=int, help="注文ID")
     parser.add_argument("--performance", action="store_true", help="パフォーマンス表示")
     parser.add_argument("--report", action="store_true", help="レポート出力（CSV/HTML）")
-    parser.add_argument("--strategy", default="default", help="戦術名")
+    parser.add_argument(
+        "--portfolio",
+        "--strategy",
+        dest="portfolio",
+        default=None,
+        help="仮想取引portfolio名（--strategyは互換alias）",
+    )
+    parser.add_argument(
+        "--signal-strategy",
+        default=None,
+        help="シグナル生成戦略名",
+    )
     parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
 
@@ -144,36 +165,44 @@ def main():
         print(f"[ERROR] {e}")
         return 1
 
+    portfolio = args.portfolio or virtual_portfolio_name(config)
+    signal_strategy = args.signal_strategy or signal_strategy_name(config)
     manager = VirtualTradeManager(config)
 
     if args.list:
-        list_orders(manager, args.strategy)
+        list_orders(manager, portfolio)
         return 0
     if args.positions:
-        list_positions(manager, args.strategy)
+        list_positions(manager, portfolio)
         return 0
     if args.list_fills:
-        list_fills(manager, args.strategy)
+        list_fills(manager, portfolio)
         return 0
     if args.performance:
-        show_performance(manager, args.strategy)
+        show_performance(manager, portfolio)
         return 0
     if args.report:
         from datetime import datetime
         import pandas as pd
         out_dir = Path("reports")
         out_dir.mkdir(parents=True, exist_ok=True)
-        report = manager.generate_report(args.strategy)
+        report = manager.generate_report(portfolio)
         date_str = datetime.now().strftime("%Y%m%d")
         csv_path = out_dir / f"virtual_trade_{date_str}.csv"
         pd.DataFrame([report]).to_csv(csv_path, index=False, encoding="utf-8-sig")
         print(f"[OK] CSV: {csv_path}")
         return 0
     if args.from_signals:
-        from_signals(manager, config, args.date or "latest", args.strategy)
+        from_signals(
+            manager,
+            config,
+            args.date or "latest",
+            portfolio,
+            signal_strategy,
+        )
         return 0
     if args.generate_exits:
-        orders = manager.generate_exits(args.strategy, args.date)
+        orders = manager.generate_exits(portfolio, args.date)
         print(f"{len(orders)} 件の売却注文を生成しました")
         return 0
     if args.cancel:
@@ -192,7 +221,7 @@ def main():
         return 1
 
     order = manager.place_order(
-        strategy_name=args.strategy,
+        strategy_name=portfolio,
         code=args.code,
         side=args.side,
         quantity=args.quantity,

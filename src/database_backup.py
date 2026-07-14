@@ -345,13 +345,18 @@ class DatabaseBackupManager:
         backup_path: Path,
         destination_path: Path,
         *,
-        strategy_name: str = "momentum",
+        portfolio_name: str | None = None,
         as_of_date: str | None = None,
         dry_run: bool = False,
+        require_history: bool = False,
     ) -> RestoreResult:
         backup_path = backup_path.resolve()
         destination_path = destination_path.resolve()
         source_path = self.source_path.resolve()
+        if portfolio_name is None:
+            from .trading_identity import virtual_portfolio_name
+
+            portfolio_name = virtual_portfolio_name(self.config)
         if destination_path == source_path:
             raise BackupError("稼働中DBと同じパスには復元できません")
         if destination_path.exists():
@@ -367,7 +372,11 @@ class DatabaseBackupManager:
 
             checker = VirtualTradeIntegrityChecker(cast(Any, self.config))
             checker.db_path = candidate
-            return checker.run(strategy_name, as_of_date)
+            return checker.run(
+                portfolio_name,
+                as_of_date,
+                require_history=require_history,
+            )
 
         if dry_run:
             report = run_integrity(backup_path)

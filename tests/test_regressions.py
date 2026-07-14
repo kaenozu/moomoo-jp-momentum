@@ -195,6 +195,7 @@ def test_dry_run_is_read_only(monkeypatch, tmp_path):
         "is_trading_day": True,
         "cycle_skipped": False,
         "skip_reason": "",
+        "virtual_portfolio": "default",
         "symbols": 2,
         "benchmarks": 1,
     }

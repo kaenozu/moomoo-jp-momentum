@@ -33,6 +33,7 @@ universe:
   exclude_low_price_stocks: true
   auto_downgrade_expensive_to_watch: true
 signals:
+  strategy_name: momentum
   ma_periods:
     short: 5
     medium: 25
@@ -133,6 +134,7 @@ backtest:
     benchmark_code: JP.1306
 virtual_trade:
   enabled: true
+  portfolio_name: default
   initial_cash: 150000
   max_position_amount: 20000
   max_total_positions: 5

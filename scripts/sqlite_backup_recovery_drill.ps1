@@ -16,7 +16,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RestorePath,
 
-    [string]$Strategy = "momentum",
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Portfolio,
 
     [string]$Python = "python",
 
@@ -242,6 +244,66 @@ if ($journalExit -ne 0) {
     throw ($journalRaw -join "`n")
 }
 $JournalMode = ($journalRaw -join "").Trim()
+
+$PortfolioInventoryScript = @'
+from pathlib import Path
+import json
+import sqlite3
+import sys
+
+path = Path(sys.argv[1]).resolve()
+selected = sys.argv[2]
+tables = (
+    "virtual_orders",
+    "virtual_fills",
+    "virtual_positions",
+    "virtual_equity_curve",
+)
+inventory = {}
+with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
+    existing = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    for table in tables:
+        if table not in existing:
+            continue
+        for portfolio, row_count in connection.execute(
+            f"SELECT strategy_name, COUNT(*) FROM {table} GROUP BY strategy_name"
+        ):
+            name = str(portfolio)
+            inventory.setdefault(name, {})[table] = int(row_count)
+
+selected_rows = sum(inventory.get(selected, {}).values())
+total_rows = sum(sum(counts.values()) for counts in inventory.values())
+print(json.dumps({
+    "selected": selected,
+    "selected_rows": selected_rows,
+    "total_rows": total_rows,
+    "portfolios": inventory,
+}, ensure_ascii=False, sort_keys=True))
+'@
+
+$portfolioInventoryRaw = $PortfolioInventoryScript | & $Python - `
+    $LiveDb $Portfolio 2>&1
+$portfolioInventoryExit = $LASTEXITCODE
+if ($portfolioInventoryExit -ne 0) {
+    throw ($portfolioInventoryRaw -join "`n")
+}
+$PortfolioInventory = ($portfolioInventoryRaw -join "`n") | ConvertFrom-Json
+if (
+    [int]$PortfolioInventory.selected_rows -eq 0 -and
+    [int]$PortfolioInventory.total_rows -gt 0
+) {
+    throw (
+        "selected virtual portfolio has no history while other portfolios do: " +
+        "selected=$Portfolio available=" +
+        (($PortfolioInventory.portfolios | ConvertTo-Json -Compress -Depth 6))
+    )
+}
+
 $ProductionConfigHash = (
     Get-FileHash -Algorithm SHA256 -LiteralPath $ProductionConfig
 ).Hash
@@ -270,6 +332,10 @@ $Preflight = [pscustomobject]@{
     secondary_directory = $SecondaryDir
     restore_path = $RestorePath
     journal_mode = $JournalMode
+    virtual_portfolio = $Portfolio
+    selected_virtual_portfolio_rows = [int]$PortfolioInventory.selected_rows
+    total_virtual_portfolio_rows = [int]$PortfolioInventory.total_rows
+    virtual_portfolio_inventory = $PortfolioInventory.portfolios
     filesystem_space = @(
         Get-PSDrive -PSProvider FileSystem |
             Select-Object Name, Root, Used, Free
@@ -435,7 +501,7 @@ with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
         ]
 
     payload = {
-        "strategy": strategy,
+        "portfolio": strategy,
         "schema_version": int(
             connection.execute("PRAGMA user_version").fetchone()[0]
         ),
@@ -462,7 +528,7 @@ function Write-DbSnapshot {
         [Parameter(Mandatory = $true)][string]$OutputPath
     )
 
-    $snapshotRaw = $SnapshotScript | & $Python - $DbPath $Strategy 2>&1
+    $snapshotRaw = $SnapshotScript | & $Python - $DbPath $Portfolio 2>&1
     $snapshotExit = $LASTEXITCODE
     if ($snapshotExit -ne 0) {
         throw ($snapshotRaw -join "`n")
@@ -575,7 +641,7 @@ $DryRunResult = Invoke-PythonJson `
         "database_backup.py",
         "--config", $DrillConfig,
         "restore", $SecondaryBackup, $RestorePath,
-        "--strategy", $Strategy,
+        "--portfolio", $Portfolio,
         "--dry-run"
     ) `
     -FailureMessage "restore dry-run failed" `
@@ -593,7 +659,7 @@ $RestoreResult = Invoke-PythonJson `
         "database_backup.py",
         "--config", $DrillConfig,
         "restore", $SecondaryBackup, $RestorePath,
-        "--strategy", $Strategy
+        "--portfolio", $Portfolio
     ) `
     -FailureMessage "restore failed" `
     -LogPath "$EvidenceDir\41-restore-output.txt"
@@ -689,7 +755,7 @@ try {
     $corruptRestoreRaw = & $Python database_backup.py `
         --config $DrillConfig restore `
         $CorruptBackup $CorruptRestorePath `
-        --strategy $Strategy --dry-run 2>&1
+        --portfolio $Portfolio --dry-run 2>&1
     $CorruptRestoreExit = $LASTEXITCODE
     $corruptRestoreRaw |
         Set-Content -Encoding utf8 `
@@ -736,6 +802,7 @@ $FinalResult = [pscustomobject]@{
     production_working_directory = $ProductionWorkingDirectory
     configured_database_path = $ConfigInfo.database_path_setting
     live_db = $LiveDb
+    virtual_portfolio = $Portfolio
     drill_config_sha256 = $DrillConfigHash
     backup_path = $BackupPath
     backup_sha256 = $BackupHash
