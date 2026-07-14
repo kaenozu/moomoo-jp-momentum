@@ -692,7 +692,7 @@ try {
     $corruptRestoreRaw = & $Python database_backup.py `
         --config $DrillConfig restore `
         $CorruptBackup $CorruptRestorePath `
-        --strategy $Portfolio --dry-run 2>&1
+        --portfolio $Portfolio --dry-run 2>&1
     $CorruptRestoreExit = $LASTEXITCODE
     $corruptRestoreRaw |
         Set-Content -Encoding utf8 `
