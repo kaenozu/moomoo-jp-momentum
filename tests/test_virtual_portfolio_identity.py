@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from src.models import CREATE_TABLES_SQL
 from src.trading_identity import signal_strategy_name, virtual_portfolio_name
@@ -52,7 +52,7 @@ def test_wrong_empty_portfolio_fails_when_another_has_history(tmp_path: Path) ->
     database = tmp_path / "portfolio.db"
     create_database(database, portfolio="default")
     checker = VirtualTradeIntegrityChecker(
-        StubConfig(database, {"virtual_trade": {"initial_cash": 150000}})
+        cast(Any, StubConfig(database, {"virtual_trade": {"initial_cash": 150000}}))
     )
 
     report = checker.run("momentum", require_history=True)
@@ -68,7 +68,7 @@ def test_no_history_is_distinct_and_strict_mode_fails(tmp_path: Path) -> None:
     database = tmp_path / "empty.db"
     create_database(database, portfolio=None)
     checker = VirtualTradeIntegrityChecker(
-        StubConfig(database, {"virtual_trade": {"initial_cash": 150000}})
+        cast(Any, StubConfig(database, {"virtual_trade": {"initial_cash": 150000}}))
     )
 
     normal = checker.run("default")
