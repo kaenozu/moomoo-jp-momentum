@@ -68,6 +68,11 @@ def build_walk_forward_folds(
 
     if train_days <= 0 or test_days <= 0 or step_days <= 0:
         raise ValueError("train_days, test_days and step_days must be positive")
+    if step_days < test_days:
+        raise ValueError(
+            "step_days must be greater than or equal to test_days "
+            "so out-of-sample folds do not overlap"
+        )
     normalized = list(trading_days)
     if normalized != sorted(normalized):
         raise ValueError("trading_days must be sorted")
@@ -182,7 +187,10 @@ def training_selection_key(
     excess_raw = benchmarks.get("excess_vs_JP.1306_cash_matched_pct")
     excess = float(excess_raw) if excess_raw is not None else -1.0e100
     pf_raw = performance.get("profit_factor")
-    profit_factor = float(pf_raw) if pf_raw is not None else -1.0e100
+    if bool(performance.get("profit_factor_unbounded", False)):
+        profit_factor = 1.0e100
+    else:
+        profit_factor = float(pf_raw) if pf_raw is not None else -1.0e100
     drawdown = float(performance["max_drawdown_pct"])
     eligible = int(
         closed_trades >= min_closed_trades
