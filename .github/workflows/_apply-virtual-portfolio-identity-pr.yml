@@ -34,13 +34,22 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            src/trading_identity.py src/signals.py run_daily_cycle.py virtual_order.py \
-            app.py database_backup.py src/database_backup.py \
-            src/virtual_trade_integrity.py scripts/sqlite_backup_recovery_drill.ps1 \
-            config.example.yaml README.md tests/test_database_backup_drill.py \
-            tests/run_database_backup_drill_windows.ps1 \
-            tests/test_virtual_portfolio_identity.py .github/workflows/tests.yml \
-            pyrightconfig.json
+          git add -A
+          git reset -- \
+            scripts/_apply_virtual_portfolio_identity.py \
+            scripts/_virtual_portfolio_apply_diagnostics.txt \
+            scripts/_fix_virtual_portfolio_applicator.py \
+            .github/workflows/_apply-virtual-portfolio-identity.yml \
+            .github/workflows/_apply-virtual-portfolio-identity-pr.yml \
+            .github/workflows/_diagnose-virtual-portfolio-applicator.yml \
+            .github/workflows/_fix-virtual-portfolio-applicator.yml \
+            docs/.virtual-portfolio-pr-placeholder \
+            docs/.virtual-portfolio-pr-scope \
+            docs/.virtual-portfolio-pr-ready \
+            docs/.virtual-portfolio-pr-retry
+          if [[ -z "$(git diff --cached --name-only)" ]]; then
+            echo "No generated implementation changes"
+            exit 1
+          fi
           git commit -m "fix: separate signal strategy from virtual portfolio"
           git push origin HEAD:agent/virtual-portfolio-identity
