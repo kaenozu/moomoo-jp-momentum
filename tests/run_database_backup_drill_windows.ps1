@@ -314,6 +314,24 @@ if ([string]$preflight.configured_database_path -ne "data/moomoo.db") {
 if ([string]$preflight.live_db -ne (Resolve-Path $LiveDb).Path) {
     throw "preflight resolved the wrong live DB"
 }
+if ([string]$preflight.virtual_portfolio -ne "default") {
+    throw "preflight reported the wrong virtual portfolio"
+}
+if ([int]$preflight.selected_virtual_portfolio_rows -ne 4) {
+    throw "preflight reported the wrong selected portfolio row count"
+}
+if ([int]$preflight.total_virtual_portfolio_rows -ne 4) {
+    throw "preflight reported the wrong total portfolio row count"
+}
+$DefaultInventory = $preflight.virtual_portfolio_inventory.default
+if (
+    [int]$DefaultInventory.virtual_orders -ne 1 -or
+    [int]$DefaultInventory.virtual_fills -ne 1 -or
+    [int]$DefaultInventory.virtual_positions -ne 1 -or
+    [int]$DefaultInventory.virtual_equity_curve -ne 1
+) {
+    throw "preflight virtual portfolio inventory is incomplete"
+}
 if (
     [string]$preflight.configured_backup_directory -ne
     [IO.Path]::GetFullPath($ProductionBackupDir)
