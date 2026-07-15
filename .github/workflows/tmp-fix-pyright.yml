@@ -1,0 +1,44 @@
+name: Temporary Pyright Comment Fix
+
+on:
+  push:
+    branches:
+      - fix/pyright-test-type-errors
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/pyright-test-type-errors
+          fetch-depth: 0
+
+      - name: Use Pyright diagnostic ignores
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_core.py")
+          text = path.read_text(encoding="utf-8")
+          old = "# type: ignore[attr-defined]"
+          new = "# pyright: ignore[reportAttributeAccessIssue]"
+          count = text.count(old)
+          if count != 3:
+              raise RuntimeError(f"Expected 3 mypy-style ignores, found {count}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+      - name: Commit and push fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_core.py
+          git commit -m "fix: use pyright diagnostic ignores"
+          git push origin HEAD:fix/pyright-test-type-errors
