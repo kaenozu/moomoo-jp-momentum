@@ -244,7 +244,7 @@ class TestDailyBarSource:
     def test_save_dataframe_preserves_source_columns(self, tmp_path):
         db_path = tmp_path / "source.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         store = DataStore(config)
 
         df = pd.DataFrame([{
@@ -275,7 +275,7 @@ class TestBacktestRunStats:
     def test_run_stats_use_peak_drawdown_and_closed_trade_pnl(self, tmp_path):
         db_path = tmp_path / "backtest.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         DataStore(config)
 
         runner = BacktestRunner(config)
@@ -324,7 +324,7 @@ class TestBacktestRunStats:
 def _setup_bt_db(db_path, start="2026-01-05", end="2026-01-09"):
     """バックテスト用の最小DBを構築するヘルパー"""
     config = Config("tests/fixtures/config.test.yaml")
-    config._config = {"database": {"path": str(db_path)}}
+    config._config["database"] = {"path": str(db_path)}
     DataStore(config)
 
     with sqlite3.connect(db_path) as conn:
@@ -521,12 +521,8 @@ class TestIdleCashOrder:
         """idle cash benchmark上昇時にequity_curveのtotal_equityも上がる"""
         db_path = tmp_path / "idle.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {
-            "database": {"path": str(db_path)},
-            "backtest": {
-                "idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"},
-            },
-        }
+        config._config["database"] = {"path": str(db_path)}
+        config._config["backtest"] = {"idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"}}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -573,7 +569,7 @@ class TestPendingCashReservation:
         """pending BUY注文がある場合、利用可能cashが減少すること"""
         db_path = tmp_path / "vtm_pending.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -615,7 +611,7 @@ class TestPendingCashReservation:
         """reserve_buffer_pct=2.0のとき、予約額が latest_close * qty * 1.02 になること"""
         db_path = tmp_path / "vtm_buffer.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -656,7 +652,7 @@ class TestPendingCashReservation:
         """_validate_buy_orderがavailable cash(buffer込み)を使って判定すること"""
         db_path = tmp_path / "vtm_validate.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {"database": {"path": str(db_path)}}
+        config._config["database"] = {"path": str(db_path)}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -786,14 +782,9 @@ class TestBacktestCashFlowIntegration:
     @staticmethod
     def _build_db(db_path):
         config = Config("tests/fixtures/config.test.yaml")
-        config._config = {
-            "database": {"path": str(db_path)},
-            "screening": {"min_turnover": 50_000_000},
-            "backtest": {
-                "max_positions": 5,
-                "idle_cash_allocation": {"enabled": False},
-            },
-        }
+        config._config["database"] = {"path": str(db_path)}
+        config._config["screening"] = {"min_turnover": 50_000_000}
+        config._config["backtest"] = {"max_positions": 5, "idle_cash_allocation": {"enabled": False}}
         DataStore(config)
 
         bars = []

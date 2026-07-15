@@ -79,6 +79,12 @@ class OpenDConnection:
             self._status = ConnectionStatus(False, msg, hint)
             return self._status
 
+        if self._quote_context is None:
+            msg = "OpenQuoteContextの作成に失敗しました（None）"
+            logger.error(msg)
+            self._status = ConnectionStatus(False, msg)
+            return self._status
+
         ret, data = self._quote_context.get_market_snapshot(["US.SPY"])
 
         if ret == RET_OK:

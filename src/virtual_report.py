@@ -101,9 +101,9 @@ class VirtualReport:
     excess_vs_1306: Optional[float] = None
 
     # exit_reason別
-    exit_reason_stats: list[ExitReasonStats] = None
+    exit_reason_stats: Optional[list[ExitReasonStats]] = None
     # クローズ済みトレード
-    closed_trades: list[ClosedTrade] = None
+    closed_trades: Optional[list[ClosedTrade]] = None
 
 
 class VirtualReportGenerator:
