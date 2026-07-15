@@ -84,9 +84,17 @@ class BenchmarkManager:
         now = datetime.now().isoformat()
 
         with self._get_connection() as conn:
+            prev_close: Optional[float] = None
             for _, row in df.iterrows():
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
+
+                # 前日終値から日次リターンを計算
+                daily_return: Optional[float] = None
+                if prev_close is not None and close is not None and prev_close > 0:
+                    daily_return = (float(close) - float(prev_close)) / float(prev_close) * 100
+                if close is not None:
+                    prev_close = float(close)
 
                 try:
                     conn.execute(
@@ -95,7 +103,7 @@ class BenchmarkManager:
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
-                        (code, date, close, None, now, now),
+                        (code, date, close, daily_return, now, now),
                     )
                     count += 1
                 except sqlite3.Error as e:

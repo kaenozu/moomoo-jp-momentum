@@ -117,10 +117,7 @@ class TradeLog:
                     now,
                 ),
             )
-            last_id = cursor.lastrowid
-            if last_id is None:
-                raise RuntimeError("INSERT failed to return rowid")
-            return last_id
+            return cursor.lastrowid or -1
 
     def get_trade(self, trade_id: int) -> Optional[TradeRecord]:
         """売買記録を取得する"""

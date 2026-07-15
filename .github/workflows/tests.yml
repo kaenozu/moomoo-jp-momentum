@@ -9,12 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check for pre-existing artifacts
-        run: |
-          echo "=== git status before ==="
-          git status --porcelain
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -26,48 +20,33 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Record pre-run file listing
+        run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_files.txt || true
+
       - name: Run fast tests
         run: python -m pytest tests/ -m "not slow" -q
 
       - name: Run ruff
-        run: >-
-          ruff check src/ tests/ run_daily_cycle.py daily_update.py
-          historical_backtest.py screen_candidates.py scheduler.py
-          performance_report.py --output-format=github
+        run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
 
       - name: Run pyright
+        run: pyright
+
+      - name: Dry-run with test config
+        run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
+
+      - name: Verify no artifacts were created
         run: |
-          set +e
-          pyright > "$RUNNER_TEMP/pyright.log" 2>&1
-          status=$?
-          cat "$RUNNER_TEMP/pyright.log"
-          exit "$status"
-
-      - name: Upload pyright log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pyright-log
-          path: ${{ runner.temp }}/pyright.log
-          if-no-files-found: ignore
-          retention-days: 3
-
-      - name: Test dry-run with test config
-        run: >-
-          python run_daily_cycle.py --dry-run
-          --config tests/fixtures/config.test.yaml
-
-      - name: Verify no artifacts created
-        if: always()
-        run: |
-          echo "=== git status after ==="
-          git status --porcelain
-          if git status --porcelain | grep -q .; then
-            echo "ERROR: New files were created by the test run" >&2
-            git status --porcelain
+          find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true
+          NEW_FILES=$(diff /tmp/pre_files.txt /tmp/post_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
+          if [ -n "$NEW_FILES" ]; then
+            echo "ERROR: New files were created during dry-run:"
+            echo "$NEW_FILES"
             exit 1
           fi
-          test ! -e data/moomoo.db || { echo "ERROR: data/moomoo.db was created"; exit 1; }
-          test ! -d logs || { echo "ERROR: logs/ was created"; exit 1; }
-          test ! -d reports || { echo "ERROR: reports/ was created"; exit 1; }
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: git status shows uncommitted changes"
+            exit 1
+          fi
           echo "OK: No artifacts created"

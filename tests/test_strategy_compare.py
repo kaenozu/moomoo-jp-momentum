@@ -70,17 +70,15 @@ class TestStrategyNames:
 
     def test_etf_rotation_only_etf(self):
         """etf_rotationはETFのみ対象"""
-        class Cfg:
-            def get(self, k, d=None):
-                u = {"min_trade_price": 500, "max_trade_price": 50000}
-                s = {"min_history_days": 25}
-                return {"universe": u}.get(k, s) if k in ("universe", "screening") else d
-            @property
-            def database_path(self): return ":memory:"
-            @property
-            def opend_host(self): return "127.0.0.1"
-            @property
-            def opend_port(self): return 11111
+        from src.config import Config
+
+        class Cfg(Config):
+            def __init__(self):
+                self.config_path = "dummy.yaml"
+                self._config = {
+                    "universe": {"min_trade_price": 500, "max_trade_price": 50000},
+                    "screening": {"min_history_days": 25},
+                }
 
         strategy = ETFRotationStrategy(Cfg())  # type: ignore[arg-type]  # test stub, not full Config
         assert strategy._is_etf("JP.2559") is True

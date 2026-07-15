@@ -93,14 +93,12 @@ class TestDailyCycle:
 
     def test_freshness_guard_stale(self):
         """DBがない場合、鮮度チェックがエラーになる"""
-        class TestConfig:
-            def get(self, key, default=None):
-                if key == "database":
-                    return {"path": "data/nonexistent_xyz.db"}
-                return default
-            @property
-            def database_path(self):
-                return "data/nonexistent_xyz.db"
+        from src.config import Config
+
+        class TestConfig(Config):
+            def __init__(self):
+                self.config_path = "dummy.yaml"
+                self._config = {"database": {"path": "data/nonexistent_xyz.db"}}
 
         guard = DataFreshnessGuard(TestConfig())  # type: ignore[arg-type]  # test stub, not full Config
         status = guard.check_freshness()

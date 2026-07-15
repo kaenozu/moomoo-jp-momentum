@@ -603,7 +603,7 @@ class TestPendingCashReservation:
         assert vtm.get_cash("default") == 100000
 
         # available cash = 100,000 - 20,000*buffer(1.02) = 79,600
-        available = vtm.get_available_cash("default")
+        available = vtm.get_available_cash("default")  # type: ignore[attr-defined]  # temporary: method added in PR #5
         assert available == 79600.0
 
     @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
@@ -638,14 +638,14 @@ class TestPendingCashReservation:
 
         # 予約額 = 1000 * 10 * 1.02 = 10,200
         # available = 50,000 - 10,200 = 39,800
-        assert vtm.get_available_cash("default") == 39800.0
+        assert vtm.get_available_cash("default") == 39800.0  # type: ignore[attr-defined]  # temporary: method added in PR #5
 
         # reserve_buffer_pct をカスタマイズ (5%)
         config._config["virtual_trade"] = {"reserve_buffer_pct": 5.0}
         vtm2 = VirtualTradeManager(config)
         # 予約額 = 1000 * 10 * 1.05 = 10,500
         # available = 50,000 - 10,500 = 39,500
-        assert vtm2.get_available_cash("default") == 39500.0
+        assert vtm2.get_available_cash("default") == 39500.0  # type: ignore[attr-defined]  # temporary: method added in PR #5
 
     @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
     def test_validate_buy_uses_available_cash(self, tmp_path):

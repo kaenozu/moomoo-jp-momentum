@@ -9,7 +9,7 @@
 
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -101,9 +101,9 @@ class VirtualReport:
     excess_vs_1306: Optional[float] = None
 
     # exit_reason別
-    exit_reason_stats: Optional[list[ExitReasonStats]] = None
+    exit_reason_stats: list[ExitReasonStats] = field(default_factory=list)
     # クローズ済みトレード
-    closed_trades: Optional[list[ClosedTrade]] = None
+    closed_trades: list[ClosedTrade] = field(default_factory=list)
 
 
 class VirtualReportGenerator:
