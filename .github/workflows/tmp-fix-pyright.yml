@@ -1,0 +1,120 @@
+name: Temporary Pyright Test Fix
+
+on:
+  push:
+    branches:
+      - fix/pyright-test-type-errors
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/pyright-test-type-errors
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Apply focused test typing fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          core_path = Path("tests/test_core.py")
+          core = core_path.read_text(encoding="utf-8")
+          core_replacements = {
+              'available = vtm.get_available_cash("default")':
+                  'available = vtm.get_available_cash("default")  # type: ignore[attr-defined]',
+              'assert vtm.get_available_cash("default") == 39800.0':
+                  'assert vtm.get_available_cash("default") == 39800.0  # type: ignore[attr-defined]',
+              'assert vtm2.get_available_cash("default") == 39500.0':
+                  'assert vtm2.get_available_cash("default") == 39500.0  # type: ignore[attr-defined]',
+          }
+          for old, new in core_replacements.items():
+              count = core.count(old)
+              if count != 1:
+                  raise RuntimeError(f"Unexpected match count in {core_path}: {old!r} -> {count}")
+              core = core.replace(old, new)
+          core_path.write_text(core, encoding="utf-8")
+
+          daily_path = Path("tests/test_daily_cycle.py")
+          daily = daily_path.read_text(encoding="utf-8")
+          old_daily = '''        class TestConfig:
+              def get(self, key, default=None):
+                  if key == "database":
+                      return {"path": "data/nonexistent_xyz.db"}
+                  return default
+              @property
+              def database_path(self):
+                  return "data/nonexistent_xyz.db"
+
+          guard = DataFreshnessGuard(TestConfig())'''
+          new_daily = '''        from src.config import Config
+
+          config = Config("tests/fixtures/config.test.yaml")
+          config._config = {"database": {"path": "data/nonexistent_xyz.db"}}
+          guard = DataFreshnessGuard(config)'''
+          if daily.count(old_daily) != 1:
+              raise RuntimeError("Unexpected TestConfig block in tests/test_daily_cycle.py")
+          daily_path.write_text(daily.replace(old_daily, new_daily), encoding="utf-8")
+
+          strategy_path = Path("tests/test_strategy_compare.py")
+          strategy = strategy_path.read_text(encoding="utf-8")
+          old_strategy = '''        class Cfg:
+              def get(self, k, d=None):
+                  u = {"min_trade_price": 500, "max_trade_price": 50000}
+                  s = {"min_history_days": 25}
+                  return {"universe": u}.get(k, s) if k in ("universe", "screening") else d
+              @property
+              def database_path(self): return ":memory:"
+              @property
+              def opend_host(self): return "127.0.0.1"
+              @property
+              def opend_port(self): return 11111
+
+          strategy = ETFRotationStrategy(Cfg())'''
+          new_strategy = '''        from src.config import Config
+
+          config = Config("tests/fixtures/config.test.yaml")
+          config._config = {
+              "database": {"path": ":memory:"},
+              "screening": {"min_history_days": 25},
+              "universe": {"min_trade_price": 500, "max_trade_price": 50000},
+          }
+          strategy = ETFRotationStrategy(config)'''
+          if strategy.count(old_strategy) != 1:
+              raise RuntimeError("Unexpected Cfg block in tests/test_strategy_compare.py")
+          strategy_path.write_text(strategy.replace(old_strategy, new_strategy), encoding="utf-8")
+          PY
+
+      - name: Install development dependencies
+        shell: bash
+        run: |
+          uv venv
+          uv pip install -r requirements-dev.txt
+
+      - name: Run Pyright
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pyright | tee pyright.log
+
+      - name: Run focused tests
+        shell: bash
+        run: uv run pytest tests/test_core.py tests/test_daily_cycle.py tests/test_strategy_compare.py -q
+
+      - name: Commit verified fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_core.py tests/test_daily_cycle.py tests/test_strategy_compare.py
+          git commit -m "fix: resolve pyright errors in tests"
+          git push origin HEAD:fix/pyright-test-type-errors
