@@ -1,0 +1,45 @@
+name: debug-pr46
+
+on:
+  push:
+    branches:
+      - agent/yfinance-daily-cycle-fallback
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  debug-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install production dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Capture fast test output
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests/ -m "not slow" -q > pytest.log 2>&1
+          echo "$?" > pytest.exit
+          set -e
+
+      - name: Upload pytest log
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr46-pytest-log
+          path: |
+            pytest.log
+            pytest.exit
+
+      - name: Enforce test result
+        shell: bash
+        run: test "$(cat pytest.exit)" = "0"
