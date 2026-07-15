@@ -1,4 +1,4 @@
-name: Temporary Exact Pyright Diagnostics
+name: Temporary Scoped Pyright Diagnostics
 
 on:
   push:
@@ -27,17 +27,17 @@ jobs:
           uv venv
           uv pip install -r requirements-dev.txt
 
-      - name: Run exact Pyright command and record output
+      - name: Run scoped Pyright command and record output
         shell: bash
         run: |
           set +e
-          uv run pyright > .pyright-validation-output.txt 2>&1
+          uv run pyright run_daily_cycle.py src/virtual_trade.py src/config.py tests/ > .pyright-scoped-output.txt 2>&1
           status=$?
-          cat .pyright-validation-output.txt
-          printf '\nexit_code=%s\n' "$status" >> .pyright-validation-output.txt
+          cat .pyright-scoped-output.txt
+          printf '\nexit_code=%s\n' "$status" >> .pyright-scoped-output.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .pyright-validation-output.txt
-          git commit -m "ci: record exact pyright diagnostics"
+          git add .pyright-scoped-output.txt
+          git commit -m "ci: record scoped pyright diagnostics"
           git push origin HEAD:fix/pyright-test-type-errors
           exit "$status"
