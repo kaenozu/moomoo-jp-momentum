@@ -9,21 +9,23 @@ import argparse
 import logging
 import sys
 import time
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from daily_update import add_relative_strength, save_benchmark_prices_from_indicators, save_indicators_to_db
 from src.alerts import AlertManager
-from src.config import load_config
+from src.config import Config, load_config
 from src.connection import OpenDConnection
 from src.data_freshness import DataFreshnessGuard
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
+from src.models import Symbol
 from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
-from daily_update import add_relative_strength, save_benchmark_prices_from_indicators, save_indicators_to_db
 
 log_dir = Path("logs")
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -38,9 +40,35 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_daily_cycle_symbols(
+    data_store: DataStore,
+    markets: Collection[str],
+) -> list[Symbol]:
+    """dry-runと実運用で共通の日次サイクル対象銘柄を取得する。"""
+    return data_store.get_enabled_symbols(
+        include_benchmarks=True,
+        markets=markets,
+    )
+
+
+def get_daily_cycle_settings(config: Config) -> tuple[Collection[str], int]:
+    """日次サイクルの市場と取得件数を設定から取得する。"""
+    markets = config.get("daily_cycle.markets", ["JP"])
+    fetch_mode = str(config.get("daily_cycle.fetch_mode", "latest")).lower()
+    latest_bar_count = int(config.get("daily_cycle.latest_bar_count", 30))
+
+    if fetch_mode != "latest":
+        raise ValueError("daily_cycle.fetch_modeはlatestのみ指定できます")
+    if latest_bar_count <= 0:
+        raise ValueError("daily_cycle.latest_bar_countは1以上にしてください")
+
+    return markets, latest_bar_count
+
+
 def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
     results: dict[str, int | bool] = {}
     config = load_config(config_path)
+    configured_markets, latest_bar_count = get_daily_cycle_settings(config)
 
     if not dry_run:
         opend_conn = OpenDConnection(config)
@@ -56,7 +84,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
 
     data_store = DataStore(config)
     data_store.sync_symbols_from_json(config.watchlist_file)
-    symbols = data_store.get_enabled_symbols(include_benchmarks=True)
+    symbols = get_daily_cycle_symbols(data_store, configured_markets)
     codes = [s.code for s in symbols]
     symbols_info = {s.code: s.name for s in symbols}
     benchmark_codes = {s.code for s in symbols if s.role == "benchmark"}
@@ -67,7 +95,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         data_dict = {}
         for i, code in enumerate(codes, 1):
             logger.info("[%d/%d] %s の日足を取得中...", i, len(codes), code)
-            df = quote_service.get_daily_klines_with_fallback(code, num=120, start="2025-01-01")
+            df = quote_service.get_daily_klines_latest_only(code, num=latest_bar_count)
             if not df.empty:
                 data_store.save_dataframe_to_daily_bars(df, code)
                 data_dict[code] = df
