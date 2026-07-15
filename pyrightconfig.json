@@ -1,0 +1,9 @@
+{
+  "include": [
+    "run_daily_cycle.py",
+    "src/virtual_trade.py",
+    "src/config.py",
+    "tests"
+  ],
+  "pythonVersion": "3.11"
+}

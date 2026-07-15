@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from datetime import datetime
+from src.config import Config
 from src.data_freshness import DataFreshnessGuard
 
 
@@ -92,15 +93,9 @@ class TestDailyCycle:
 
     def test_freshness_guard_stale(self):
         """DBがない場合、鮮度チェックがエラーになる"""
-        class TestConfig:
-            def get(self, key, default=None):
-                if key == "database":
-                    return {"path": "data/nonexistent_xyz.db"}
-                return default
-            @property
-            def database_path(self):
-                return "data/nonexistent_xyz.db"
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config = {"database": {"path": "data/nonexistent_xyz.db"}}
 
-        guard = DataFreshnessGuard(TestConfig())
+        guard = DataFreshnessGuard(config)
         status = guard.check_freshness()
         assert status.level == "error"
