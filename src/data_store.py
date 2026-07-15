@@ -10,6 +10,7 @@ SQLiteデータ保存モジュール
 import json
 import logging
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 from typing import Optional
 
@@ -136,18 +137,37 @@ class DataStore:
             json_path = self.config.watchlist_file
         return self.load_symbols_from_json(json_path)
 
-    def get_enabled_symbols(self, include_benchmarks: bool = False) -> list[Symbol]:
+    def get_enabled_symbols(
+        self,
+        include_benchmarks: bool = False,
+        markets: Collection[str] | None = None,
+    ) -> list[Symbol]:
         """有効な銘柄リストを取得する。"""
         query = """
             SELECT * FROM symbols
             WHERE enabled = 1
         """
+        params: list[str] = []
+
+        if markets is not None:
+            market_values = [markets] if isinstance(markets, str) else markets
+            normalized_markets = sorted({
+                market.strip().upper()
+                for market in market_values
+                if market.strip()
+            })
+            if not normalized_markets:
+                raise ValueError("marketsは空にできません")
+            placeholders = ", ".join("?" for _ in normalized_markets)
+            query += f" AND UPPER(market) IN ({placeholders})"
+            params.extend(normalized_markets)
+
         if not include_benchmarks:
             query += " AND COALESCE(role, 'trade_candidate') != 'benchmark'"
         query += " ORDER BY code"
 
         with self._get_connection() as conn:
-            rows = conn.execute(query).fetchall()
+            rows = conn.execute(query, params).fetchall()
 
         return [
             Symbol(

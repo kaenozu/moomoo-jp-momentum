@@ -19,6 +19,12 @@ quote:
     - "SNAPSHOT"
     - "K_DAY"
 
+daily_cycle:
+  markets:
+    - JP
+  fetch_mode: latest
+  latest_bar_count: 30
+
 trading_hours:
   enabled: true
   morning:
