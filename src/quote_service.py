@@ -2,7 +2,7 @@
 相場データ取得モジュール
 
 ファイルパス: src/quote_service.py
-何をするか: moomoo OpenDから日本株の相場データを取得する
+何をするか: moomoo OpenDまたはyfinanceから日本株の相場データを取得する
 なぜ存在するか: 行情データの取得ロジックを一元管理するため
 関連ファイル: connection.py, models.py, data_store.py
 
@@ -17,9 +17,10 @@ quota管理:
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, cast
 
 import pandas as pd
+import yfinance as yf
 from futu import (
     KLType,
     Market,
@@ -41,9 +42,163 @@ BATCH_SLEEP_SECONDS = 1.0
 class QuoteService:
     """相場データ取得サービス"""
 
-    def __init__(self, config: Config, quote_context: OpenQuoteContext):
+    def __init__(
+        self,
+        config: Config,
+        quote_context: Optional[OpenQuoteContext] = None,
+    ):
         self.config = config
-        self.ctx = quote_context
+        # yfinance専用利用ではOpenDコンテキストを渡さない。moomoo系メソッドは
+        # 従来どおりOpenQuoteContextを渡したインスタンスでのみ呼び出す。
+        self.ctx = cast(OpenQuoteContext, quote_context)
+
+    @staticmethod
+    def to_yfinance_ticker(code: str) -> str:
+        """moomooの日本株コードをYahoo Finance形式へ変換する。"""
+        if not code.startswith("JP."):
+            raise ValueError(f"日本株コードではありません: {code}")
+        local_code = code.removeprefix("JP.")
+        if not local_code.isdigit():
+            raise ValueError(f"日本株コード形式が不正です: {code}")
+        return f"{local_code}.T"
+
+    def get_daily_klines_yfinance(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+    ) -> pd.DataFrame:
+        """yfinanceから指定期間の日足を取得する。
+
+        ``start_date`` と ``end_date`` は両端を含む日付として扱う。
+        yfinanceのendは排他的なため、内部ではend_dateの翌日を指定する。
+        0円以下のOHLC、または直前の正常終値から100%以上変動した行は
+        異常値として除外する。
+        """
+        try:
+            ticker = self.to_yfinance_ticker(code)
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            logger.error("yfinance取得条件が不正: %s", exc)
+            return pd.DataFrame()
+
+        if start > end:
+            logger.error(
+                "yfinance取得期間が不正: %s (start=%s, end=%s)",
+                code,
+                start_date,
+                end_date,
+            )
+            return pd.DataFrame()
+
+        exclusive_end = (end + timedelta(days=1)).strftime("%Y-%m-%d")
+        logger.info(
+            "日足取得(yfinance): %s -> %s (start=%s, end=%s)",
+            code,
+            ticker,
+            start_date,
+            end_date,
+        )
+
+        try:
+            data = yf.Ticker(ticker).history(
+                start=start_date,
+                end=exclusive_end,
+                interval="1d",
+                auto_adjust=False,
+                actions=False,
+            )
+        except Exception as exc:
+            logger.error("日足取得失敗(yfinance): %s - %s", code, exc)
+            return pd.DataFrame()
+
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            logger.warning("日足取得結果が空(yfinance): %s", code)
+            return pd.DataFrame()
+
+        normalized = data.rename(
+            columns={
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+                "Volume": "volume",
+            }
+        ).copy()
+        required = ["open", "high", "low", "close", "volume"]
+        missing = [column for column in required if column not in normalized.columns]
+        if missing:
+            logger.error("yfinance応答に必要列がありません: %s - %s", code, missing)
+            return pd.DataFrame()
+
+        normalized = normalized.reset_index()
+        date_column = "Date" if "Date" in normalized.columns else normalized.columns[0]
+        normalized["time_key"] = pd.to_datetime(normalized[date_column]).dt.strftime(
+            "%Y-%m-%d"
+        )
+        normalized = normalized.sort_values("time_key").reset_index(drop=True)
+
+        accepted_rows: list[dict] = []
+        previous_close: Optional[float] = None
+        skipped = 0
+        for _, row in normalized.iterrows():
+            try:
+                open_price = float(row["open"])
+                high_price = float(row["high"])
+                low_price = float(row["low"])
+                close_price = float(row["close"])
+                volume = int(row["volume"]) if pd.notna(row["volume"]) else 0
+            except (TypeError, ValueError, OverflowError):
+                skipped += 1
+                continue
+
+            prices = (open_price, high_price, low_price, close_price)
+            if any(not pd.notna(price) or price <= 0 for price in prices):
+                logger.warning(
+                    "異常価格をスキップ(yfinance): %s %s OHLC=%s",
+                    code,
+                    row["time_key"],
+                    prices,
+                )
+                skipped += 1
+                continue
+
+            if previous_close is not None:
+                change = abs(close_price / previous_close - 1.0)
+                if change >= 1.0:
+                    logger.warning(
+                        "100%%以上の価格変動をスキップ(yfinance): %s %s %.2f%%",
+                        code,
+                        row["time_key"],
+                        change * 100,
+                    )
+                    skipped += 1
+                    continue
+
+            accepted_rows.append(
+                {
+                    "time_key": str(row["time_key"]),
+                    "open": open_price,
+                    "high": high_price,
+                    "low": low_price,
+                    "close": close_price,
+                    "volume": volume,
+                    "turnover": volume * close_price,
+                    "source": "yfinance",
+                    "turnover_source": "estimated",
+                }
+            )
+            previous_close = close_price
+
+        result = pd.DataFrame(accepted_rows)
+        logger.info(
+            "日足取得完了(yfinance): %s - %d件 (異常値スキップ=%d)",
+            code,
+            len(result),
+            skipped,
+        )
+        return result
 
     def get_stock_snapshot(self, codes: list[str]) -> pd.DataFrame:
         """複数銘柄のマーケットスナップショットを取得する"""
@@ -86,25 +241,27 @@ class QuoteService:
         return data
 
     def get_history_kl_quota(self) -> dict:
-        """履歴K-lineのquota状況を取得する。
-
-        Returns:
-            {
-                "used": int,        # 直近7日間に取得したユニーク銘柄数
-                "remaining": int,   # 新規銘柄の取得可能数
-                "total": int,       # used + remaining
-                "details": list,    # 取得済み銘柄の詳細リスト
-                "recent_codes": set, # 直近7日以内に取得済みの銘柄コード集合
-            }
-        """
+        """履歴K-lineのquota状況を取得する。"""
         ret, data = self.ctx.get_history_kl_quota(get_detail=True)
         if ret != RET_OK:
             logger.error("quota取得失敗: %s", data)
-            return {"used": 0, "remaining": 0, "total": 0, "details": [], "recent_codes": set()}
+            return {
+                "used": 0,
+                "remaining": 0,
+                "total": 0,
+                "details": [],
+                "recent_codes": set(),
+            }
 
         if not isinstance(data, tuple) or len(data) < 3:
             logger.error("quota応答形式が不正: %s", data)
-            return {"used": 0, "remaining": 0, "total": 0, "details": [], "recent_codes": set()}
+            return {
+                "used": 0,
+                "remaining": 0,
+                "total": 0,
+                "details": [],
+                "recent_codes": set(),
+            }
 
         used_quota, remain_quota, detail_list = data[0], data[1], data[2]
         details = list(detail_list) if detail_list else []
@@ -119,11 +276,7 @@ class QuoteService:
         }
 
     def is_code_fetchable(self, code: str, quota_info: dict) -> bool:
-        """指定銘柄がquota的に取得可能か判定する。
-
-        同じ銘柄を7日以内に再取得しても追加quotaは消費されないため、
-        recent_codesに含まれる銘柄は常に取得可能。
-        """
+        """指定銘柄がquota的に取得可能か判定する。"""
         if code in quota_info.get("recent_codes", set()):
             return True
         return quota_info.get("remaining", 0) > 0
@@ -215,13 +368,14 @@ class QuoteService:
         if not isinstance(data, pd.DataFrame):
             return pd.DataFrame()
 
-        # 取引時間中（市場が開いている時間帯）の場合は、当日の不完全足を除外
         if not data.empty:
-            from datetime import datetime, timezone
+            from datetime import timezone
+
             now_jst = datetime.now(timezone.utc).astimezone()
             hour = now_jst.hour
-            # 日本時間 9:00〜15:29 は取引時間中
-            is_trading_hours = (9 <= hour < 15) or (hour == 15 and now_jst.minute < 30)
+            is_trading_hours = (9 <= hour < 15) or (
+                hour == 15 and now_jst.minute < 30
+            )
             if is_trading_hours:
                 today = now_jst.strftime("%Y-%m-%d")
                 before = len(data)
@@ -229,7 +383,12 @@ class QuoteService:
                     tk = pd.to_datetime(data["time_key"])
                     data = data[tk.dt.strftime("%Y-%m-%d") != today]  # type: ignore[union-attr]
                 if len(data) < before:
-                    logger.info("取引時間中のため当日足を除外: %s (%d→%d件)", code, before, len(data))
+                    logger.info(
+                        "取引時間中のため当日足を除外: %s (%d→%d件)",
+                        code,
+                        before,
+                        len(data),
+                    )
 
         logger.info("直近日足取得完了: %s - %s件", code, len(data))
         return data  # type: ignore[return-type]
@@ -243,7 +402,9 @@ class QuoteService:
         """日足を取得する（get_cur_kline + request_history_kline のフォールバック付き）"""
         cur_df = self.get_cur_daily_klines(code, num=min(num, 30))
 
-        start_date = start or (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+        start_date = start or (datetime.now() - timedelta(days=180)).strftime(
+            "%Y-%m-%d"
+        )
         hist_df = self.get_daily_klines(code, num=num, start=start_date)
 
         if cur_df.empty and hist_df.empty:
@@ -255,7 +416,9 @@ class QuoteService:
 
         combined = pd.concat([cur_df, hist_df], ignore_index=True)
         combined = combined.drop_duplicates(subset=["time_key"], keep="first")
-        combined = combined.sort_values("time_key", ascending=False).reset_index(drop=True)
+        combined = combined.sort_values("time_key", ascending=False).reset_index(
+            drop=True
+        )
 
         logger.info("日足取得完了(フォールバック): %s - %s件", code, len(combined))
         return combined
@@ -281,12 +444,14 @@ class QuoteService:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
-        """request_history_klineのみで日足を取得する（購読枠を消費しない）。
-
-        get_cur_klineを使わないためmoomoo OpenDの購読枠制限に影響しない。
-        バックテスト用の大量バックフィルに最適。
-        """
-        logger.info("日足取得(history): %s (num=%s, start=%s, end=%s)", code, num, start, end)
+        """request_history_klineのみで日足を取得する（購読枠を消費しない）。"""
+        logger.info(
+            "日足取得(history): %s (num=%s, start=%s, end=%s)",
+            code,
+            num,
+            start,
+            end,
+        )
 
         if num <= MAX_KLINE_PER_REQUEST:
             ret, data, _ = self.ctx.request_history_kline(
@@ -333,20 +498,22 @@ class QuoteService:
         logger.info("日足取得完了(history): %s - %s件", code, len(all_data))
         return all_data
 
-    def get_daily_klines_latest_only(self, code: str, num: int = 30) -> pd.DataFrame:
-        """get_cur_klineで直近日足を取得する（subscribe→取得→unsubscribe）。
-
-        取得後に必ずunsubscribeすることで購読枠を消費しっぱなしにしない。
-        日次更新・当日データ取得向け。大量銘柄には不向き。
-        """
+    def get_daily_klines_latest_only(
+        self, code: str, num: int = 30
+    ) -> pd.DataFrame:
+        """get_cur_klineで直近日足を取得する（subscribe→取得→unsubscribe）。"""
         logger.info("日足取得(latest): %s (num=%s)", code, num)
 
-        ret, data = self.ctx.subscribe(code, [SubType.K_DAY], subscribe_push=False)
+        ret, data = self.ctx.subscribe(
+            code, [SubType.K_DAY], subscribe_push=False
+        )
         if ret != RET_OK:
             logger.warning("サブスクライブ失敗: %s - %s", code, data)
 
         try:
-            ret, data = self.ctx.get_cur_kline(code, num=num, ktype=KLType.K_DAY)
+            ret, data = self.ctx.get_cur_kline(
+                code, num=num, ktype=KLType.K_DAY
+            )
             if ret != RET_OK:
                 logger.error("直近日足取得失敗(latest): %s - %s", code, data)
                 return pd.DataFrame()
@@ -358,7 +525,9 @@ class QuoteService:
         if not data.empty:
             now_jst = datetime.now().astimezone()
             hour = now_jst.hour
-            is_trading_hours = (9 <= hour < 15) or (hour == 15 and now_jst.minute < 30)
+            is_trading_hours = (9 <= hour < 15) or (
+                hour == 15 and now_jst.minute < 30
+            )
             if is_trading_hours:
                 today = now_jst.strftime("%Y-%m-%d")
                 before = len(data)
@@ -366,7 +535,12 @@ class QuoteService:
                     tk = pd.to_datetime(data["time_key"])
                     data = data[tk.dt.strftime("%Y-%m-%d") != today]  # type: ignore[union-attr]
                 if len(data) < before:
-                    logger.info("取引時間中のため当日足を除外: %s (%d→%d件)", code, before, len(data))
+                    logger.info(
+                        "取引時間中のため当日足を除外: %s (%d→%d件)",
+                        code,
+                        before,
+                        len(data),
+                    )
 
         logger.info("日足取得完了(latest): %s - %s件", code, len(data))
         return data  # type: ignore[return-type]
@@ -382,21 +556,7 @@ class QuoteService:
         retry_count: int = 2,
         quota_aware: bool = True,
     ) -> dict[str, pd.DataFrame]:
-        """複数銘柄の日足をバッチ処理で安定取得する。
-
-        Args:
-            codes: 取得対象銘柄コード一覧
-            mode: "history"(request_history_kline) / "latest"(get_cur_kline) / "auto"
-            num: 取得日数
-            start: 取得開始日
-            end: 取得終了日（None=今日まで）
-            batch_size: 1バッチあたりの銘柄数
-            retry_count: 失敗時のリトライ回数
-            quota_aware: Trueの場合、履歴K-line quotaを確認してから取得
-
-        Returns:
-            成功した銘柄の {code: DataFrame} 辞書
-        """
+        """複数銘柄の日足をバッチ処理で安定取得する。"""
         if not codes:
             return {}
 
@@ -405,34 +565,50 @@ class QuoteService:
 
         total = len(codes)
         n_batches = (total + batch_size - 1) // batch_size
-        logger.info("バッチ日足取得: %s銘柄, mode=%s, batch_size=%s, %sバッチ, quota_aware=%s",
-                     total, mode, batch_size, n_batches, quota_aware)
+        logger.info(
+            "バッチ日足取得: %s銘柄, mode=%s, batch_size=%s, %sバッチ, quota_aware=%s",
+            total,
+            mode,
+            batch_size,
+            n_batches,
+            quota_aware,
+        )
 
         result: dict[str, pd.DataFrame] = {}
         failed: list[str] = []
         quota_skipped: list[str] = []
 
-        # historyモードでquota_awareの場合、事前にquotaを確認
         quota_info = None
         if mode == "history" and quota_aware:
             quota_info = self.get_history_kl_quota()
-            logger.info("quota状況: used=%d, remaining=%d, total=%d",
-                        quota_info["used"], quota_info["remaining"], quota_info["total"])
+            logger.info(
+                "quota状況: used=%d, remaining=%d, total=%d",
+                quota_info["used"],
+                quota_info["remaining"],
+                quota_info["total"],
+            )
 
         for batch_idx in range(0, total, batch_size):
             batch = codes[batch_idx : batch_idx + batch_size]
             batch_num = batch_idx // batch_size + 1
-            logger.info("  バッチ %d/%d: %s銘柄 処理開始", batch_num, n_batches, len(batch))
+            logger.info(
+                "  バッチ %d/%d: %s銘柄 処理開始",
+                batch_num,
+                n_batches,
+                len(batch),
+            )
 
             for idx_in_batch, code in enumerate(batch):
-                # quotaチェック: historyモードで新規銘柄かつquota不足の場合スキップ
                 if quota_info and mode == "history":
                     if not self.is_code_fetchable(code, quota_info):
-                        logger.info("    [%s] quota不足のためスキップ (remaining=%d)", code, quota_info["remaining"])
+                        logger.info(
+                            "    [%s] quota不足のためスキップ (remaining=%d)",
+                            code,
+                            quota_info["remaining"],
+                        )
                         quota_skipped.append(code)
                         continue
 
-                # Rate limit: 60 req/30sec → 0.5s最小間隔、リトライ時も同じ
                 if idx_in_batch > 0 or batch_num > 1:
                     time.sleep(BATCH_SLEEP_SECONDS)
 
@@ -442,22 +618,43 @@ class QuoteService:
                         time.sleep(BATCH_SLEEP_SECONDS * 2)
                     try:
                         if mode == "latest":
-                            df = self.get_daily_klines_latest_only(code, num=min(num, 30))
+                            df = self.get_daily_klines_latest_only(
+                                code, num=min(num, 30)
+                            )
                         else:
-                            df = self.get_daily_klines_history_only(code, num=num, start=start, end=end)
+                            df = self.get_daily_klines_history_only(
+                                code,
+                                num=num,
+                                start=start,
+                                end=end,
+                            )
 
                         if not df.empty:
                             result[code] = df
                             success = True
-                            # quota使用済み銘柄を更新
-                            if quota_info and code not in quota_info["recent_codes"]:
+                            if (
+                                quota_info
+                                and code not in quota_info["recent_codes"]
+                            ):
                                 quota_info["recent_codes"].add(code)
-                                quota_info["remaining"] = max(0, quota_info["remaining"] - 1)
+                                quota_info["remaining"] = max(
+                                    0, quota_info["remaining"] - 1
+                                )
                             break
-                        else:
-                            logger.warning("    [%s] データ空(attempt %d/%d)", code, attempt, retry_count + 1)
+                        logger.warning(
+                            "    [%s] データ空(attempt %d/%d)",
+                            code,
+                            attempt,
+                            retry_count + 1,
+                        )
                     except Exception as e:
-                        logger.error("    [%s] 例外: %s (attempt %d/%d)", code, e, attempt, retry_count + 1)
+                        logger.error(
+                            "    [%s] 例外: %s (attempt %d/%d)",
+                            code,
+                            e,
+                            attempt,
+                            retry_count + 1,
+                        )
 
                 if not success:
                     failed.append(code)
@@ -466,8 +663,12 @@ class QuoteService:
                 logger.info("  バッチ間待機: %s秒", BATCH_SLEEP_SECONDS)
                 time.sleep(BATCH_SLEEP_SECONDS)
 
-        logger.info("バッチ日足取得完了: 成功=%d, 失敗=%d, quota_skipped=%d",
-                     len(result), len(failed), len(quota_skipped))
+        logger.info(
+            "バッチ日足取得完了: 成功=%d, 失敗=%d, quota_skipped=%d",
+            len(result),
+            len(failed),
+            len(quota_skipped),
+        )
         if failed:
             logger.warning("  失敗銘柄一覧: %s", failed)
         if quota_skipped:
@@ -478,7 +679,7 @@ class QuoteService:
     def get_intraday_klines(
         self,
         code: str,
-        ktype: KLType = KLType.K_1M,  # type: ignore[arg-type]  # SDK stub: KLType is str enum
+        ktype: KLType = KLType.K_1M,  # type: ignore[arg-type]
         num: int = 100,
     ) -> pd.DataFrame:
         """分足ローソク足を取得する"""
@@ -486,7 +687,7 @@ class QuoteService:
 
         ret, data, _ = self.ctx.request_history_kline(
             code,
-            ktype=ktype,  # type: ignore[arg-type]  # SDK stub: KLType is str enum
+            ktype=ktype,  # type: ignore[arg-type]
             max_count=num,
         )
 
@@ -501,7 +702,7 @@ class QuoteService:
     def get_realtime_klines(
         self,
         code: str,
-        ktype: KLType = KLType.K_DAY,  # type: ignore[arg-type]  # SDK stub: KLType is str enum
+        ktype: KLType = KLType.K_DAY,  # type: ignore[arg-type]
         num: int = 10,
     ) -> pd.DataFrame:
         """リアルタイムローソク足（最新）を取得する"""
@@ -516,7 +717,7 @@ class QuoteService:
         ret, data = self.ctx.get_cur_kline(
             code,
             num=num,
-            ktype=ktype,  # type: ignore[arg-type]  # SDK stub: KLType is str enum
+            ktype=ktype,  # type: ignore[arg-type]
         )
 
         if ret != RET_OK:
@@ -529,15 +730,15 @@ class QuoteService:
 
     def get_stock_basicinfo(
         self,
-        market: Market = Market.JP,  # type: ignore[arg-type]  # SDK stub: Market is str enum
-        stock_type: SecurityType = SecurityType.STOCK,  # type: ignore[arg-type]  # SDK stub: SecurityType is str enum
+        market: Market = Market.JP,  # type: ignore[arg-type]
+        stock_type: SecurityType = SecurityType.STOCK,  # type: ignore[arg-type]
     ) -> pd.DataFrame:
         """銘柄情報を取得する"""
         logger.info("銘柄情報取得: market=%s", market)
 
         ret, data = self.ctx.get_stock_basicinfo(
-            market,  # type: ignore[arg-type]  # SDK stub: Market is str enum
-            stock_type,  # type: ignore[arg-type]  # SDK stub: SecurityType is str enum
+            market,  # type: ignore[arg-type]
+            stock_type,  # type: ignore[arg-type]
         )
 
         if ret != RET_OK:
