@@ -46,6 +46,31 @@
 2. 20 delisted銘柄を無効化 (enabled=0)
 3. P1検証作業開始
 
+## P1完了状況 (2026-07-15)
+
+### P1-1: Daily update dry-run ✅
+- quota確認: used=0, remaining=100
+- dry-run: 851 symbols identified, batch processing functional
+- ETF権限エラー: JP.1306で`request_history_kline`失敗 → `--mode latest`で対応可能
+
+### P1-2: Backtest robustness ✅
+- momentum戦略: +5.11% (max_positions=30)
+- 設定差異（max_positions）による結果違いのみ、ロジックにバグなし
+- 同じ設定で再実行すれば結果は再現可能
+
+### P1-3: Data bias audit ✅
+- サバイバーシップバイアス: PASS (`enabled=1`フィルタが全モジュールで適用中)
+- ルックアヘッドバイアス: PASS (全データアクセスが`date<=day`で制限)
+- データソース区別: PASS (moomoo=`actual`/yfinance=`estimated`でDBに明記)
+- yfinance推定誤差: 軽微（volume_ratio等の出来高指標に推定誤差あり）
+
+### P1-4: Result recording ✅
+- 詳細: `docs/validation/p1_validation_report.md`
+
+### P1 次のステップ
+1. 段階的比較計画に進む（100→200→300→366銘柄）
+2. moomoo quota回復後、不足29銘柄を補完
+
 ## 主な変更ファイル
 
 - `src/indicators.py`
@@ -87,7 +112,9 @@ moomoo OpenD / K-line 取得で以下の制限あり。
 - 履歴K-line枠 **100 stocks/week** → 未解決。366銘柄全取得には複数週かかる可能性あり
 - **現状**: moomoo(127) + yfinance(210) = 337/366 (92.1%) まで補完済み
 
-## 7/8以降の手順
+## 次の手順
+
+履順
 
 履歴K-line枠が回復したら、不足29銘柄をmoomooで補完する。
 
