@@ -24,22 +24,28 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Capture fast test output
+      - name: Capture validation output
         shell: bash
         run: |
           set +e
           python -m pytest tests/ -m "not slow" -q > pytest.log 2>&1
           echo "$?" > pytest.exit
+          pyright run_daily_cycle.py src/virtual_trade.py src/config.py tests/ > pyright.log 2>&1
+          echo "$?" > pyright.exit
           set -e
 
-      - name: Upload pytest log
+      - name: Upload validation logs
         uses: actions/upload-artifact@v4
         with:
-          name: pr46-pytest-log
+          name: pr46-validation-logs
           path: |
             pytest.log
             pytest.exit
+            pyright.log
+            pyright.exit
 
-      - name: Enforce test result
+      - name: Enforce validation result
         shell: bash
-        run: test "$(cat pytest.exit)" = "0"
+        run: |
+          test "$(cat pytest.exit)" = "0"
+          test "$(cat pyright.exit)" = "0"
