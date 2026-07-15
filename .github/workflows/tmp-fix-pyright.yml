@@ -1,4 +1,4 @@
-name: Temporary Pyright Comment Fix
+name: Temporary Exact Pyright Validation
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  apply-fix:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Check out branch
@@ -18,27 +18,25 @@ jobs:
           ref: fix/pyright-test-type-errors
           fetch-depth: 0
 
-      - name: Use Pyright diagnostic ignores
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install development dependencies
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          uv venv
+          uv pip install -r requirements-dev.txt
 
-          path = Path("tests/test_core.py")
-          text = path.read_text(encoding="utf-8")
-          old = "# type: ignore[attr-defined]"
-          new = "# pyright: ignore[reportAttributeAccessIssue]"
-          count = text.count(old)
-          if count != 3:
-              raise RuntimeError(f"Expected 3 mypy-style ignores, found {count}")
-          path.write_text(text.replace(old, new), encoding="utf-8")
-          PY
+      - name: Run exact Pyright command
+        shell: bash
+        run: uv run pyright
 
-      - name: Commit and push fix
+      - name: Record successful validation
         shell: bash
         run: |
+          printf 'uv run pyright: 0 errors\n' > .pyright-validation-ok
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/test_core.py
-          git commit -m "fix: use pyright diagnostic ignores"
+          git add .pyright-validation-ok
+          git commit -m "ci: record exact pyright validation"
           git push origin HEAD:fix/pyright-test-type-errors
