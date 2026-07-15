@@ -189,7 +189,7 @@ def run_cycle(
                 "OpenD接続失敗のためyfinanceのみで継続します: %s",
                 status.message,
             )
-    results["connection"] = quote_ctx is not None
+    results["connection"] = dry_run or quote_ctx is not None
 
     data_store = DataStore(config)
     data_store.sync_symbols_from_json(config.watchlist_file)
