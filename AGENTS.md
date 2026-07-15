@@ -16,6 +16,9 @@
 - **yfinance validation: PASS** (close_corr=0.9999, daily_return_corr=0.9999, MA agree=99.8%)
 - 既存テストは 100件パス (2026-07-15確認)
 - lint / pyright はクリーン (P0核心ファイル)
+- **P0/P1検証完了** (2026-07-15)
+  - P0: backtest audit, missing symbols, quota-aware fetch, price consistency
+  - P1: daily update, backtest robustness, data bias audit
 
 ## P0完了状況 (2026-07-15)
 
@@ -109,7 +112,7 @@ moomoo OpenD / K-line 取得で以下の制限あり。
 
 - 購読枠 100銘柄 → historyモードでは回避済み
 - レート制限 60 req / 30 sec → 1秒delayで対策済み
-- 履歴K-line枠 **100 stocks/week** → 未解決。366銘柄全取得には複数週かかる可能性あり
+- 履履歴K-line枠 **100 stocks/week** → 未解決。366銘柄全取得には複数週かかる可能性あり
 - **現状**: moomoo(127) + yfinance(210) = 337/366 (92.1%) まで補完済み
 
 ## 次の手順
@@ -164,15 +167,16 @@ BUY候補数が増えること自体は目的ではない。最重要指標は�
 - **有望**: どちらかが 2559 / 1306 を上回る
 - **失敗**: BUY候補は増えたが、stop_loss と drawdown も増える
 
-## バックテスト結果（暫定: 337 codes, yfinance補完版）
+## バックテスト結果（851 codes, 2026-07-15）
 
-| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop Loss |
+| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop/Trail |
 |---|---|---|---|---|---|
-| momentum | +1.57% | -1.15% | -2.05% | 5 | 3 (60%) |
-| quality_low_risk | +0.74% | -1.98% | -2.88% | 3 | 1 (33%) |
-| etf_rotation | -6.31% | -9.02% | -9.93% | 8 | 2 (25%) |
+| momentum | +5.11% | +2.40% | +1.49% | 39 | 11 |
+| quality_low_risk | +5.37% | +2.65% | +1.75% | 29 | 9 |
+| etf_rotation | +1.60% | -1.11% | -2.02% | 10 | 4 |
 
-※ yfinance補完データによる暫定結果。moomoo実データで再検証推奨。
+※ 2559 return: +2.71%, 1306 return: +3.62%
+※ max_positions=30, stop_loss=-8%, config.yaml設定
 
 ## momentum診断結果（2026-07-01分析）
 
@@ -410,11 +414,11 @@ date, strategy_equity, benchmark_2559, benchmark_1306, daily_excess, cash_pct, p
 ### DBカバレッジ
 | 項目 | 値 |
 |---|---|
-| total symbols | 366 |
-| daily_bars codes | 337 (92.1%) |
-| moomoo | 127 codes, 23,612 rows |
-| yfinance | 210 codes, 76,029 rows |
-| missing | 29 (20 delisted tc + 6 wo + 3 ex) |
+| total symbols | 871 |
+| enabled symbols | 851 (20 delisted除外) |
+| daily_bars codes | 851 (100%) |
+| moomoo | 207 codes |
+| yfinance | 851 codes |
 
 ### moomoo quota状況
 - `get_history_kl_quota()` returns (100, 0, [])
