@@ -14,8 +14,37 @@
 - **indicators: 337 codes, 最新日付=2026-07-01**
 - **BUY_CANDIDATE: 21件** (337 indicators, 2026-07-01)
 - **yfinance validation: PASS** (close_corr=0.9999, daily_return_corr=0.9999, MA agree=99.8%)
-- 既存テストは 50件パス
-- lint / pyright はクリーン
+- 既存テストは 100件パス (2026-07-15確認)
+- lint / pyright はクリーン (P0核心ファイル)
+
+## P0完了状況 (2026-07-15)
+
+### P0-1: Backtest accounting audit ✅
+- DD計算は正しい (stored_dd == calc_dd)
+- `peak_equity` によるproper tracking確認
+
+### P0-2: Missing symbol classification ✅
+- 20銘柄すべてdelisted（永続的利用不可）
+- 対象: JP.1884, JP.1890, JP.2651, JP.3250, JP.3938, JP.4185, JP.4541, JP.4551, JP.4581, JP.4921, JP.6355, JP.6641, JP.7518, JP.8270, JP.8355, JP.8527, JP.8905, JP.9062, JP.9437, JP.9719
+
+### P0-3: Quota-aware fetch ✅
+- `src/quote_service.py`: `get_history_kl_quota()`, `is_code_fetchable()`, quota-aware batch fetch
+- `daily_update.py`: `--quota-check`, `--no-quota-aware` オプション追加
+
+### P0-4: Price consistency ✅
+- JP 127銘柄すべて遷移点10%以内（正常な日次変動）
+- moomoo: 2025-01-06~2026-07-02, yfinance: 2025-01-06~2026-07-09
+- 日付範囲が重複していないため、遷移点比較のみ実施
+
+### 検証結果
+- Tests: 100 passed, 3 skipped
+- Ruff: P0核心ファイル クリーン
+- Pyright: 0 errors
+
+### 次のステップ
+1. P0変更をcommit/push（チェックポイント）
+2. 20 delisted銘柄を無効化 (enabled=0)
+3. P1検証作業開始
 
 ## 主な変更ファイル
 

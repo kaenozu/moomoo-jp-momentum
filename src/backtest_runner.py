@@ -357,10 +357,15 @@ class BacktestRunner:
                 idle_bench_prev = bm_today
 
             # ── Phase 5: equity curve更新 ──
-            pos_value = sum(
-                (self._bars_up_to(p["code"], day).iloc[0]["close"] if not self._bars_up_to(p["code"], day).empty else 0) * p["quantity"]
-                for p in self._get_all_positions() if p["quantity"] > 0
-            )
+            pos_value = 0.0
+            for p in self._get_all_positions():
+                if p["quantity"] <= 0:
+                    continue
+                bars = self._bars_up_to(p["code"], day)
+                if bars.empty:
+                    logger.warning("valuation price missing: %s on %s", p["code"], day)
+                    continue
+                pos_value += float(bars.iloc[0]["close"]) * p["quantity"]
             total_equity = self.cash + pos_value
 
             bm_2559 = self._benchmark_value(BM2559, day)

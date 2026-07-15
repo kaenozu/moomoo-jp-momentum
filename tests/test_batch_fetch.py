@@ -21,18 +21,11 @@ from src.quote_service import QuoteService
 from src.config import Config
 
 
-class DummyConfig:
-    def get(self, key_path, default=None):
-        return default
-    @property
-    def opend_host(self):
-        return "127.0.0.1"
-    @property
-    def opend_port(self):
-        return 11111
-    @property
-    def opend_timeout(self):
-        return 10
+class DummyConfig(Config):
+    """Configを継承したテスト用設定。ファイル読み込みを行わない。"""
+    def __init__(self):
+        self.config_path = "dummy.yaml"
+        self._config = {}
 
 
 @pytest.fixture
@@ -42,6 +35,8 @@ def mock_ctx():
     ctx.subscribe.return_value = (0, "ok")
     # unsubscribe returns OK
     ctx.unsubscribe.return_value = (0, "ok")
+    # quota check returns default values
+    ctx.get_history_kl_quota.return_value = (0, (0, 100, []))
     return ctx
 
 

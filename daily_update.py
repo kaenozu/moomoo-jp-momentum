@@ -64,6 +64,7 @@ def fetch_and_save_daily_klines(
     mode: str = "auto",
     start: str | None = DEFAULT_START,
     batch_size: int = 80,
+    quota_aware: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """日足を取得・保存する（バッチ処理＋リトライ対応）。
 
@@ -115,6 +116,7 @@ def fetch_and_save_daily_klines(
                 start=start if effective_mode == "history" else None,
                 batch_size=len(batch),
                 retry_count=2,
+                quota_aware=quota_aware,
             )
 
             # 保存
@@ -138,7 +140,7 @@ def fetch_and_save_daily_klines(
 def save_benchmark_prices_from_indicators(data_store: DataStore, indicators_df: pd.DataFrame, benchmark_codes: set[str]) -> int:
     if indicators_df.empty or not benchmark_codes:
         return 0
-    rows = indicators_df[indicators_df["code"].isin(benchmark_codes)]
+    rows = indicators_df[indicators_df["code"].isin(list(benchmark_codes))]
     count = 0
     with sqlite3.connect(data_store.db_path) as conn:
         for _, row in rows.iterrows():
@@ -209,6 +211,8 @@ def main() -> int:
                         help="取得モード: history(request_history_kline), latest(get_cur_kline), auto(自動判別)")
     parser.add_argument("--start", default=None, help="取得開始日 (YYYY-MM-DD、デフォルト: 2025-01-01)")
     parser.add_argument("--batch-size", type=int, default=80, help="1バッチあたりの銘柄数 (デフォルト: 80)")
+    parser.add_argument("--quota-check", action="store_true", help="取得前にquota状況を確認して終了")
+    parser.add_argument("--no-quota-aware", action="store_true", help="quota確認なしで取得（従来動作）")
     args = parser.parse_args()
 
     effective_start = args.start or "2025-01-01"
@@ -265,6 +269,20 @@ def main() -> int:
             return 1
 
         quote_service = QuoteService(config, quote_ctx)
+
+        # quota確認モード
+        if args.quota_check:
+            quota = quote_service.get_history_kl_quota()
+            print("\n=== 履歴K-line Quota 状況 ===")
+            print(f"  使用済み: {quota['used']}銘柄")
+            print(f"  残り: {quota['remaining']}銘柄")
+            print(f"  合計: {quota['total']}銘柄")
+            if quota["recent_codes"]:
+                print(f"\n  直近7日以内に取得以内に取得済みの銘柄 ({len(quota['recent_codes'])}件):")
+                for code in sorted(quota["recent_codes"]):
+                    print(f"    {code}")
+            return 0
+
         print("\n" + "-" * 60)
         print("日足データ取得・保存")
         print("-" * 60)
@@ -275,6 +293,7 @@ def main() -> int:
             mode=args.mode,
             start=effective_start,
             batch_size=args.batch_size,
+            quota_aware=not args.no_quota_aware,
         )
         if not data_dict:
             print("[ERROR] データが取得できませんでした")
