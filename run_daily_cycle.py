@@ -12,7 +12,7 @@ import time
 from collections.abc import Collection
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import pandas as pd
 
@@ -130,10 +130,15 @@ def fetch_daily_bars(
 
         if not moomoo_df.empty:
             if "time_key" in moomoo_df.columns:
-                moomoo_df = moomoo_df[
-                    pd.to_datetime(moomoo_df["time_key"]).dt.strftime("%Y-%m-%d")
+                date_mask = (
+                    pd.to_datetime(moomoo_df["time_key"])
+                    .dt.strftime("%Y-%m-%d")
                     <= target_date
-                ]
+                )
+                moomoo_df = cast(
+                    pd.DataFrame,
+                    moomoo_df.loc[date_mask].copy(),
+                )
             if not moomoo_df.empty:
                 return moomoo_df, "moomoo", False
 
