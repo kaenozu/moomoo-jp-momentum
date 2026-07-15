@@ -74,6 +74,24 @@
 1. 段階的比較計画に進む（100→200→300→366銘柄）
 2. moomoo quota回復後、不足29銘柄を補完
 
+## P2完了状況 (2026-07-15)
+
+### P2-0: Baseline Record ✅
+- 設定固定: max_positions=30, stop_loss=-8%, cost=0
+- 詳細: `docs/validation/p2_baseline.md`
+
+### P2-1: Extended Period Backtest ✅
+- 短期(40日): momentum +5.11%, quality_low_risk +5.37% → 2559/1306を上回る
+- 長期(120日): momentum +14.77%, quality_low_risk +12.93% → 2559/1306に大幅劣後
+- **結論**: 強気相場では個別株戦略が指数に追いつかない
+- 詳細: `docs/validation/p2_validation_report.md`
+
+### P2 次のステップ
+1. 月別分解分析（どの月で負けたか）
+2. momentum / quality_low_risk の重複分析
+3. 戦略改善の方向性検討
+4. ペーパートレード開始
+
 ## 主な変更ファイル
 
 - `src/indicators.py`
@@ -134,14 +152,18 @@ python universe_diagnostics.py --date 2026-07-08 --csv
 python historical_backtest.py --from 2026-05-21 --to 2026-06-30 --strategy all --csv
 ```
 
-## 段階的比較計画
+## 段階的比較計画（終了）
 
-履歴K-line枠の制限があるため、以下の段階で比較する。
+旧計画「100 → 200 → 300 → 366銘柄」の段階的比較は終了した。
 
-- 100銘柄版
-- 200銘柄版
-- 300銘柄版
-- 366銘柄完全版
+2026-07-15時点:
+- symbols: 871
+- enabled: 851
+- daily_bars coverage: 851 / 851（100%）
+- delisted等: 20銘柄を無効化済み
+
+段階的なデータカバレッジ拡張は完了したため、
+今後は期間拡張、パラメータ堅牢性、フォワード検証を優先する。
 
 各段階で以下を記録する。
 
@@ -169,14 +191,30 @@ BUY候補数が増えること自体は目的ではない。最重要指標は�
 
 ## バックテスト結果（851 codes, 2026-07-15）
 
+### 短期（2026-05-21 ~ 06-30, 40日）
+
 | Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop/Trail |
 |---|---|---|---|---|---|
 | momentum | +5.11% | +2.40% | +1.49% | 39 | 11 |
 | quality_low_risk | +5.37% | +2.65% | +1.75% | 29 | 9 |
 | etf_rotation | +1.60% | -1.11% | -2.02% | 10 | 4 |
 
-※ 2559 return: +2.71%, 1306 return: +3.62%
-※ max_positions=30, stop_loss=-8%, config.yaml設定
+### 長期（2026-01-01 ~ 06-30, 120日）
+
+| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop/Trail |
+|---|---|---|---|---|---|
+| momentum | +14.77% | -22.81% | -26.01% | 203 | 86 |
+| quality_low_risk | +12.93% | -24.65% | -27.85% | 215 | 66 |
+| etf_rotation | +16.00% | -21.58% | -24.78% | 28 | 6 |
+
+### ベンチマーク
+- 2559: +2.71% (短期), +37.58% (長期)
+- 1306: +3.62% (短期), +40.78% (長期)
+
+### 重要な発見
+- 短期では2559/1306を上回るが、長期では大幅に劣後
+- 2026年上半期は強気相場で、個別株モメンタムでは指数に追いつかず
+- 詳細: `docs/validation/p2_validation_report.md`
 
 ## momentum診断結果（2026-07-01分析）
 
