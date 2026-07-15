@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 import sqlite3
 from datetime import datetime
+from src.config import Config
 from src.models import CREATE_TABLES_SQL
 
 
@@ -61,19 +62,23 @@ class TestVirtualTradeIntegration:
         conn.commit()
         conn.close()
 
-        class TestConfig:
-            def get(self, key, default=None):
-                if key == "database":
-                    return {"path": str(db_path)}
-                if key == "virtual_trade":
-                    return {"enabled": True, "initial_cash": 100000, "max_position_amount": 50000, "max_total_positions": 5, "max_position_per_symbol": 1, "market_fill_mode": "next_day_open", "commission": 0, "slippage_bps": 10}
-                if key == "universe":
-                    return {"min_trade_price": 500, "max_trade_price": 50000}
-                return default
-            @property
-            def database_path(self): return str(db_path)
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config = {
+            "database": {"path": str(db_path)},
+            "virtual_trade": {
+                "enabled": True,
+                "initial_cash": 100000,
+                "max_position_amount": 50000,
+                "max_total_positions": 5,
+                "max_position_per_symbol": 1,
+                "market_fill_mode": "next_day_open",
+                "commission": 0,
+                "slippage_bps": 10,
+            },
+            "universe": {"min_trade_price": 500, "max_trade_price": 50000},
+        }
 
-        mgr = VirtualTradeManager(TestConfig())
+        mgr = VirtualTradeManager(config)
         assert mgr.place_order("default", "JP.2559", "BUY", 1, "MARKET_SIM") is None
         assert mgr.place_order("default", "JP.7203", "BUY", 1, "MARKET_SIM") is None
 
