@@ -22,7 +22,12 @@ from typing import Optional
 import pandas as pd
 
 from .config import Config
+from .execution_engine import ExecutionEngine, PositionState
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
+from .run_fingerprint import (
+    collect_backtest_run_metadata,
+    ensure_backtest_run_metadata_columns,
+)
 from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
@@ -68,6 +73,10 @@ class BacktestRunner:
         universe_cfg = config.get("universe", {})
         self.min_trade_price = universe_cfg.get("min_trade_price", 500)
         self.max_trade_price = universe_cfg.get("max_trade_price", 20000)
+        self.execution_engine = ExecutionEngine(
+            commission=float(self.commission),
+            max_total_positions=int(self.max_total_positions),
+        )
 
     def _benchmark_code(self) -> str:
         return self.config.get("signals.relative_strength.benchmark_code", BM1306)
@@ -121,10 +130,34 @@ class BacktestRunner:
         return code in {str(item) for item in configured}
 
     def create_run(self, strategy_name: str, start_date: str, end_date: str) -> int:
+        market = str(self.config.get("backtest.market", "JP")).upper()
         with self._conn() as conn:
+            ensure_backtest_run_metadata_columns(conn)
+            metadata = collect_backtest_run_metadata(
+                conn, self.config, start_date, end_date, market
+            )
             cur = conn.execute(
-                "INSERT INTO backtest_runs (strategy_name, start_date, end_date, initial_cash) VALUES (?, ?, ?, ?)",
-                (strategy_name, start_date, end_date, self.initial_cash),
+                """
+                INSERT INTO backtest_runs (
+                    strategy_name, start_date, end_date, initial_cash, market,
+                    git_commit, config_hash, universe_hash, data_snapshot_hash,
+                    data_max_date, engine_version, adjustment_policy
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    strategy_name,
+                    start_date,
+                    end_date,
+                    self.initial_cash,
+                    metadata.market,
+                    metadata.git_commit,
+                    metadata.config_hash,
+                    metadata.universe_hash,
+                    metadata.data_snapshot_hash,
+                    metadata.data_max_date,
+                    metadata.engine_version,
+                    metadata.adjustment_policy,
+                ),
             )
             self.run_id = cur.lastrowid
         if self.run_id is None:
@@ -202,54 +235,95 @@ class BacktestRunner:
             pending_orders = [o for o in pending_orders if o.fill_date != day]
 
             for order in today_fills:
-                if order.side == "BUY":
-                    cost = order.fill_price * order.quantity + self.commission
-                    if cost > self.cash + 1e-9:
-                        logger.warning(
-                            "BUY fill skipped for insufficient cash: %s cost=%.2f cash=%.2f",
-                            order.code, cost, self.cash,
+                current_row = self._get_position(order.code)
+                current_position = PositionState(
+                    quantity=int(current_row["quantity"]) if current_row else 0,
+                    avg_cost=float(current_row["avg_cost"]) if current_row else 0.0,
+                    realized_pl=float(current_row["realized_pl"] or 0.0)
+                    if current_row
+                    else 0.0,
+                )
+                try:
+                    transition = self.execution_engine.apply_fill(
+                        self.cash,
+                        current_position,
+                        order.side,
+                        order.fill_price,
+                        order.quantity,
+                    )
+                except ValueError as exc:
+                    if order.side == "BUY":
+                        reserved = self.execution_engine.required_cash(
+                            order.fill_price, order.quantity
                         )
-                        self.reserved_cash = max(0.0, self.reserved_cash - cost)
-                        continue
-                    with self._conn() as conn:
-                        cur = conn.execute(
-                            "INSERT INTO backtest_orders (run_id, strategy_name, code, side, quantity, order_type, status, signal_date) VALUES (?,?,?,?,?,?,?,?)",
-                            (self.run_id, strategy_name, order.code, "BUY", order.quantity, "MARKET_SIM", "FILLED", order.signal_date),
-                        )
-                        oid = cur.lastrowid
-                        conn.execute(
-                            "INSERT INTO backtest_fills (run_id, order_id, strategy_name, code, side, quantity, price, filled_at, fill_mode) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (self.run_id, oid, strategy_name, order.code, "BUY", order.quantity, order.fill_price, day, "next_day_open"),
-                        )
-                        conn.execute(
-                            "INSERT OR REPLACE INTO backtest_positions (run_id, strategy_name, code, quantity, avg_cost, realized_pl) VALUES (?,?,?,?,?,0)",
-                            (self.run_id, strategy_name, order.code, order.quantity, order.fill_price),
-                        )
-                    trailing_highs[order.code] = order.fill_price
-                    self.cash -= cost
-                    self.reserved_cash = max(0.0, self.reserved_cash - cost)
-                    fills_processed += 1
+                        self.reserved_cash = max(0.0, self.reserved_cash - reserved)
+                    logger.warning(
+                        "%s fill skipped: %s %s", order.side, order.code, exc
+                    )
+                    continue
 
-                elif order.side == "SELL":
-                    with self._conn() as conn:
-                        cur = conn.execute(
-                            "INSERT INTO backtest_orders (run_id, strategy_name, code, side, quantity, order_type, status, signal_date, exit_reason) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (self.run_id, strategy_name, order.code, "SELL", order.quantity, "MARKET_SIM", "FILLED", order.signal_date, order.exit_reason),
-                        )
-                        oid = cur.lastrowid
+                with self._conn() as conn:
+                    cur = conn.execute(
+                        "INSERT INTO backtest_orders (run_id, strategy_name, code, side, quantity, order_type, status, signal_date, exit_reason) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (
+                            self.run_id, strategy_name, order.code, order.side,
+                            order.quantity, "MARKET_SIM", "FILLED",
+                            order.signal_date, order.exit_reason,
+                        ),
+                    )
+                    oid = cur.lastrowid
+                    conn.execute(
+                        "INSERT INTO backtest_fills (run_id, order_id, strategy_name, code, side, quantity, price, filled_at, fill_mode) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (
+                            self.run_id, oid, strategy_name, order.code, order.side,
+                            order.quantity, order.fill_price, day,
+                            "next_day_open" if order.side == "BUY" else "exit",
+                        ),
+                    )
+                    if current_row:
                         conn.execute(
-                            "INSERT INTO backtest_fills (run_id, order_id, strategy_name, code, side, quantity, price, filled_at, fill_mode) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (self.run_id, oid, strategy_name, order.code, "SELL", order.quantity, order.fill_price, day, "exit"),
+                            """
+                            UPDATE backtest_positions
+                            SET quantity=?, avg_cost=?, realized_pl=?
+                            WHERE run_id=? AND strategy_name=? AND code=?
+                            """,
+                            (
+                                transition.position.quantity,
+                                transition.position.avg_cost,
+                                transition.position.realized_pl,
+                                self.run_id,
+                                strategy_name,
+                                order.code,
+                            ),
                         )
-                        realized_pl = (order.fill_price - order.avg_cost) * order.quantity
+                    elif transition.position.quantity > 0:
                         conn.execute(
-                            "UPDATE backtest_positions SET quantity=0, realized_pl=realized_pl + ? WHERE run_id=? AND strategy_name=? AND code=?",
-                            (realized_pl, self.run_id, strategy_name, order.code),
+                            """
+                            INSERT INTO backtest_positions
+                            (run_id, strategy_name, code, quantity, avg_cost, realized_pl)
+                            VALUES (?,?,?,?,?,?)
+                            """,
+                            (
+                                self.run_id,
+                                strategy_name,
+                                order.code,
+                                transition.position.quantity,
+                                transition.position.avg_cost,
+                                transition.position.realized_pl,
+                            ),
                         )
-                    self.cash += order.fill_price * order.quantity - self.commission
+
+                self.cash = transition.cash
+                if order.side == "BUY":
+                    reserved = self.execution_engine.required_cash(
+                        order.fill_price, order.quantity
+                    )
+                    self.reserved_cash = max(0.0, self.reserved_cash - reserved)
+                    trailing_highs[order.code] = order.fill_price
+                else:
                     trailing_highs.pop(order.code, None)
                     exits_generated += 1
-                    fills_processed += 1
+                fills_processed += 1
 
             # ── Phase 2: exit判定（既存ポジションのみ） ──
             positions = self._get_all_positions()
@@ -333,7 +407,9 @@ class BacktestRunner:
             # 注文可能数 = max_total_positions - (約定済みポジション数 + pending BUY数)
             current_pos_count = self._count_positions()
             pending_buy_count = sum(1 for o in pending_orders if o.side == "BUY")
-            slots_available = self.max_total_positions - current_pos_count - pending_buy_count
+            slots_available = self.execution_engine.available_slots(
+                current_pos_count, pending_buy_count
+            )
 
             valid_pairs.sort(
                 key=lambda pair: (
@@ -355,7 +431,9 @@ class BacktestRunner:
                     break
                 code = sym["code"]
 
-                available_cash = self.cash - self.reserved_cash
+                available_cash = self.execution_engine.available_cash(
+                    self.cash, self.reserved_cash
+                )
                 if ind.close and ind.close > available_cash:
                     continue
 
@@ -370,7 +448,7 @@ class BacktestRunner:
 
                 fill_price = next_open * (1 + self.slippage_bps / 10000)
                 qty = max(1, int(target_pos_value / fill_price))
-                cost = fill_price * qty + self.commission
+                cost = self.execution_engine.required_cash(fill_price, qty)
                 if cost > available_cash:
                     continue
 
@@ -391,7 +469,9 @@ class BacktestRunner:
                 bm_today = self._benchmark_value(idle_code, day)
                 if bm_today is not None and idle_bench_prev is not None:
                     daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                    investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
+                    investable_idle_cash = self.execution_engine.available_cash(
+                        self.cash, self.reserved_cash
+                    )
                     self.cash += investable_idle_cash * daily_bm_ret
                 idle_bench_prev = bm_today
 

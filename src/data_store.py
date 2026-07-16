@@ -88,6 +88,16 @@ class DataStore:
         add_missing("signals", {
             "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
         })
+        add_missing("backtest_runs", {
+            "market": "TEXT NOT NULL DEFAULT 'JP'",
+            "git_commit": "TEXT",
+            "config_hash": "TEXT NOT NULL DEFAULT ''",
+            "universe_hash": "TEXT NOT NULL DEFAULT ''",
+            "data_snapshot_hash": "TEXT NOT NULL DEFAULT ''",
+            "data_max_date": "TEXT",
+            "engine_version": "TEXT NOT NULL DEFAULT 'legacy'",
+            "adjustment_policy": "TEXT NOT NULL DEFAULT 'split_adjustment_service'",
+        })
 
     def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
         """旧UNIQUE(code,date)をUNIQUE(strategy_name,code,date)へ移行する。"""

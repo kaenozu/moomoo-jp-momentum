@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import Config
+from .execution_engine import ExecutionEngine, PositionState
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,10 @@ class VirtualTradeManager:
         universe_config = config.get("universe", {})
         self.min_trade_price = float(universe_config.get("min_trade_price", 500))
         self.max_trade_price = float(universe_config.get("max_trade_price", 20000))
+        self.execution_engine = ExecutionEngine(
+            commission=self.commission,
+            max_total_positions=self.max_total_positions,
+        )
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=5.0)
@@ -160,7 +165,9 @@ class VirtualTradeManager:
                 else self._latest_close(conn, row["code"], ref_date)
             )
             if price is not None and price > 0:
-                reserved += price * int(row["quantity"]) + self.commission
+                reserved += self.execution_engine.required_cash(
+                    price, int(row["quantity"])
+                )
         return reserved
 
     def get_available_cash(
@@ -173,7 +180,7 @@ class VirtualTradeManager:
             reserved = self._pending_buy_reservation_with_conn(
                 conn, strategy_name, as_of_date
             )
-        return max(0.0, cash - reserved)
+        return self.execution_engine.available_cash(cash, reserved)
 
     def _validate_buy_order(
         self,
@@ -195,7 +202,7 @@ class VirtualTradeManager:
             return False, "参照価格を取得できません"
         if not self.min_trade_price <= ref_price <= self.max_trade_price:
             return False, "価格が取引可能範囲外です"
-        order_amount = ref_price * quantity + self.commission
+        order_amount = self.execution_engine.required_cash(ref_price, quantity)
         if ref_price * quantity > self.max_position_amount:
             return False, "注文金額が1銘柄上限を超えています"
 
@@ -229,14 +236,14 @@ class VirtualTradeManager:
             """,
             (strategy_name,),
         ).fetchone()[0])
-        if held_count + pending_count >= self.max_total_positions:
+        if self.execution_engine.available_slots(held_count, pending_count) <= 0:
             return False, "保有・未約定銘柄数上限に達しています"
 
         cash = self._get_cash_with_conn(conn, strategy_name, submitted_at)
         reserved = self._pending_buy_reservation_with_conn(
             conn, strategy_name, submitted_at
         )
-        if order_amount > max(0.0, cash - reserved):
+        if order_amount > self.execution_engine.available_cash(cash, reserved):
             return False, "未約定注文を含めると仮想cashが不足しています"
         return True, ""
 
@@ -566,7 +573,9 @@ class VirtualTradeManager:
             fill_price = round(float(fill_price), 1)
 
             if order.side == "BUY":
-                required_cash = fill_price * order.quantity + self.commission
+                required_cash = self.execution_engine.required_cash(
+                    fill_price, order.quantity
+                )
                 actual_cash = self._get_cash_with_conn(
                     conn, order.strategy_name, filled_at
                 )
@@ -671,54 +680,23 @@ class VirtualTradeManager:
         pos = conn.execute(
             """
             SELECT * FROM virtual_positions
-            WHERE strategy_name = ? AND code = ?
-            """,
-            (order.strategy_name, order.code),
-        ).fetchone()
-
-        gross = fill.price * fill.quantity
-        if order.side == "BUY":
-            if pos:
-                new_quantity = int(pos["quantity"]) + fill.quantity
-                new_avg_cost = (float(pos["avg_cost"]) * int(pos["quantity"]) + gross) / new_quantity
-                conn.execute(
-                    """
-                    UPDATE virtual_positions
-                    SET quantity = ?, avg_cost = ?, market_price = ?, market_value = ?,
-                        unrealized_pl = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (new_quantity, new_avg_cost, fill.price, fill.price * new_quantity, (fill.price - new_avg_cost) * new_quantity, now, pos["id"]),
-                )
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO virtual_positions
-                    (strategy_name, code, quantity, avg_cost, market_price, market_value,
-                     unrealized_pl, realized_pl, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
-                    """,
-                    (order.strategy_name, order.code, fill.quantity, fill.price, fill.price, gross, now),
-                )
-            self._apply_cash_delta(conn, order.strategy_name, fill.filled_at, -(gross + self.commission))
-
-        elif order.side == "SELL" and pos:
-            current_qty = int(pos["quantity"])
-            sell_qty = min(fill.quantity, current_qty)
-            new_quantity = current_qty - sell_qty
-            realized_pl = (fill.price - float(pos["avg_cost"])) * sell_qty - self.commission
-            market_value = fill.price * new_quantity
-            unrealized_pl = (fill.price - float(pos["avg_cost"])) * new_quantity if new_quantity > 0 else 0
-            conn.execute(
-                """
-                UPDATE virtual_positions
-                SET quantity = ?, market_price = ?, market_value = ?, unrealized_pl = ?,
-                    realized_pl = COALESCE(realized_pl, 0) + ?, updated_at = ?
-                WHERE id = ?
+            WHERE (strategy_name, code, quantity, avg_cost, market_price, market_value,
+                 unrealized_pl, realized_pl, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (new_quantity, fill.price, market_value, unrealized_pl, realized_pl, now, pos["id"]),
+                (
+                    order.strategy_name,
+                    order.code,
+                    transition.position.quantity,
+                    transition.position.avg_cost,
+                    fill.price,
+                    market_value,
+                    unrealized_pl,
+                    transition.position.realized_pl,
+                    now,
+                ),
             )
-            self._apply_cash_delta(conn, order.strategy_name, fill.filled_at, gross - self.commission)
+        self._set_cash(conn, order.strategy_name, fill.filled_at, transition.cash)
 
     def get_strategy_performance(self, strategy_name: str = "default") -> dict:
         cash = self.get_cash(strategy_name)

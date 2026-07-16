@@ -1,6 +1,6 @@
 ..........................................sss........................... [ 57%]
 ......................................................                   [100%]
-123 passed, 3 skipped, 1 deselected in 25.65s
+123 passed, 3 skipped, 1 deselected in 26.66s
 F401 [*] `.execution_engine.PositionState` imported but unused
   --> src/virtual_trade.py:16:48
    |
