@@ -23,6 +23,7 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
+from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
 
@@ -52,6 +53,7 @@ class BacktestRunner:
     def __init__(self, config: Config):
         self.config = config
         self.db_path = Path(config.database_path)
+        self.split_adjustments = SplitAdjustmentService(self.db_path)
         self.run_id: Optional[int] = None
         self.strategy_name = ""
         self.initial_cash = 100000
@@ -96,7 +98,11 @@ class BacktestRunner:
                 "FROM daily_bars WHERE code = ? AND date <= ? ORDER BY date DESC LIMIT ?",
                 conn, params=[code, date, limit],
             )
-        return df
+        return self.split_adjustments.apply_to_dataframe(
+            df,
+            code,
+            date_column="time_key",
+        )
 
     def _next_open_bar(self, code: str, after_date: str) -> Optional[tuple[str, float]]:
         with self._conn() as conn:
@@ -104,7 +110,11 @@ class BacktestRunner:
                 "SELECT date, open FROM daily_bars WHERE code = ? AND date > ? ORDER BY date LIMIT 1",
                 (code, after_date),
             ).fetchone()
-            return (str(row[0]), float(row[1])) if row and row[1] is not None else None
+        if not row or row[1] is None:
+            return None
+        fill_date = str(row[0])
+        adjusted_open = self.split_adjustments.adjust_price(code, fill_date, row[1])
+        return (fill_date, adjusted_open) if adjusted_open is not None else None
 
     def _is_etf(self, code: str) -> bool:
         return code.startswith("JP.13") or code.startswith("JP.25")
@@ -447,10 +457,12 @@ class BacktestRunner:
     def _benchmark_value(self, code: str, date: str) -> Optional[float]:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
+                "SELECT date, close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
                 (code, date),
             ).fetchone()
-            return float(row[0]) if row and row[0] is not None else None
+        if not row or row[1] is None:
+            return None
+        return self.split_adjustments.adjust_price(code, str(row[0]), row[1])
 
     def _calculate_run_stats(self) -> dict[str, Optional[float]]:
         with self._conn() as conn:

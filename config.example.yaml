@@ -18,6 +18,12 @@ quote:
     - "SNAPSHOT"
     - "K_DAY"
 
+daily_cycle:
+  markets:
+    - JP
+  fetch_mode: latest
+  latest_bar_count: 30
+
 trading_hours:
   enabled: true
   morning:
@@ -75,11 +81,11 @@ scoring:
 
 benchmark:
   primary:
-    code: "JP.2559"
-    name: "MAXIS全世界株式（オール・カントリー）"
+    code: "JP.1306"
+    name: "TOPIX連動ETF"
   secondary:
-    - code: "JP.1306"
-      name: "TOPIX連動ETF"
+    - code: "JP.2559"
+      name: "MAXIS全世界株式（オール・カントリー）"
     - code: "JP.1320"
       name: "日経平均連動ETF"
     - code: "JP.2558"
@@ -99,7 +105,7 @@ report:
 app:
   title: "Moomoo Strategy Monitor"
   timezone: "Asia/Tokyo"
-  default_benchmark: "JP.2559"
+  default_benchmark: "JP.1306"
 
 alerts:
   enabled: false
@@ -136,6 +142,14 @@ scheduler:
       enabled: true
       cron: "30 16 * * 5"
 
+# 履歴バックテスト設定
+backtest:
+  max_positions: 5
+  stop_loss_pct: 5.0
+  idle_cash_allocation:
+    enabled: true
+    benchmark_code: "JP.1306"
+
 # アプリ内仮想ペーパートレード設定
 # moomoo APIには注文を送信しない。SQLite上の仮想売買のみ。
 virtual_trade:
@@ -150,7 +164,7 @@ virtual_trade:
   commission: 0
   slippage_bps: 10
   tax_enabled: false
-  default_benchmark: "JP.2559"
+  default_benchmark: "JP.1306"
 
 # moomoo OpenAPIのSIMULATE取引はJP市場では使わない
 paper_trade:

@@ -1,32 +1,9 @@
 {
   "include": [
     "run_daily_cycle.py",
-    "screen_candidates.py",
-    "src/benchmark.py",
-    "src/connection.py",
-    "src/performance.py",
-    "src/relative_strength.py",
-    "src/screener.py",
-    "src/strategies/etf_rotation.py",
-    "src/strategies/quality_low_risk.py",
-    "src/strategy_runner.py",
-    "src/trade_log.py",
-    "src/virtual_report.py",
-    "tests/test_batch_fetch.py",
-    "tests/test_daily_cycle.py",
-    "tests/test_regressions.py",
-    "tests/test_strategy_compare.py",
-    "tests/test_virtual_integration.py",
-    "tests/test_virtual_report.py"
+    "src/virtual_trade.py",
+    "src/config.py",
+    "tests"
   ],
-  "exclude": [
-    ".venv",
-    "data",
-    "reports",
-    "logs",
-    "scripts",
-    "**/__pycache__"
-  ],
-  "pythonVersion": "3.11",
-  "typeCheckingMode": "basic"
+  "pythonVersion": "3.11"
 }

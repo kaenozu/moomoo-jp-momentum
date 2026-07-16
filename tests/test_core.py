@@ -244,7 +244,7 @@ class TestDailyBarSource:
     def test_save_dataframe_preserves_source_columns(self, tmp_path):
         db_path = tmp_path / "source.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
+        config._config = {"database": {"path": str(db_path)}}
         store = DataStore(config)
 
         df = pd.DataFrame([{
@@ -275,7 +275,7 @@ class TestBacktestRunStats:
     def test_run_stats_use_peak_drawdown_and_closed_trade_pnl(self, tmp_path):
         db_path = tmp_path / "backtest.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
+        config._config = {"database": {"path": str(db_path)}}
         DataStore(config)
 
         runner = BacktestRunner(config)
@@ -324,7 +324,7 @@ class TestBacktestRunStats:
 def _setup_bt_db(db_path, start="2026-01-05", end="2026-01-09"):
     """バックテスト用の最小DBを構築するヘルパー"""
     config = Config("tests/fixtures/config.test.yaml")
-    config._config["database"] = {"path": str(db_path)}
+    config._config = {"database": {"path": str(db_path)}}
     DataStore(config)
 
     with sqlite3.connect(db_path) as conn:
@@ -521,8 +521,12 @@ class TestIdleCashOrder:
         """idle cash benchmark上昇時にequity_curveのtotal_equityも上がる"""
         db_path = tmp_path / "idle.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
-        config._config["backtest"] = {"idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"}}
+        config._config = {
+            "database": {"path": str(db_path)},
+            "backtest": {
+                "idle_cash_allocation": {"enabled": True, "benchmark_code": "JP.2559"},
+            },
+        }
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -569,7 +573,7 @@ class TestPendingCashReservation:
         """pending BUY注文がある場合、利用可能cashが減少すること"""
         db_path = tmp_path / "vtm_pending.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
+        config._config = {"database": {"path": str(db_path)}}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -603,7 +607,7 @@ class TestPendingCashReservation:
         assert vtm.get_cash("default") == 100000
 
         # available cash = 100,000 - 20,000*buffer(1.02) = 79,600
-        available = vtm.get_available_cash("default")  # type: ignore[attr-defined]  # temporary: method added in PR #5
+        available = vtm.get_available_cash("default")  # pyright: ignore[reportAttributeAccessIssue]
         assert available == 79600.0
 
     @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
@@ -611,7 +615,7 @@ class TestPendingCashReservation:
         """reserve_buffer_pct=2.0のとき、予約額が latest_close * qty * 1.02 になること"""
         db_path = tmp_path / "vtm_buffer.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
+        config._config = {"database": {"path": str(db_path)}}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -638,21 +642,21 @@ class TestPendingCashReservation:
 
         # 予約額 = 1000 * 10 * 1.02 = 10,200
         # available = 50,000 - 10,200 = 39,800
-        assert vtm.get_available_cash("default") == 39800.0  # type: ignore[attr-defined]  # temporary: method added in PR #5
+        assert vtm.get_available_cash("default") == 39800.0  # pyright: ignore[reportAttributeAccessIssue]
 
         # reserve_buffer_pct をカスタマイズ (5%)
         config._config["virtual_trade"] = {"reserve_buffer_pct": 5.0}
         vtm2 = VirtualTradeManager(config)
         # 予約額 = 1000 * 10 * 1.05 = 10,500
         # available = 50,000 - 10,500 = 39,500
-        assert vtm2.get_available_cash("default") == 39500.0  # type: ignore[attr-defined]  # temporary: method added in PR #5
+        assert vtm2.get_available_cash("default") == 39500.0  # pyright: ignore[reportAttributeAccessIssue]
 
     @pytest.mark.skip(reason="requires get_available_cash() from PR #5: fix/virtual-trade-cash-reservation")
     def test_validate_buy_uses_available_cash(self, tmp_path):
         """_validate_buy_orderがavailable cash(buffer込み)を使って判定すること"""
         db_path = tmp_path / "vtm_validate.db"
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
+        config._config = {"database": {"path": str(db_path)}}
         DataStore(config)
 
         with sqlite3.connect(db_path) as conn:
@@ -782,9 +786,14 @@ class TestBacktestCashFlowIntegration:
     @staticmethod
     def _build_db(db_path):
         config = Config("tests/fixtures/config.test.yaml")
-        config._config["database"] = {"path": str(db_path)}
-        config._config["screening"] = {"min_turnover": 50_000_000}
-        config._config["backtest"] = {"max_positions": 5, "idle_cash_allocation": {"enabled": False}}
+        config._config = {
+            "database": {"path": str(db_path)},
+            "screening": {"min_turnover": 50_000_000},
+            "backtest": {
+                "max_positions": 5,
+                "idle_cash_allocation": {"enabled": False},
+            },
+        }
         DataStore(config)
 
         bars = []

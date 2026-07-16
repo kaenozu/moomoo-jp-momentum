@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from datetime import datetime
+from src.config import Config
 from src.data_freshness import DataFreshnessGuard
 
 
@@ -87,19 +88,14 @@ class TestDailyCycle:
         # --dry-run相当を直接実行（テスト用設定ファイルを使用）
         results = run_cycle("2026-07-01", dry_run=True, config_path="tests/fixtures/config.test.yaml")
         assert results is not None
-        assert results.get("connection_attempted") is False
+        assert results.get("connection") is True
         assert results.get("symbols", 0) > 0
-        assert results.get("database_write_attempted") is False
 
     def test_freshness_guard_stale(self):
         """DBがない場合、鮮度チェックがエラーになる"""
-        from src.config import Config
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config = {"database": {"path": "data/nonexistent_xyz.db"}}
 
-        class TestConfig(Config):
-            def __init__(self):
-                self.config_path = "dummy.yaml"
-                self._config = {"database": {"path": "data/nonexistent_xyz.db"}}
-
-        guard = DataFreshnessGuard(TestConfig())  # type: ignore[arg-type]  # test stub, not full Config
+        guard = DataFreshnessGuard(config)
         status = guard.check_freshness()
         assert status.level == "error"

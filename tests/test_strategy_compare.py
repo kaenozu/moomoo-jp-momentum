@@ -72,15 +72,14 @@ class TestStrategyNames:
         """etf_rotationはETFのみ対象"""
         from src.config import Config
 
-        class Cfg(Config):
-            def __init__(self):
-                self.config_path = "dummy.yaml"
-                self._config = {
-                    "universe": {"min_trade_price": 500, "max_trade_price": 50000},
-                    "screening": {"min_history_days": 25},
-                }
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config = {
+            "database": {"path": ":memory:"},
+            "screening": {"min_history_days": 25},
+            "universe": {"min_trade_price": 500, "max_trade_price": 50000},
+        }
 
-        strategy = ETFRotationStrategy(Cfg())  # type: ignore[arg-type]  # test stub, not full Config
+        strategy = ETFRotationStrategy(config)
         assert strategy._is_etf("JP.2559") is True
         assert strategy._is_etf("JP.7203") is False
 
