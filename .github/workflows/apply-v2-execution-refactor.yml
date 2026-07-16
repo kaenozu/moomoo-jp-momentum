@@ -1,0 +1,58 @@
+name: apply-v2-execution-refactor
+
+on:
+  push:
+    branches:
+      - agent/v2-execution-reproducibility
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v2-execution-reproducibility
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Reconstruct and apply source refactor
+        run: |
+          cat scripts/.v2_refactor.part1.b64 \
+              scripts/.v2_refactor.part2.b64 \
+              scripts/.v2_refactor.part3.b64 \
+            | base64 --decode > /tmp/apply_v2_execution_refactor.py
+          python /tmp/apply_v2_execution_refactor.py
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Validate implementation
+        run: |
+          python -m pytest tests/ -m 'not slow' -q
+          ruff check src/ tests/ run_daily_cycle.py
+          pyright
+
+      - name: Remove temporary migration assets
+        run: |
+          rm scripts/.v2_refactor.part1.b64
+          rm scripts/.v2_refactor.part2.b64
+          rm scripts/.v2_refactor.part3.b64
+          rm .github/workflows/apply-v2-execution-refactor.yml
+
+      - name: Commit validated implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests scripts .github/workflows
+          git commit -m 'refactor: share execution accounting and fingerprint backtests'
+          git push origin HEAD:agent/v2-execution-reproducibility
