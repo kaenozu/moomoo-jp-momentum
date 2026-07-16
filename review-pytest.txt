@@ -1,0 +1,451 @@
+................................F.......sss...........F...F...FF........ [ 60%]
+................................................                         [100%]
+=================================== FAILURES ===================================
+_______ TestDailyBarSource.test_save_dataframe_preserves_source_columns ________
+
+self = <test_core.TestDailyBarSource object at 0x7fc34eb96e10>
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_save_dataframe_preserves_0')
+
+    def test_save_dataframe_preserves_source_columns(self, tmp_path):
+        db_path = tmp_path / "source.db"
+        config = Config("tests/fixtures/config.test.yaml")
+        config._config = {"database": {"path": str(db_path)}}
+        store = DataStore(config)
+    
+        df = pd.DataFrame([{
+            "time_key": "2026-07-01",
+            "open": 100,
+            "high": 110,
+            "low": 90,
+            "close": 105,
+            "volume": 1000,
+            "turnover": 105000,
+            "source": "yfinance",
+            "turnover_source": "estimated",
+        }])
+    
+>       assert store.save_dataframe_to_daily_bars(df, "JP.0001") == 1
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_core.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/data_store.py:350: in save_dataframe_to_daily_bars
+    return self.save_daily_bars_batch(bars)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <src.data_store.DataStore object at 0x7fc34e79ca10>
+bars = [DailyBar(code='JP.0001', date='2026-07-01', open=100, high=110, low=90, close=105, volume=1000, turnover=105000, source='yfinance', turnover_source='estimated')]
+
+    def save_daily_bars_batch(self, bars: list[DailyBar]) -> int:
+        if not bars:
+            return 0
+        sql = """
+            INSERT OR REPLACE INTO daily_bars
+            (code, date, open, high, low, close, volume, turnover, source, turnover_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = [
+            (
+                b.code, b.date, b.open, b.high, b.low, b.close,
+                b.volume, b.turnover, b.source, b.turnover_source,
+            )
+            for b in bars
+        ]
+        with self._get_connection() as conn:
+>           conn.executemany(sql, params)
+E           sqlite3.IntegrityError: FOREIGN KEY constraint failed
+
+src/data_store.py:302: IntegrityError
+__________________ test_dry_run_and_live_use_same_jp_targets ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_dry_run_and_live_use_same0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc34e6bf650>
+
+    def test_dry_run_and_live_use_same_jp_targets(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """dry-runと実運用が同じJP対象を選び、latest取得だけを使う。"""
+        config_path = _write_test_config(tmp_path)
+    
+        class OpenDConnectionStub:
+            def __init__(self, config: Config):
+                self.config = config
+    
+            def connect(self) -> SimpleNamespace:
+                return SimpleNamespace(
+                    connected=True,
+                    message="",
+                    quote_context=object(),
+                )
+    
+            def disconnect(self) -> None:
+                return None
+    
+        class QuoteServiceStub:
+            requested: list[tuple[str, int]] = []
+    
+            def __init__(self, config: Config, quote_context: object):
+                self.config = config
+                self.quote_context = quote_context
+    
+            def get_daily_klines_latest_only(
+                self,
+                code: str,
+                num: int = 30,
+            ) -> pd.DataFrame:
+                self.requested.append((code, num))
+                return pd.DataFrame(
+                    [
+                        {
+                            "time_key": "2026-07-14",
+                            "open": 100.0,
+                            "high": 101.0,
+                            "low": 99.0,
+                            "close": 100.5,
+                            "volume": 1000,
+                            "turnover": 100500.0,
+                        }
+                    ]
+                )
+    
+        class FreshnessGuardStub:
+            def __init__(self, config: Config):
+                self.config = config
+    
+            def check_freshness(self) -> SimpleNamespace:
+                return SimpleNamespace(
+                    level="ok",
+                    days_stale=0,
+                    message="",
+                )
+    
+        class ScreenerStub:
+            def __init__(self, config: Config):
+                self.config = config
+    
+            def screen_candidates(self, date: str) -> list:
+                return []
+    
+            def save_signals_to_db(self, candidates: list) -> int:
+                return 0
+    
+        class VirtualTradeManagerStub:
+            def __init__(self, config: Config):
+                self.config = config
+    
+            def get_cash(self, strategy_name: str) -> float:
+                return 100000.0
+    
+            def process_fills(self, strategy_name: str, target_date: str) -> list:
+                return []
+    
+            def generate_exits(self, strategy_name: str, target_date: str) -> list:
+                return []
+    
+            def update_market_prices(
+                self,
+                strategy_name: str,
+                target_date: str,
+            ) -> int:
+                return 0
+    
+            def save_equity_curve(
+                self,
+                strategy_name: str,
+                target_date: str,
+            ) -> None:
+                return None
+    
+        class AlertManagerStub:
+            def __init__(self, config: Config):
+                self.config = config
+    
+            def run_all_checks(self) -> list:
+                return []
+    
+        monkeypatch.setattr(run_daily_cycle, "OpenDConnection", OpenDConnectionStub)
+        monkeypatch.setattr(run_daily_cycle, "QuoteService", QuoteServiceStub)
+        monkeypatch.setattr(run_daily_cycle, "DataFreshnessGuard", FreshnessGuardStub)
+        monkeypatch.setattr(run_daily_cycle, "Screener", ScreenerStub)
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "VirtualTradeManager",
+            VirtualTradeManagerStub,
+        )
+        monkeypatch.setattr(run_daily_cycle, "AlertManager", AlertManagerStub)
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "calculate_indicators_batch",
+            lambda data_dict, symbols_info: [],
+        )
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "indicators_to_dataframe",
+            lambda indicators: pd.DataFrame(),
+        )
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "add_relative_strength",
+            lambda indicators_df, benchmark_code: indicators_df,
+        )
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "save_indicators_to_db",
+            lambda data_store, indicators_df: 0,
+        )
+        monkeypatch.setattr(
+            run_daily_cycle,
+            "save_benchmark_prices_from_indicators",
+            lambda data_store, indicators_df, benchmark_codes: 0,
+        )
+    
+        dry_run_results = run_daily_cycle.run_cycle(
+            "2026-07-14",
+            dry_run=True,
+            config_path=str(config_path),
+        )
+>       live_results = run_daily_cycle.run_cycle(
+            "2026-07-14",
+            dry_run=False,
+            config_path=str(config_path),
+        )
+
+tests/test_daily_cycle_markets.py:237: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target_date = '2026-07-14', dry_run = False
+config_path = '/tmp/pytest-of-runner/pytest-0/test_dry_run_and_live_use_same0/config.yaml'
+allow_stale = False
+
+    def run_cycle(
+        target_date: str,
+        dry_run: bool = False,
+        config_path: str = "config.yaml",
+        allow_stale: bool = False,
+    ) -> dict:
+        config = load_config(config_path)
+        configured_markets, latest_bar_count = get_daily_cycle_settings(config)
+        normalized_markets = {str(item).upper() for item in configured_markets}
+    
+        if dry_run:
+            watchlist_path = Path(config.watchlist_file)
+            try:
+                raw_symbols = json.loads(watchlist_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"watchlistを読み込めません: {exc}") from exc
+            if not isinstance(raw_symbols, list):
+                raise RuntimeError("watchlistのトップレベルがlistではありません")
+            selected = [
+                item for item in raw_symbols
+                if isinstance(item, dict)
+                and item.get("enabled", True)
+                and str(item.get("market", "JP")).upper() in normalized_markets
+            ]
+            benchmark_count = sum(
+                1 for item in selected if item.get("role") == "benchmark"
+            )
+            if benchmark_count == 0:
+                raise RuntimeError("日次対象にbenchmark が0件です")
+            return {
+                "connection_attempted": False,
+                "database_write_attempted": False,
+                "virtual_trade_enabled": bool(config.get("virtual_trade.enabled", True)),
+                "symbols": len(selected),
+                "benchmarks": benchmark_count,
+            }
+    
+        results: dict[str, int | bool] = {}
+        connection = OpenDConnection(config)
+        try:
+            status = connection.connect()
+            if not status.connected:
+                raise RuntimeError(f"OpenD接続失敗: {status.message}")
+            results["connection"] = True
+            store = DataStore(config)
+            store.sync_symbols_from_json(config.watchlist_file)
+            symbols = get_daily_cycle_symbols(store, configured_markets)
+            codes = [symbol.code for symbol in symbols]
+            names = {symbol.code: symbol.name for symbol in symbols}
+            benchmarks = {symbol.code for symbol in symbols if symbol.role == "benchmark"}
+            results["symbols"] = len(codes)
+    
+            quote_service = QuoteService(config, status.quote_context)
+            updated = 0
+            for index, code in enumerate(codes, 1):
+                logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
+                frame = quote_service.get_daily_klines_latest_only(
+                    code, num=latest_bar_count
+                )
+                if not frame.empty:
+                    store.save_dataframe_to_daily_bars(frame, code)
+                    updated += 1
+            results["daily_bars"] = updated
+    
+            history_limit = max(120, latest_bar_count)
+            data_dict = {}
+            for code in codes:
+                history = store.get_daily_bars(
+                    code, end_date=target_date, limit=history_limit
+                )
+                if not history.empty:
+                    history = history.sort_values("date").rename(
+                        columns={"date": "time_key"}
+                    )
+                    data_dict[code] = history
+            if data_dict:
+                indicators = calculate_indicators_batch(data_dict, names)
+                indicators_df = indicators_to_dataframe(indicators)
+                benchmark_code = config.get(
+                    "signals.relative_strength.benchmark_code", "JP.1306"
+                )
+                indicators_df = add_relative_strength(indicators_df, benchmark_code)
+                results["indicators"] = save_indicators_to_db(store, indicators_df)
+                results["benchmark_prices"] = save_benchmark_prices_from_indicators(
+                    store, indicators_df, benchmarks
+                )
+            else:
+                results["indicators"] = 0
+                results["benchmark_prices"] = 0
+    
+            freshness = DataFreshnessGuard(config).check_freshness()
+            if freshness.level == "error":
+                raise SystemError(f"データ鮮度エラー: {freshness.message}")
+            if freshness.level == "warning" and not allow_stale:
+                raise SystemError(
+                    f"データが古いため処理を停止します: {freshness.message}"
+                )
+            if freshness.level == "warning":
+                logger.warning("古いデータで明示続行します: %s", freshness.message)
+    
+            screener = Screener(config)
+            candidates = screener.screen_candidates(date=target_date)
+            results["signals"] = screener.save_signals_to_db(candidates)
+    
+            manager = VirtualTradeManager(config)
+            threshold = config.get("virtual_trade.score_threshold_for_order", 70)
+>           available_cash = manager.get_available_cash("default", target_date)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'VirtualTradeManagerStub' object has no attribute 'get_available_cash'
+
+run_daily_cycle.py:175: AttributeError
+__________________ test_history_pagination_forwards_page_key ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_history_pagination_forwar0')
+
+    def test_history_pagination_forwards_page_key(tmp_path: Path) -> None:
+        config = make_config(tmp_path)
+        context = MagicMock()
+        first = pd.DataFrame({"time_key": ["2026-07-01"], "close": [100.0]})
+        second = pd.DataFrame({"time_key": ["2026-07-02"], "close": [101.0]})
+        context.request_history_kline.side_effect = [
+            (0, first, "next-key"),
+            (0, second, None),
+        ]
+        service = QuoteService(config, context)
+        result = service.get_daily_klines("JP.1306", num=2)
+>       assert result["time_key"].tolist() == ["2026-07-01", "2026-07-02"]
+E       AssertionError: assert ['2026-07-01'] == ['2026-07-01', '2026-07-02']
+E         
+E         Right contains one more item: '2026-07-02'
+E         
+E         Full diff:
+E           [
+E               '2026-07-01',
+E         -     '2026-07-02',
+E           ]
+
+tests/test_full_review_regressions.py:151: AssertionError
+_____________________ test_screener_rejects_missing_close ______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_screener_rejects_missing_0')
+
+    def test_screener_rejects_missing_close(tmp_path):
+        screener = Screener(make_config(tmp_path))
+        row = pd.Series(
+            {
+                "code": "JP.7203",
+                "date": "2026-07-01",
+                "close": None,
+            }
+        )
+    
+>       with pytest.raises(
+            ValueError,
+            match=r"code=JP\.7203, date=2026-07-01",
+        ):
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_regressions.py:117: Failed
+_______________________ test_benchmark_return_lifecycle ________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_benchmark_return_lifecycl0')
+
+    def test_benchmark_return_lifecycle(tmp_path):
+        config = make_config(tmp_path)
+        DataStore(config)
+        manager = BenchmarkManager(config)
+        dataframe = pd.DataFrame(
+            [
+                {"time_key": "2026-07-01", "close": 100.0},
+                {"time_key": "2026-07-02", "close": 110.0},
+            ]
+        )
+    
+        assert manager.save_benchmark_prices("JP.1306", dataframe) == 2
+        with sqlite3.connect(config.database_path) as connection:
+            before = connection.execute(
+                "SELECT date, daily_return FROM benchmark_prices "
+                "WHERE benchmark_code = ? ORDER BY date",
+                ("JP.1306",),
+            ).fetchall()
+>       assert before == [("2026-07-01", None), ("2026-07-02", None)]
+E       AssertionError: assert [('2026-07-01...07-02', 10.0)] == [('2026-07-01...07-02', None)]
+E         
+E         At index 1 diff: ('2026-07-02', 10.0) != ('2026-07-02', None)
+E         
+E         Full diff:
+E           [
+E               (
+E                   '2026-07-01',
+E                   None,
+E               ),
+E               (
+E                   '2026-07-02',
+E         -         None,
+E         +         10.0,
+E               ),
+E           ]
+
+tests/test_regressions.py:142: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_core.py::TestDailyBarSource::test_save_dataframe_preserves_source_columns - sqlite3.IntegrityError: FOREIGN KEY constraint failed
+FAILED tests/test_daily_cycle_markets.py::test_dry_run_and_live_use_same_jp_targets - AttributeError: 'VirtualTradeManagerStub' object has no attribute 'get_available_cash'
+FAILED tests/test_full_review_regressions.py::test_history_pagination_forwards_page_key - AssertionError: assert ['2026-07-01'] == ['2026-07-01', '2026-07-02']
+  
+  Right contains one more item: '2026-07-02'
+  
+  Full diff:
+    [
+        '2026-07-01',
+  -     '2026-07-02',
+    ]
+FAILED tests/test_regressions.py::test_screener_rejects_missing_close - Failed: DID NOT RAISE ValueError
+FAILED tests/test_regressions.py::test_benchmark_return_lifecycle - AssertionError: assert [('2026-07-01...07-02', 10.0)] == [('2026-07-01...07-02', None)]
+  
+  At index 1 diff: ('2026-07-02', 10.0) != ('2026-07-02', None)
+  
+  Full diff:
+    [
+        (
+            '2026-07-01',
+            None,
+        ),
+        (
+            '2026-07-02',
+  -         None,
+  +         10.0,
+        ),
+    ]
+5 failed, 112 passed, 3 skipped, 1 deselected in 26.26s
