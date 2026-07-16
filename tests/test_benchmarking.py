@@ -1,4 +1,4 @@
-"""Regression coverage for benchmark roles and split-adjusted price series."""
+"""SQLite regression coverage for benchmark roles and split-adjusted price series."""
 
 from __future__ import annotations
 
