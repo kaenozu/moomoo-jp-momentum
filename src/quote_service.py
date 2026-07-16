@@ -135,61 +135,45 @@ class QuoteService:
         start: Optional[str] = None,
         end: Optional[str] = None,
     ) -> pd.DataFrame:
-        """日足ローソク足を取得する"""
+        """page_req_keyを引き継いで履歴日足を取得する。"""
         logger.info("日足取得: %s (num=%s)", code, num)
-
-        if num <= MAX_KLINE_PER_REQUEST:
-            ret, data, _ = self.ctx.request_history_kline(
-                code,
-                ktype=KLType.K_DAY,
-                max_count=num,
-                start=start,
-                end=end,
-            )
-
-            if ret != RET_OK:
-                logger.error("日足取得失敗: %s - %s", code, data)
-                return pd.DataFrame()
-            if not isinstance(data, pd.DataFrame):
-                return pd.DataFrame()
-
-            return data
-
-        all_data = pd.DataFrame()
+        if num <= 0:
+            return pd.DataFrame()
+        frames: list[pd.DataFrame] = []
         remaining = num
-        current_end = end
-
+        page_req_key = None
         while remaining > 0:
             batch_size = min(remaining, MAX_KLINE_PER_REQUEST)
-
-            ret, data, page_req_key = self.ctx.request_history_kline(
+            ret, data, next_page_key = self.ctx.request_history_kline(
                 code,
                 ktype=KLType.K_DAY,
                 max_count=batch_size,
                 start=start,
-                end=current_end,
+                end=end,
+                page_req_key=page_req_key,
             )
-
             if ret != RET_OK:
                 logger.error("日足取得失敗: %s - %s", code, data)
                 break
-            if not isinstance(data, pd.DataFrame):
+            if not isinstance(data, pd.DataFrame) or data.empty:
                 break
-
-            if data.empty:
-                break
-
-            all_data = pd.concat([all_data, data], ignore_index=True)
+            frames.append(data)
             remaining -= len(data)
-
-            if page_req_key is None or len(data) < batch_size:
+            if next_page_key is None or len(data) < batch_size:
                 break
-
-            oldest_date = data["time_key"].min()[:10]
-            current_end = oldest_date
-
-        logger.info("日足取得完了: %s - %s件", code, len(all_data))
-        return all_data
+            page_req_key = next_page_key
+        if not frames:
+            return pd.DataFrame()
+        result = pd.concat(frames, ignore_index=True)
+        if "time_key" in result.columns:
+            result = (
+                result.drop_duplicates(subset=["time_key"], keep="last")
+                .sort_values("time_key")
+                .reset_index(drop=True)
+            )
+        if len(result) > num:
+            result = result.tail(num).reset_index(drop=True)
+        return result
 
     def get_cur_daily_klines(self, code: str, num: int = 30) -> pd.DataFrame:
         """get_cur_klineで直近の日足を取得する（取引時間中の当日不完全足は除外）"""

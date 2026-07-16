@@ -30,7 +30,7 @@ def replace_function(path: str, name: str, source: str) -> None:
     if start is None or indent is None:
         raise RuntimeError(f"{path}: {name} not found")
     end = len(lines)
-    next_def = re.compile(rf"^{{{indent}}}(?:def|class)\s+")
+    next_def = re.compile(r"^" + (" " * indent) + r"(?:def|class)\s+")
     for index in range(start + 1, len(lines)):
         if lines[index].strip() and next_def.match(lines[index]):
             end = index
