@@ -43,7 +43,7 @@ jobs:
           set -o pipefail
           python -m pytest tests/ -m "not slow" -q 2>&1 | tee review-pytest.txt
 
-      - name: Commit failure diagnostics
+      - name: Commit pytest diagnostics
         if: steps.pytest.outcome == 'failure'
         run: |
           git config user.name "github-actions[bot]"
@@ -53,7 +53,7 @@ jobs:
           git push origin HEAD:agent/fix-full-source-review
           exit 1
 
-      - name: Remove transient diagnostics
+      - name: Remove pytest diagnostics
         if: steps.pytest.outcome == 'success'
         run: rm -f review-pytest.txt
 
@@ -62,11 +62,29 @@ jobs:
         run: ruff check src tests run_daily_cycle.py scheduler.py
 
       - name: Type check
+        id: pyright
         if: steps.pytest.outcome == 'success'
-        run: pyright
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pyright 2>&1 | tee review-pyright.txt
+
+      - name: Commit pyright diagnostics
+        if: steps.pytest.outcome == 'success' && steps.pyright.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add review-pyright.txt
+          git commit -m "test: capture full review pyright diagnostics"
+          git push origin HEAD:agent/fix-full-source-review
+          exit 1
+
+      - name: Remove pyright diagnostics
+        if: steps.pyright.outcome == 'success'
+        run: rm -f review-pyright.txt
 
       - name: Commit diagnostic cleanup
-        if: steps.pytest.outcome == 'success'
+        if: steps.pytest.outcome == 'success' && steps.pyright.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
