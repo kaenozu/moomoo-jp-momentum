@@ -1,8 +1,9 @@
 """
 株式分割・受益権分割の価格調整モジュール。
 
-rawのdaily_barsは変更せず、読み込み時に分割前のOHLCへ調整係数を適用する。
-これにより、分割日をまたぐリターン・移動平均・バックテスト価格を連続系列として扱える。
+moomoo/yfinanceからのデータは前方調整済み(QFQ)で取得されるため、
+追加の分割調整は不要。corporate_actions テーブルは分割情報の記録・
+検証用として維持する。adjust_price/apply_to_dataframe はno-op。
 """
 
 from __future__ import annotations
@@ -154,16 +155,12 @@ class SplitAdjustmentService:
         date: str,
         price: float | int | None,
     ) -> float | None:
-        """単一価格を分割後口数ベースへ調整する。"""
-        if price is None:
-            return None
+        """価格をそのまま返す（QFQデータには追加調整不要）。
 
-        adjusted = float(price)
-        normalized_date = str(date)[:10]
-        for action in self.get_splits(code):
-            if normalized_date < action.effective_date:
-                adjusted *= action.adjustment_factor
-        return adjusted
+        Note: moomoo/yfinance は前方調整済み価格を返すため、
+        二重調整を避けるためこの関数はno-op。
+        """
+        return float(price) if price is not None else None
 
     def apply_to_dataframe(
         self,
@@ -173,34 +170,9 @@ class SplitAdjustmentService:
         date_column: str | None = None,
         price_columns: Iterable[str] = PRICE_COLUMNS,
     ) -> pd.DataFrame:
-        """DataFrameの分割前OHLCを調整したコピーを返す。"""
-        if df.empty:
-            return df.copy()
+        """DataFrameをそのまま返す（QFQデータには追加調整不要）。
 
-        actions = self.get_splits(code)
-        if not actions:
-            return df.copy()
-
-        resolved_date_column = date_column
-        if resolved_date_column is None:
-            if "date" in df.columns:
-                resolved_date_column = "date"
-            elif "time_key" in df.columns:
-                resolved_date_column = "time_key"
-            else:
-                raise ValueError("分割調整にはdateまたはtime_key列が必要です")
-
-        adjusted = df.copy()
-        normalized_dates = adjusted[resolved_date_column].astype(str).str.slice(0, 10)
-
-        for action in actions:
-            mask = normalized_dates < action.effective_date
-            if not mask.any():
-                continue
-            for column in price_columns:
-                if column not in adjusted.columns:
-                    continue
-                numeric = pd.to_numeric(adjusted.loc[mask, column], errors="coerce")
-                adjusted.loc[mask, column] = numeric * action.adjustment_factor
-
-        return adjusted
+        Note: moomoo/yfinance は前方調整済み価格を返すため、
+        二重調整を避けるためこの関数はno-op。
+        """
+        return df.copy()
