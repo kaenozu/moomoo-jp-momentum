@@ -45,15 +45,37 @@ jobs:
         run: python -m compileall -q src tests run_daily_cycle.py scheduler.py
 
       - name: Test
-        run: python -m pytest tests/ -m "not slow" -q
+        id: pytest
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          python -m pytest tests/ -m "not slow" -q 2>&1 | tee reports/review-pytest.log
+
+      - name: Commit failure diagnostics
+        if: steps.pytest.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test: capture full review failure diagnostics"
+          git push origin HEAD:agent/fix-full-source-review
+          exit 1
+
+      - name: Remove transient diagnostics
+        if: steps.pytest.outcome == 'success'
+        run: rm -f reports/review-pytest.log
 
       - name: Lint
+        if: steps.pytest.outcome == 'success'
         run: ruff check src tests run_daily_cycle.py scheduler.py
 
       - name: Type check
+        if: steps.pytest.outcome == 'success'
         run: pyright
 
       - name: Commit generated fixes
+        if: steps.pytest.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
