@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/v2-execution-reproducibility
+  pull_request:
+    branches:
+      - agent/fix-full-source-review
 
 permissions:
   contents: write
