@@ -48,23 +48,22 @@ jobs:
         id: pytest
         continue-on-error: true
         run: |
-          mkdir -p reports
           set -o pipefail
-          python -m pytest tests/ -m "not slow" -q 2>&1 | tee reports/review-pytest.log
+          python -m pytest tests/ -m "not slow" -q 2>&1 | tee review-pytest.log
 
       - name: Commit failure diagnostics
         if: steps.pytest.outcome == 'failure'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "test: capture full review failure diagnostics"
+          git add -A review-pytest.log
+          git commit -m "test: capture full review pytest diagnostics"
           git push origin HEAD:agent/fix-full-source-review
           exit 1
 
       - name: Remove transient diagnostics
         if: steps.pytest.outcome == 'success'
-        run: rm -f reports/review-pytest.log
+        run: rm -f review-pytest.log
 
       - name: Lint
         if: steps.pytest.outcome == 'success'
