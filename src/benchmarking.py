@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from functools import reduce
 from operator import mul
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from .config import Config
 

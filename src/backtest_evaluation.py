@@ -190,7 +190,6 @@ def training_selection_key(
     """Return a deterministic key for training-only parameter selection."""
 
     performance = report["performance"]
-    benchmarks = report["benchmarks"]
     closed_trades = int(performance["closed_trade_count"])
     total_return = float(performance["total_return_pct"])
     excess_raw = _primary_cash_matched_excess(report)
