@@ -38,31 +38,12 @@ def replace_function(path: str, name: str, source: str) -> None:
     write(path, "".join(lines[:start]) + source.rstrip() + "\n\n" + "".join(lines[end:]))
 
 
-# A page key is authoritative even when the API returns fewer rows than requested.
 quote_service = read("src/quote_service.py")
 quote_service = quote_service.replace(
     "            if next_page_key is None or len(data) < batch_size:\n                break\n",
     "            if next_page_key is None:\n                break\n",
 )
 write("src/quote_service.py", quote_service)
-
-# Keep tests and lightweight stubs compatible without weakening production cash checks.
-cycle = read("run_daily_cycle.py")
-cycle = cycle.replace(
-    '        available_cash = manager.get_available_cash("default", target_date)\n',
-    '        if hasattr(manager, "get_available_cash"):\n'
-    '            available_cash = manager.get_available_cash("default", target_date)\n'
-    '        else:\n'
-    '            available_cash = manager.get_cash("default")\n',
-)
-cycle = cycle.replace(
-    '                available_cash = manager.get_available_cash("default", target_date)\n',
-    '                if hasattr(manager, "get_available_cash"):\n'
-    '                    available_cash = manager.get_available_cash("default", target_date)\n'
-    '                else:\n'
-    '                    available_cash = manager.get_cash("default")\n',
-)
-write("run_daily_cycle.py", cycle)
 
 replace_function(
     "src/screener.py",
@@ -106,7 +87,6 @@ replace_function(
 ''',
 )
 
-# Save raw benchmark observations first; split-aware return calculation is explicit.
 replace_function(
     "src/benchmark.py",
     "save_benchmark_prices",
@@ -138,7 +118,6 @@ replace_function(
 ''',
 )
 
-# Foreign keys are intentionally enabled; seed the symbol in this source-column test.
 test_core = read("tests/test_core.py")
 needle = '''        store = DataStore(config)
 
