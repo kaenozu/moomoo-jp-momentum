@@ -4,7 +4,7 @@
 __________________ test_dry_run_and_live_use_same_jp_targets ___________________
 
 tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_dry_run_and_live_use_same0')
-monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5f193c6f50>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7ffa64143e10>
 
     def test_dry_run_and_live_use_same_jp_targets(
         tmp_path: Path,
@@ -276,4 +276,4 @@ E           AttributeError: 'VirtualTradeManagerStub' object has no attribute 'g
 run_daily_cycle.py:191: AttributeError
 =========================== short test summary info ============================
 FAILED tests/test_daily_cycle_markets.py::test_dry_run_and_live_use_same_jp_targets - AttributeError: 'VirtualTradeManagerStub' object has no attribute 'get_available_cash'
-1 failed, 116 passed, 3 skipped, 1 deselected in 26.49s
+1 failed, 116 passed, 3 skipped, 1 deselected in 25.90s
