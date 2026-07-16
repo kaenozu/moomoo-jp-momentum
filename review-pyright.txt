@@ -1,0 +1,14 @@
+/home/runner/work/moomoo-jp-momentum/moomoo-jp-momentum/run_daily_cycle.py
+  /home/runner/work/moomoo-jp-momentum/moomoo-jp-momentum/run_daily_cycle.py:81:22 - error: Argument of type "object" cannot be assigned to parameter "x" of type "ConvertibleToFloat" in function "__new__"
+    Type "object" is not assignable to type "ConvertibleToFloat"
+      "object" is not assignable to "str"
+      "object" is incompatible with protocol "Buffer"
+        "__buffer__" is not present
+      "object" is incompatible with protocol "SupportsFloat"
+        "__float__" is not present
+      "object" is incompatible with protocol "SupportsIndex"
+        "__index__" is not present (reportArgumentType)
+  /home/runner/work/moomoo-jp-momentum/moomoo-jp-momentum/run_daily_cycle.py:139:46 - error: Argument of type "OpenQuoteContext | None" cannot be assigned to parameter "quote_context" of type "OpenQuoteContext" in function "__init__"
+    Type "OpenQuoteContext | None" is not assignable to type "OpenQuoteContext"
+      "None" is not assignable to "OpenQuoteContext" (reportArgumentType)
+2 errors, 0 warnings, 0 informations
