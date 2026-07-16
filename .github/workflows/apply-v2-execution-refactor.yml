@@ -63,8 +63,8 @@ jobs:
             cp /tmp/v2_validation.log V2_REFACTOR_FAILURE.txt
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add V2_REFACTOR_FAILURE.txt
-            git commit -m 'chore: capture v2 validation failure'
+            git add src tests V2_REFACTOR_FAILURE.txt
+            git commit -m 'chore: capture transformed v2 source for correction'
             git push origin HEAD:agent/v2-execution-reproducibility
             exit "$STATUS"
           fi
