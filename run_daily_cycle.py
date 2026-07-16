@@ -76,10 +76,10 @@ def _available_cash(
     target_date: str,
 ) -> float:
     """新実装と軽量テストスタブの両方から利用可能cashを取得する。"""
-    getter = getattr(manager, "get_available_cash", None)
-    if callable(getter):
-        return float(getter(strategy_name, target_date))
-    return float(manager.get_cash(strategy_name))
+    try:
+        return float(manager.get_available_cash(strategy_name, target_date))
+    except AttributeError:
+        return float(manager.get_cash(strategy_name))
 
 
 def run_cycle(
@@ -124,7 +124,7 @@ def run_cycle(
     connection = OpenDConnection(config)
     try:
         status = connection.connect()
-        if not status.connected:
+        if not status.connected or status.quote_context is None:
             raise RuntimeError(f"OpenD接続失敗: {status.message}")
         results["connection"] = True
 
