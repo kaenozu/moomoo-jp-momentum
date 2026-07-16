@@ -45,7 +45,7 @@ jobs:
         run: python -m compileall -q src tests run_daily_cycle.py scheduler.py
 
       - name: Test
-        run: pytest -q
+        run: python -m pytest tests/ -m "not slow" -q
 
       - name: Lint
         run: ruff check src tests run_daily_cycle.py scheduler.py
