@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/moomoo-jp-momentum/moomoo-jp-momentum/scripts/apply_v2_round_trip_fix.py", line 89, in <module>
-    raise RuntimeError(
-RuntimeError: src/run_fingerprint.py: expected one adjustment policy default, found 2

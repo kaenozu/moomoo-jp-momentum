@@ -80,7 +80,7 @@ def ensure_backtest_run_metadata_columns(conn: sqlite3.Connection) -> None:
         "data_snapshot_hash": "TEXT NOT NULL DEFAULT ''",
         "data_max_date": "TEXT",
         "engine_version": "TEXT NOT NULL DEFAULT 'legacy'",
-        "adjustment_policy": "TEXT NOT NULL DEFAULT 'split_adjustment_service'",
+        "adjustment_policy": "TEXT NOT NULL DEFAULT 'qfq_no_additional_adjustment'",
     }
     for name, definition in definitions.items():
         if name not in existing:
@@ -143,7 +143,7 @@ def collect_backtest_run_metadata(
         repository_root if (repository_root / ".git").exists() else None
     )
     adjustment_policy = str(
-        config.get("backtest.adjustment_policy", "split_adjustment_service")
+        config.get("backtest.adjustment_policy", "qfq_no_additional_adjustment")
     )
     return BacktestRunMetadata(
         market=normalized_market,

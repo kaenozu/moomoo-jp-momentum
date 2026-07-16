@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
     data_snapshot_hash TEXT NOT NULL DEFAULT '',
     data_max_date TEXT,
     engine_version TEXT NOT NULL DEFAULT 'legacy',
-    adjustment_policy TEXT NOT NULL DEFAULT 'split_adjustment_service',
+    adjustment_policy TEXT NOT NULL DEFAULT 'qfq_no_additional_adjustment',
     final_equity REAL,
     total_return_pct REAL,
     max_drawdown_pct REAL,

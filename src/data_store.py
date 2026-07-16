@@ -96,7 +96,7 @@ class DataStore:
             "data_snapshot_hash": "TEXT NOT NULL DEFAULT ''",
             "data_max_date": "TEXT",
             "engine_version": "TEXT NOT NULL DEFAULT 'legacy'",
-            "adjustment_policy": "TEXT NOT NULL DEFAULT 'split_adjustment_service'",
+            "adjustment_policy": "TEXT NOT NULL DEFAULT 'qfq_no_additional_adjustment'",
         })
 
     def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:

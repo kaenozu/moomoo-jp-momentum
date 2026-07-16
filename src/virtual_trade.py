@@ -253,6 +253,7 @@ class VirtualTradeManager:
         strategy_name: str,
         code: str,
         quantity: int,
+        exclude_order_id: int | None = None,
     ) -> tuple[bool, str]:
         pos = conn.execute(
             """
@@ -264,14 +265,17 @@ class VirtualTradeManager:
         if not pos or pos["quantity"] < quantity:
             return False, "売却可能な仮想ポジションが不足しています"
 
-        pending = conn.execute(
-            """
+        sql = """
             SELECT 1 FROM virtual_orders
-            WHERE strategy_name = ? AND code = ? AND side = 'SELL' AND status = 'PENDING'
-            LIMIT 1
-            """,
-            (strategy_name, code),
-        ).fetchone()
+            WHERE strategy_name = ? AND code = ?
+              AND side = 'SELL' AND status = 'PENDING'
+        """
+        params: list[object] = [strategy_name, code]
+        if exclude_order_id is not None:
+            sql += " AND id != ?"
+            params.append(exclude_order_id)
+        sql += " LIMIT 1"
+        pending = conn.execute(sql, params).fetchone()
         if pending:
             return False, "同一銘柄の未約定SELL注文が既に存在します"
         return True, ""
@@ -545,7 +549,13 @@ class VirtualTradeManager:
 
         with self._get_connection() as conn:
             if order.side == "SELL":
-                ok, reason = self._validate_sell_order(conn, order.strategy_name, order.code, order.quantity)
+                ok, reason = self._validate_sell_order(
+                    conn,
+                    order.strategy_name,
+                    order.code,
+                    order.quantity,
+                    exclude_order_id=order.id,
+                )
                 if not ok:
                     logger.warning("SELL約定拒否: %s - %s", order.code, reason)
                     return None
