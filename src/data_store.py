@@ -18,6 +18,7 @@ import pandas as pd
 
 from .config import Config
 from .models import CREATE_TABLES_SQL, DailyBar, Quote, Symbol
+from .split_adjustment import SplitAdjustmentService
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class DataStore:
         self.db_path = Path(config.database_path)
         self._ensure_directory()
         self._init_db()
+        self.split_adjustments = SplitAdjustmentService(self.db_path)
 
     def _ensure_directory(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,7 +271,8 @@ class DataStore:
         query += " ORDER BY date DESC LIMIT ?"
         params.append(limit)
         with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(query, conn, params=params)
+        return self.split_adjustments.apply_to_dataframe(df, code, date_column="date")
 
     def save_dataframe_to_daily_bars(
         self,
@@ -326,4 +329,10 @@ class DataStore:
             params.append(end_date)
         query += " ORDER BY date"
         with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(query, conn, params=params)
+        return self.split_adjustments.apply_to_dataframe(
+            df,
+            benchmark_code,
+            date_column="date",
+            price_columns=("close",),
+        )
