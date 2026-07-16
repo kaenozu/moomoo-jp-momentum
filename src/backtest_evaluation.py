@@ -173,6 +173,15 @@ def trade_distribution(realized_pnls: Sequence[float]) -> dict[str, Any]:
     }
 
 
+def _primary_cash_matched_excess(report: Mapping[str, Any]) -> float | None:
+    roles = report.get("benchmark_roles", {})
+    primary_code = str(roles.get("primary", "JP.1306"))
+    value = report["benchmarks"].get(
+        f"excess_vs_{primary_code}_cash_matched_pct"
+    )
+    return float(value) if value is not None else None
+
+
 def training_selection_key(
     report: Mapping[str, Any],
     *,
@@ -184,8 +193,8 @@ def training_selection_key(
     benchmarks = report["benchmarks"]
     closed_trades = int(performance["closed_trade_count"])
     total_return = float(performance["total_return_pct"])
-    excess_raw = benchmarks.get("excess_vs_JP.1306_cash_matched_pct")
-    excess = float(excess_raw) if excess_raw is not None else -1.0e100
+    excess_raw = _primary_cash_matched_excess(report)
+    excess = excess_raw if excess_raw is not None else -1.0e100
     pf_raw = performance.get("profit_factor")
     if bool(performance.get("profit_factor_unbounded", False)):
         profit_factor = 1.0e100
@@ -220,10 +229,7 @@ def summarize_walk_forward(
         raise ValueError("minimum_positive_fold_ratio must be within (0, 1]")
 
     def _excess(report: Mapping[str, Any]) -> float | None:
-        value = report["benchmarks"].get(
-            "excess_vs_JP.1306_cash_matched_pct"
-        )
-        return float(value) if value is not None else None
+        return _primary_cash_matched_excess(report)
 
     base_excesses = [_excess(report) for report in fold_reports]
     stress_excesses = [_excess(report) for report in stress_reports]
@@ -283,10 +289,10 @@ def summarize_walk_forward(
         "status": status,
         "fold_count": len(fold_reports),
         "closed_trade_count": total_trades,
-        "median_cash_matched_excess_vs_JP.1306_pct": median_excess,
+        "median_cash_matched_excess_vs_primary_pct": median_excess,
         "positive_excess_fold_count": base_positive,
         "positive_excess_fold_ratio": base_ratio,
-        "stress_median_cash_matched_excess_vs_JP.1306_pct": (
+        "stress_median_cash_matched_excess_vs_primary_pct": (
             median_stress_excess
         ),
         "stress_positive_excess_fold_count": stress_positive,

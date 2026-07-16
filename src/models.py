@@ -282,6 +282,69 @@ CREATE TABLE IF NOT EXISTS virtual_equity_curve (
     UNIQUE(strategy_name, date)
 );
 
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    action_date TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    ratio_before REAL NOT NULL,
+    ratio_after REAL NOT NULL,
+    adjustment_factor REAL NOT NULL,
+    source_name TEXT,
+    source_url TEXT,
+    status TEXT NOT NULL DEFAULT 'confirmed',
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(code, action_date, action_type)
+);
+
+CREATE TABLE IF NOT EXISTS data_quality_flags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    date TEXT NOT NULL,
+    flag_type TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'warning',
+    observed_value REAL,
+    expected_value REAL,
+    status TEXT NOT NULL DEFAULT 'open',
+    details TEXT,
+    source TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    resolved_at TEXT,
+    UNIQUE(code, date, flag_type)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_benchmark_results (
+    run_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    benchmark_code TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    start_value REAL,
+    end_value REAL,
+    return_pct REAL,
+    excess_return_pct REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY(run_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_benchmark_equity (
+    run_id INTEGER NOT NULL,
+    strategy_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    role TEXT NOT NULL,
+    benchmark_code TEXT NOT NULL,
+    adjusted_close REAL,
+    PRIMARY KEY(run_id, date, role)
+);
+
+CREATE INDEX IF NOT EXISTS idx_corporate_actions_code_date ON corporate_actions(code, action_date);
+CREATE INDEX IF NOT EXISTS idx_data_quality_flags_code_date ON data_quality_flags(code, date);
+CREATE INDEX IF NOT EXISTS idx_data_quality_flags_status ON data_quality_flags(status);
+CREATE INDEX IF NOT EXISTS idx_backtest_benchmark_results_code ON backtest_benchmark_results(benchmark_code);
+CREATE INDEX IF NOT EXISTS idx_backtest_benchmark_equity_run ON backtest_benchmark_equity(run_id, date);
+
 CREATE INDEX IF NOT EXISTS idx_quotes_code ON quotes(code);
 CREATE INDEX IF NOT EXISTS idx_quotes_timestamp ON quotes(timestamp);
 CREATE INDEX IF NOT EXISTS idx_daily_bars_code ON daily_bars(code);

@@ -27,6 +27,7 @@ from src.backtest_evaluation import (
     training_selection_key,
 )
 from src.backtest_runner import BacktestRunner
+from src.benchmarking import load_benchmark_specs
 from src.config import Config, load_config
 from validated_backtest import (
     CapitalPlan,
@@ -129,8 +130,9 @@ def realized_pnls(config: Config, run_id: int) -> list[float]:
 
 def _cash_matched_status(report: dict[str, Any]) -> str:
     performance = report["performance"]
+    primary_code = report["benchmark_roles"]["primary"]
     benchmark = report["benchmarks"].get(
-        "excess_vs_JP.1306_cash_matched_pct"
+        f"excess_vs_{primary_code}_cash_matched_pct"
     )
     trades = int(performance["closed_trade_count"])
     total_return = float(performance["total_return_pct"])
@@ -178,42 +180,25 @@ def augment_report(
         else None
     )
 
-    full_1306 = benchmarks.get("JP.1306_return_pct")
-    full_2559 = benchmarks.get("JP.2559_return_pct")
-    matched_1306 = cash_matched_benchmark_return(
-        float(full_1306) if full_1306 is not None else None,
-        plan.active_cash,
-        plan.account_initial_cash,
-    )
-    matched_2559 = cash_matched_benchmark_return(
-        float(full_2559) if full_2559 is not None else None,
-        plan.active_cash,
-        plan.account_initial_cash,
-    )
+    specs = load_benchmark_specs(config)
     strategy_return = float(performance["total_return_pct"])
-    benchmarks.update(
-        {
-            "JP.1306_full_investment_return_pct": full_1306,
-            "JP.1306_cash_matched_return_pct": matched_1306,
-            "excess_vs_JP.1306_cash_matched_pct": (
-                strategy_return - matched_1306
-                if matched_1306 is not None
-                else None
-            ),
-            "JP.2559_full_investment_return_pct": full_2559,
-            "JP.2559_cash_matched_return_pct": matched_2559,
-            "excess_vs_JP.2559_cash_matched_pct": (
-                strategy_return - matched_2559
-                if matched_2559 is not None
-                else None
-            ),
-        }
-    )
+    for spec in specs.all():
+        full = benchmarks.get(f"{spec.code}_return_pct")
+        matched = cash_matched_benchmark_return(
+            float(full) if full is not None else None,
+            plan.active_cash,
+            plan.account_initial_cash,
+        )
+        benchmarks[f"{spec.code}_full_investment_return_pct"] = full
+        benchmarks[f"{spec.code}_cash_matched_return_pct"] = matched
+        benchmarks[f"excess_vs_{spec.code}_cash_matched_pct"] = (
+            strategy_return - matched if matched is not None else None
+        )
     report["full_investment_status"] = report["status"]
     report["status"] = _cash_matched_status(report)
     report["benchmark_policy"] = (
-        "Status uses JP.1306 invested only with strategy active cash; "
-        "the same reserve remains zero-return cash."
+        f"Status uses primary benchmark {specs.primary.code} invested only "
+        "with strategy active cash; the same reserve remains zero-return cash."
     )
     report["capital"]["cash_reserve_ratio"] = (
         plan.cash_reserve / plan.account_initial_cash

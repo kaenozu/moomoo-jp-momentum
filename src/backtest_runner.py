@@ -22,6 +22,14 @@ from typing import Optional, Protocol
 import pandas as pd
 
 from .config import Config
+from .benchmarking import (
+    adjusted_price,
+    ensure_benchmark_schema,
+    load_benchmark_specs,
+    save_benchmark_equity,
+    save_benchmark_result,
+    seed_configured_actions,
+)
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
 from .strategies import StrategyRegistry, StrategyResult
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
@@ -73,9 +81,6 @@ def _rank_buy_candidates(
     return [(code, indicators) for code, indicators, _ in evaluated]
 
 
-BM2559 = "JP.2559"
-BM1306 = "JP.1306"
-
 
 class BacktestRunner:
     """バックテスト実行エンジン"""
@@ -97,9 +102,16 @@ class BacktestRunner:
         universe_cfg = config.get("universe", {})
         self.min_trade_price = universe_cfg.get("min_trade_price", 500)
         self.max_trade_price = universe_cfg.get("max_trade_price", 20000)
+        self.benchmarks = load_benchmark_specs(config)
+        with self._conn() as connection:
+            ensure_benchmark_schema(connection)
+            seed_configured_actions(connection, config)
 
     def _benchmark_code(self) -> str:
-        return self.config.get("signals.relative_strength.benchmark_code", BM1306)
+        return self.config.get(
+            "signals.relative_strength.benchmark_code",
+            self.benchmarks.primary.code,
+        )
 
     def _idle_cash_benchmark_code(self) -> Optional[str]:
         cfg = self.config.get("backtest.idle_cash_allocation", {})
@@ -390,8 +402,10 @@ class BacktestRunner:
             )
             total_equity = self.cash + pos_value
 
-            bm_2559 = self._benchmark_value(BM2559, day)
-            bm_1306 = self._benchmark_value(BM1306, day)
+            benchmark_values = {
+                spec.role: self._benchmark_value(spec.code, day)
+                for spec in self.benchmarks.all()
+            }
 
             peak_equity = max(peak_equity, total_equity)
             drawdown = max(0, (peak_equity - total_equity) / peak_equity * 100) if peak_equity else 0
@@ -399,8 +413,21 @@ class BacktestRunner:
             with self._conn() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO backtest_equity_curve (run_id, strategy_name, date, cash, position_value, total_equity, benchmark_2559_value, benchmark_1306_value, drawdown_pct) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (self.run_id, strategy_name, day, self.cash, pos_value, total_equity, bm_2559, bm_1306, drawdown),
+                    (
+                        self.run_id, strategy_name, day, self.cash, pos_value,
+                        total_equity, benchmark_values["reference"],
+                        benchmark_values["primary"], drawdown,
+                    ),
                 )
+                for spec in self.benchmarks.all():
+                    save_benchmark_equity(
+                        conn,
+                        run_id=int(self.run_id),
+                        strategy_name=strategy_name,
+                        date=day,
+                        spec=spec,
+                        adjusted_close=benchmark_values[spec.role],
+                    )
 
         # ── 最終結果を保存 ──
         final_equity = self.cash + sum(
@@ -409,24 +436,22 @@ class BacktestRunner:
         )
         total_return = (final_equity - self.initial_cash) / self.initial_cash * 100
 
-        # ベンチマークリターン: 2559と1306を明示的に別計算
-        bm_2559_start = self._benchmark_value(BM2559, start_date)
-        bm_2559_end = self._benchmark_value(BM2559, days[-1])
-        bm_2559_ret = (
-            (bm_2559_end - bm_2559_start) / bm_2559_start * 100
-            if bm_2559_start and bm_2559_end is not None
-            else None
-        )
-        bm_1306_start = self._benchmark_value(BM1306, start_date)
-        bm_1306_end = self._benchmark_value(BM1306, days[-1])
-        bm_1306_ret = (
-            (bm_1306_end - bm_1306_start) / bm_1306_start * 100
-            if bm_1306_start and bm_1306_end is not None
-            else None
-        )
         stats = self._calculate_run_stats()
 
         with self._conn() as conn:
+            returns = {
+                spec.role: save_benchmark_result(
+                    conn,
+                    run_id=int(self.run_id),
+                    spec=spec,
+                    start_date=start_date,
+                    end_date=days[-1],
+                    strategy_return_pct=total_return,
+                )
+                for spec in self.benchmarks.all()
+            }
+            primary_return = returns["primary"]
+            reference_return = returns["reference"]
             conn.execute(
                 """
                 UPDATE backtest_runs
@@ -436,11 +461,15 @@ class BacktestRunner:
                     benchmark_1306_return=?, excess_vs_1306=?
                 WHERE id=?
                 """,
-                (final_equity, total_return, stats["max_drawdown_pct"],
-                 stats["win_rate"], stats["profit_factor"], stats["trade_count"],
-                 bm_2559_ret, total_return - bm_2559_ret if bm_2559_ret is not None else None,
-                 bm_1306_ret, total_return - bm_1306_ret if bm_1306_ret is not None else None,
-                 self.run_id),
+                (
+                    final_equity, total_return, stats["max_drawdown_pct"],
+                    stats["win_rate"], stats["profit_factor"], stats["trade_count"],
+                    reference_return,
+                    total_return - reference_return if reference_return is not None else None,
+                    primary_return,
+                    total_return - primary_return if primary_return is not None else None,
+                    self.run_id,
+                ),
             )
 
         logger.info("バックテスト完了: return=%.2f%%, orders=%d, fills=%d, exits=%d",
@@ -468,11 +497,7 @@ class BacktestRunner:
 
     def _benchmark_value(self, code: str, date: str) -> Optional[float]:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
-                (code, date),
-            ).fetchone()
-            return float(row[0]) if row and row[0] is not None else None
+            return adjusted_price(conn, code, date)
 
     def _calculate_run_stats(self) -> dict[str, Optional[float]]:
         with self._conn() as conn:
