@@ -30,6 +30,7 @@ jobs:
 
       - name: Apply readable migrations
         run: |
+          python scripts/fix_migration_helpers.py
           python scripts/apply_review_core.py
           python scripts/apply_review_storage.py
           python scripts/apply_review_pipeline.py
