@@ -675,12 +675,76 @@ class VirtualTradeManager:
                 return float(order.limit_price), bar["date"], "limit_high_touch"
         return None, "", ""
 
-    def _update_position_and_cash(self, conn: sqlite3.Connection, order: VirtualOrder, fill: VirtualFill) -> None:
+    def _update_position_and_cash(
+        self,
+        conn: sqlite3.Connection,
+        order: VirtualOrder,
+        fill: VirtualFill,
+    ) -> None:
+        """Persist the pure ExecutionEngine transition in one DB transaction."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pos = conn.execute(
             """
             SELECT * FROM virtual_positions
-            WHERE (strategy_name, code, quantity, avg_cost, market_price, market_value,
+            WHERE strategy_name = ? AND code = ?
+            """,
+            (order.strategy_name, order.code),
+        ).fetchone()
+        current_position = PositionState(
+            quantity=int(pos["quantity"]) if pos else 0,
+            avg_cost=float(pos["avg_cost"]) if pos else 0.0,
+            realized_pl=float(pos["realized_pl"] or 0.0) if pos else 0.0,
+        )
+        current_cash = self._get_cash_with_conn(
+            conn,
+            order.strategy_name,
+            fill.filled_at,
+        )
+        if order.side == "BUY":
+            side = "BUY"
+        elif order.side == "SELL":
+            side = "SELL"
+        else:
+            raise ValueError(f"unsupported side: {order.side}")
+        transition = self.execution_engine.apply_fill(
+            current_cash,
+            current_position,
+            side,
+            fill.price,
+            fill.quantity,
+        )
+        market_value = fill.price * transition.position.quantity
+        unrealized_pl = (
+            (fill.price - transition.position.avg_cost)
+            * transition.position.quantity
+            if transition.position.quantity > 0
+            else 0.0
+        )
+
+        if pos:
+            conn.execute(
+                """
+                UPDATE virtual_positions
+                SET quantity = ?, avg_cost = ?, market_price = ?, market_value = ?,
+                    unrealized_pl = ?, realized_pl = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    transition.position.quantity,
+                    transition.position.avg_cost,
+                    fill.price,
+                    market_value,
+                    unrealized_pl,
+                    transition.position.realized_pl,
+                    now,
+                    pos["id"],
+                ),
+            )
+        elif transition.position.quantity > 0:
+            conn.execute(
+                """
+                INSERT INTO virtual_positions
+                (strategy_name, code, quantity, avg_cost, market_price, market_value,
                  unrealized_pl, realized_pl, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -696,7 +760,12 @@ class VirtualTradeManager:
                     now,
                 ),
             )
-        self._set_cash(conn, order.strategy_name, fill.filled_at, transition.cash)
+        self._set_cash(
+            conn,
+            order.strategy_name,
+            fill.filled_at,
+            transition.cash,
+        )
 
     def get_strategy_performance(self, strategy_name: str = "default") -> dict:
         cash = self.get_cash(strategy_name)

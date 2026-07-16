@@ -22,7 +22,7 @@ from typing import Optional
 import pandas as pd
 
 from .config import Config
-from .execution_engine import ExecutionEngine, PositionState
+from .execution_engine import ExecutionEngine, PositionState, Side
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
 from .run_fingerprint import (
     collect_backtest_run_metadata,
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class _PendingOrder:
     """バックテスト用pending注文（メモリ上）"""
     code: str
-    side: str  # "BUY" or "SELL"
+    side: Side  # "BUY" or "SELL"
     quantity: int
     fill_price: float
     fill_date: str
