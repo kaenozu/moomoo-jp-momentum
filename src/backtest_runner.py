@@ -422,7 +422,7 @@ class BacktestRunner:
                 for spec in self.benchmarks.all():
                     save_benchmark_equity(
                         conn,
-                        run_id=int(self.run_id),
+                        run_id=run_id,
                         strategy_name=strategy_name,
                         date=day,
                         spec=spec,
@@ -442,7 +442,7 @@ class BacktestRunner:
             returns = {
                 spec.role: save_benchmark_result(
                     conn,
-                    run_id=int(self.run_id),
+                    run_id=run_id,
                     spec=spec,
                     start_date=start_date,
                     end_date=days[-1],
