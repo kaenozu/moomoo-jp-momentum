@@ -69,50 +69,30 @@ class BenchmarkManager:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def save_benchmark_prices(
-        self,
-        code: str,
-        df: pd.DataFrame,
-    ) -> int:
-        """
-        ベンチマーク価格を保存する
-
-        Args:
-            code: ベンチマークコード
-            df: 日足DataFrame
-
-        Returns:
-            int: 保存件数
-        """
+    def save_benchmark_prices(self, code: str, df: pd.DataFrame) -> int:
+        """Save benchmark prices without precomputing unadjusted returns."""
         count = 0
         now = datetime.now().isoformat()
-
         with self._get_connection() as conn:
-            prev_close: Optional[float] = None
             for _, row in df.iterrows():
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
-
-                # 前日終値から日次リターンを計算
-                daily_return: Optional[float] = None
-                if prev_close is not None and close is not None and prev_close > 0:
-                    daily_return = (float(close) - float(prev_close)) / float(prev_close) * 100
-                if close is not None:
-                    prev_close = float(close)
-
                 try:
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO benchmark_prices
+                        INSERT INTO benchmark_prices
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, NULL, ?, ?)
+                        ON CONFLICT(benchmark_code, date) DO UPDATE SET
+                            close = excluded.close,
+                            daily_return = NULL,
+                            updated_at = excluded.updated_at
                         """,
-                        (code, date, close, daily_return, now, now),
+                        (code, date, close, now, now),
                     )
                     count += 1
-                except sqlite3.Error as e:
-                    logger.error(f"ベンチマーク保存エラー: {code} {date} - {e}")
-
+                except sqlite3.Error as exc:
+                    logger.error("ベンチマーク保存エラー: %s %s - %s", code, date, exc)
         return count
 
     def update_daily_returns(self, code: str) -> int:

@@ -159,7 +159,7 @@ class QuoteService:
                 break
             frames.append(data)
             remaining -= len(data)
-            if next_page_key is None or len(data) < batch_size:
+            if next_page_key is None:
                 break
             page_req_key = next_page_key
         if not frames:
