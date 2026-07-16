@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - agent/v2-execution-reproducibility
-  pull_request:
-    branches:
-      - agent/fix-full-source-review
 
 permissions:
   contents: write
@@ -25,33 +22,15 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Reconstruct and diagnose source refactor
-        run: |
-          cat scripts/.v2_refactor.part1.b64 \
-              scripts/.v2_refactor.part2.b64 \
-              scripts/.v2_refactor.part3.b64 \
-            | base64 --decode > /tmp/apply_v2_execution_refactor.py
-          sed -i 's|ROOT = Path(__file__).resolve().parents\[1\]|ROOT = Path.cwd()|' /tmp/apply_v2_execution_refactor.py
-          set +e
-          python /tmp/apply_v2_execution_refactor.py > /tmp/v2_refactor_failure.log 2>&1
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            cp /tmp/v2_refactor_failure.log V2_REFACTOR_FAILURE.txt
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add V2_REFACTOR_FAILURE.txt
-            git commit -m 'chore: capture v2 refactor failure'
-            git push origin HEAD:agent/v2-execution-reproducibility
-            exit "$STATUS"
-          fi
+      - name: Apply local corrections
+        run: python scripts/apply_v2_corrections.py
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Validate and diagnose implementation
+      - name: Validate corrected implementation
         run: |
           : > /tmp/v2_validation.log
           STATUS=0
@@ -64,7 +43,7 @@ jobs:
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add src tests V2_REFACTOR_FAILURE.txt
-            git commit -m 'chore: capture transformed v2 source for correction'
+            git commit -m 'chore: capture corrected v2 validation failure'
             git push origin HEAD:agent/v2-execution-reproducibility
             exit "$STATUS"
           fi
@@ -74,6 +53,7 @@ jobs:
           rm scripts/.v2_refactor.part1.b64
           rm scripts/.v2_refactor.part2.b64
           rm scripts/.v2_refactor.part3.b64
+          rm scripts/apply_v2_corrections.py
           rm .github/workflows/apply-v2-execution-refactor.yml
           rm -f V2_REFACTOR_FAILURE.txt V2_REFACTOR_TRIGGER.txt
 
