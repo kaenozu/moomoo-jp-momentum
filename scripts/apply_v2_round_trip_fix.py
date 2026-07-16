@@ -77,20 +77,21 @@ replace_once(
     "                )\n",
 )
 
-for relative_path in (
-    "src/models.py",
-    "src/data_store.py",
-    "src/run_fingerprint.py",
-):
+expected_policy_occurrences = {
+    "src/models.py": 1,
+    "src/data_store.py": 1,
+    "src/run_fingerprint.py": 2,
+}
+for relative_path, expected_count in expected_policy_occurrences.items():
     path = ROOT / relative_path
     text = path.read_text(encoding="utf-8")
     count = text.count("split_adjustment_service")
-    if count != 1:
+    if count != expected_count:
         raise RuntimeError(
-            f"{relative_path}: expected one adjustment policy default, found {count}"
+            f"{relative_path}: expected {expected_count} adjustment policy defaults, found {count}"
         )
     path.write_text(
-        text.replace("split_adjustment_service", "qfq_no_additional_adjustment", 1),
+        text.replace("split_adjustment_service", "qfq_no_additional_adjustment"),
         encoding="utf-8",
     )
 
