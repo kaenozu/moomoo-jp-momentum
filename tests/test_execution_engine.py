@@ -9,11 +9,15 @@ def test_buy_and_sell_transitions_share_one_accounting_model() -> None:
     engine = ExecutionEngine(commission=10, max_total_positions=3)
     bought = engine.apply_fill(1000, PositionState(), "BUY", 100, 5)
     assert bought.cash == 490
+    assert bought.cash_delta == -510
+    assert bought.gross == 500
     assert bought.position.quantity == 5
     assert bought.position.avg_cost == 100
 
     sold = engine.apply_fill(bought.cash, bought.position, "SELL", 120, 2)
     assert sold.cash == 720
+    assert sold.cash_delta == 230
+    assert sold.gross == 240
     assert sold.position.quantity == 3
     assert sold.position.avg_cost == 100
     assert sold.realized_pl_delta == 30
