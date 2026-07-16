@@ -1,1 +1,1 @@
-Trigger V2 refactor with validation failure capture enabled.
+Trigger V2 transformed-source diagnostic commit.
