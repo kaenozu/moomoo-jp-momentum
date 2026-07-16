@@ -1,4 +1,4 @@
-name: Apply full review fixes
+name: Validate full review fixes
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  apply-and-validate:
+  validate:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -27,15 +27,6 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-
-      - name: Apply readable migrations
-        run: |
-          python scripts/fix_migration_helpers.py
-          python scripts/apply_review_core.py
-          python scripts/apply_review_storage.py
-          python scripts/apply_review_pipeline.py
-          python scripts/apply_review_tests.py
-          python scripts/apply_review_followups.py
 
       - name: Install dependencies
         run: |
@@ -57,7 +48,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add review-pytest.txt
           git commit -m "test: capture full review pytest diagnostics"
           git push origin HEAD:agent/fix-full-source-review
           exit 1
@@ -74,15 +65,15 @@ jobs:
         if: steps.pytest.outcome == 'success'
         run: pyright
 
-      - name: Commit generated fixes
+      - name: Commit diagnostic cleanup
         if: steps.pytest.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No generated changes"
+            echo "No cleanup changes"
           else
-            git commit -m "fix: resolve full source review findings"
+            git commit -m "chore: remove transient review diagnostics"
             git push origin HEAD:agent/fix-full-source-review
           fi
