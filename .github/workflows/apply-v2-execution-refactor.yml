@@ -32,6 +32,7 @@ jobs:
               scripts/.v2_refactor.part2.b64 \
               scripts/.v2_refactor.part3.b64 \
             | base64 --decode > /tmp/apply_v2_execution_refactor.py
+          sed -i 's|ROOT = Path(__file__).resolve().parents\[1\]|ROOT = Path.cwd()|' /tmp/apply_v2_execution_refactor.py
           set +e
           python /tmp/apply_v2_execution_refactor.py > /tmp/v2_refactor_failure.log 2>&1
           STATUS=$?
