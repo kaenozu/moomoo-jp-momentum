@@ -1,0 +1,51 @@
+name: apply-v2-round-trip-fix
+
+on:
+  push:
+    branches:
+      - agent/v2-execution-reproducibility
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v2-execution-reproducibility
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Apply round-trip correction
+        run: python scripts/apply_v2_round_trip_fix.py
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Validate final implementation
+        run: |
+          python -m pytest tests/ -m 'not slow' -q
+          ruff check src/ tests/ run_daily_cycle.py
+          pyright
+          python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
+
+      - name: Remove temporary correction assets
+        run: |
+          rm scripts/apply_v2_round_trip_fix.py
+          rm .github/workflows/apply-v2-round-trip-fix.yml
+
+      - name: Commit validated implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: validate shared execution round trip'
+          git push origin HEAD:agent/v2-execution-reproducibility
