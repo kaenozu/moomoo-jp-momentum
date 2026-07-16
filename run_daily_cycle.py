@@ -32,17 +32,29 @@ from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
 
-log_dir = Path("logs")
-log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
+    format=LOG_FORMAT,
+    datefmt=LOG_DATE_FORMAT,
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+
+
+def _configure_file_logging() -> None:
+    """実運用CLIでだけファイルログを有効化する。"""
+    root_logger = logging.getLogger()
+    if any(isinstance(handler, logging.FileHandler) for handler in root_logger.handlers):
+        return
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+    root_logger.addHandler(file_handler)
 
 
 def get_daily_cycle_symbols(
@@ -248,6 +260,9 @@ def main() -> int:
         help="古いデータでの続行を明示許可",
     )
     args = parser.parse_args()
+
+    if not args.dry_run:
+        _configure_file_logging()
 
     print("=" * 60)
     print("Moomoo 日次運用サイクル")
