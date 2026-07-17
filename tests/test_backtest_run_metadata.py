@@ -63,7 +63,7 @@ def test_create_run_persists_reproducibility_metadata(tmp_path: Path) -> None:
             assert first[key] == second[key]
         assert first["data_max_date"] == "2026-07-01"
         assert first["market"] == "JP"
-        assert first["engine_version"] == "2.0.0"
+        assert first["engine_version"] == "2.1.0"
         assert first["adjustment_policy"] == "qfq_no_additional_adjustment"
 
         conn.execute(
