@@ -6,7 +6,6 @@ import base64
 import hashlib
 import json
 import math
-import shutil
 import sqlite3
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -173,6 +172,17 @@ def project_table(
 def logical_database_digest(path: str | Path) -> str:
     digest = hashlib.sha256()
     with sqlite3.connect(path) as conn:
+        schema_rows = conn.execute(
+            """
+            SELECT type, name, tbl_name, COALESCE(sql, '')
+            FROM sqlite_master
+            WHERE name NOT LIKE 'sqlite_%'
+            ORDER BY type, name
+            """
+        ).fetchall()
+        for schema_row in schema_rows:
+            digest.update(_canonical_row(tuple(schema_row)).encode("utf-8"))
+            digest.update(b"\n")
         for table in list_user_tables(conn):
             projection = project_table(conn, table)
             digest.update(table.encode("utf-8"))
@@ -190,7 +200,7 @@ def online_backup(source: str | Path, destination: str | Path) -> Path:
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     if destination_path.exists():
         destination_path.unlink()
-    with sqlite3.connect(f"file:{source_path}?mode=ro", uri=True) as source_conn:
+    with sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True) as source_conn:
         with sqlite3.connect(destination_path) as destination_conn:
             source_conn.backup(destination_conn)
     return destination_path
@@ -222,10 +232,7 @@ def _rows_preserved(before: TableProjection, after: TableProjection) -> bool:
 
 def _schema_and_data_snapshot(path: str | Path) -> dict[str, TableProjection]:
     with sqlite3.connect(path) as conn:
-        return {
-            table: project_table(conn, table)
-            for table in list_user_tables(conn)
-        }
+        return {table: project_table(conn, table) for table in list_user_tables(conn)}
 
 
 def validate_database_migration(
@@ -267,15 +274,11 @@ def validate_database_migration(
             after_columns = set(after_first[table].columns)
             missing_columns = set(before_projection.columns) - after_columns
             if missing_columns:
-                errors.append(
-                    f"columns removed from {table}: {sorted(missing_columns)}"
-                )
+                errors.append(f"columns removed from {table}: {sorted(missing_columns)}")
                 changed_tables.append(table)
                 continue
             with sqlite3.connect(copied_database) as conn:
-                comparable_after = project_table(
-                    conn, table, before_projection.columns
-                )
+                comparable_after = project_table(conn, table, before_projection.columns)
             if table in MIGRATION_MANAGED_TABLES:
                 preserved = _rows_preserved(before_projection, comparable_after)
             else:
@@ -296,9 +299,7 @@ def validate_database_migration(
                 tuple(row) for row in conn.execute("PRAGMA foreign_key_check").fetchall()
             )
             run_columns = set(table_columns(conn, "backtest_runs"))
-            required_columns_present = REQUIRED_BACKTEST_RUN_COLUMNS.issubset(
-                run_columns
-            )
+            required_columns_present = REQUIRED_BACKTEST_RUN_COLUMNS.issubset(run_columns)
 
         first_digest = logical_database_digest(copied_database)
         DataStore(Config(str(copied_config)))
@@ -314,9 +315,7 @@ def validate_database_migration(
     if integrity != "ok":
         errors.append(f"integrity_check failed: {integrity}")
     if foreign_key_violations:
-        errors.append(
-            f"foreign_key_check found {len(foreign_key_violations)} violation(s)"
-        )
+        errors.append(f"foreign_key_check found {len(foreign_key_violations)} violation(s)")
     if not required_columns_present:
         errors.append("required backtest_runs metadata columns are missing")
     if not idempotent:
@@ -350,7 +349,10 @@ def _fetch_rows(
         return tuple(dict(row) for row in conn.execute(query, params).fetchall())
 
 
-def _run_snapshot(database: str | Path, run_id: int) -> dict[str, tuple[dict[str, Any], ...]]:
+def _run_snapshot(
+    database: str | Path,
+    run_id: int,
+) -> dict[str, tuple[dict[str, Any], ...]]:
     return {
         "orders": _fetch_rows(
             database,
@@ -491,7 +493,10 @@ def compare_backtest_runs(
     )
 
 
-def write_json_report(report: MigrationValidationReport | BacktestComparisonReport, path: str | Path) -> Path:
+def write_json_report(
+    report: MigrationValidationReport | BacktestComparisonReport,
+    path: str | Path,
+) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -501,7 +506,10 @@ def write_json_report(report: MigrationValidationReport | BacktestComparisonRepo
     return output
 
 
-def write_markdown_report(report: MigrationValidationReport | BacktestComparisonReport, path: str | Path) -> Path:
+def write_markdown_report(
+    report: MigrationValidationReport | BacktestComparisonReport,
+    path: str | Path,
+) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(report, MigrationValidationReport):
@@ -550,7 +558,8 @@ def write_markdown_report(report: MigrationValidationReport | BacktestComparison
                 marker = "expected" if difference.expected else "unexpected"
                 lines.append(
                     f"- `{difference.section}[{difference.key}].{difference.field}` "
-                    f"({marker}): `{difference.legacy_value}` → `{difference.candidate_value}`"
+                    f"({marker}): `{difference.legacy_value}` → "
+                    f"`{difference.candidate_value}`"
                 )
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return output
