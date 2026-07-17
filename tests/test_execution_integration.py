@@ -27,7 +27,7 @@ def make_config(tmp_path: Path) -> Config:
                     "max_position_per_symbol": 1,
                     "market_fill_mode": "next_day_open",
                     "slippage_bps": 0,
-                    "commission": 0,
+                    "commission": 10,
                 },
                 "universe": {
                     "min_trade_price": 1,
@@ -68,7 +68,7 @@ def test_virtual_round_trip_uses_shared_execution_accounting(tmp_path: Path) -> 
         "default",
         "JP.1111",
         "BUY",
-        1,
+        5,
         submitted_at="2026-07-01",
     )
     assert buy is not None
@@ -76,16 +76,17 @@ def test_virtual_round_trip_uses_shared_execution_accounting(tmp_path: Path) -> 
     assert len(buy_fills) == 1
     assert buy_fills[0].price == 110
     positions = manager.get_positions("default")
-    assert [(position.code, position.quantity, position.avg_cost) for position in positions] == [
-        ("JP.1111", 1, 110)
-    ]
-    assert manager.get_cash("default", "2026-07-02") == 890
+    assert [
+        (position.code, position.quantity, position.avg_cost)
+        for position in positions
+    ] == [("JP.1111", 5, 112)]
+    assert manager.get_cash("default", "2026-07-02") == 440
 
     sell = manager.place_order(
         "default",
         "JP.1111",
         "SELL",
-        1,
+        5,
         submitted_at="2026-07-02",
     )
     assert sell is not None
@@ -93,4 +94,14 @@ def test_virtual_round_trip_uses_shared_execution_accounting(tmp_path: Path) -> 
     assert len(sell_fills) == 1
     assert sell_fills[0].price == 120
     assert manager.get_positions("default") == []
-    assert manager.get_cash("default", "2026-07-03") == 1010
+    assert manager.get_cash("default", "2026-07-03") == 1030
+
+    with sqlite3.connect(store.db_path) as conn:
+        closed = conn.execute(
+            """
+            SELECT quantity, avg_cost, realized_pl
+            FROM virtual_positions
+            WHERE strategy_name='default' AND code='JP.1111'
+            """
+        ).fetchone()
+    assert closed == (0, 112.0, 30.0)
