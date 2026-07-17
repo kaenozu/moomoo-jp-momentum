@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable, Literal
 
 Side = Literal["BUY", "SELL"]
-EXECUTION_ENGINE_VERSION = "2.0.0"
+EXECUTION_ENGINE_VERSION = "2.1.0"
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ class FillTransition:
     cash: float
     cash_delta: float
     gross: float
+    commission: float
     realized_pl_delta: float
     position: PositionState
 
@@ -75,8 +76,16 @@ class ExecutionEngine:
             raise ValueError("position counts must be non-negative")
         return max(0, self.max_total_positions - held_count - pending_buy_count)
 
-    def can_afford(self, cash: float, reserved_cash: float, price: float, quantity: int) -> bool:
-        return self.required_cash(price, quantity) <= self.available_cash(cash, reserved_cash) + self.tolerance
+    def can_afford(
+        self,
+        cash: float,
+        reserved_cash: float,
+        price: float,
+        quantity: int,
+    ) -> bool:
+        return self.required_cash(price, quantity) <= (
+            self.available_cash(cash, reserved_cash) + self.tolerance
+        )
 
     def apply_fill(
         self,
@@ -86,7 +95,11 @@ class ExecutionEngine:
         price: float,
         quantity: int,
     ) -> FillTransition:
-        """Apply a fill without performing I/O."""
+        """Apply a fill without performing I/O.
+
+        BUY commission is capitalized into average cost. This keeps full-round-trip
+        realized P/L equal to the actual cash change after both BUY and SELL fees.
+        """
         self._validate_price_quantity(price, quantity)
         if not math.isfinite(cash) or cash < -self.tolerance:
             raise ValueError("cash must be non-negative and finite")
@@ -101,7 +114,11 @@ class ExecutionEngine:
                     f"insufficient cash: required={required:.10f}, cash={cash:.10f}"
                 )
             new_quantity = position.quantity + quantity
-            weighted_cost = position.avg_cost * position.quantity + gross
+            weighted_cost = (
+                position.avg_cost * position.quantity
+                + gross
+                + self.commission
+            )
             new_avg_cost = weighted_cost / new_quantity
             new_cash = max(0.0, cash - required)
             new_position = PositionState(
@@ -113,6 +130,7 @@ class ExecutionEngine:
                 cash=new_cash,
                 cash_delta=-required,
                 gross=gross,
+                commission=self.commission,
                 realized_pl_delta=0.0,
                 position=new_position,
             )
@@ -128,7 +146,9 @@ class ExecutionEngine:
         new_cash = cash + proceeds
         if new_cash < -self.tolerance:
             raise ValueError("fill would make cash negative")
-        realized_delta = (float(price) - position.avg_cost) * quantity - self.commission
+        realized_delta = (
+            (float(price) - position.avg_cost) * quantity - self.commission
+        )
         new_position = PositionState(
             quantity=position.quantity - quantity,
             avg_cost=position.avg_cost,
@@ -138,6 +158,7 @@ class ExecutionEngine:
             cash=max(0.0, new_cash),
             cash_delta=proceeds,
             gross=gross,
+            commission=self.commission,
             realized_pl_delta=realized_delta,
             position=new_position,
         )
