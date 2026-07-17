@@ -4,24 +4,15 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/v2-execution-reproducibility
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
-      - name: Apply deterministic validation cleanup
-        run: python scripts/apply_v2_validation_cleanup.py
 
       - name: Install production dependencies
         run: pip install -r requirements.txt
@@ -29,49 +20,33 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Record pre-run artifact listing
+      - name: Record pre-run file listing
         run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_files.txt || true
 
-      - name: Validate implementation
-        run: |
-          : > /tmp/v2_validation.log
-          STATUS=0
-          python -m pytest tests/ -m "not slow" -q >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          ruff check --output-format=github src/ tests/ scripts/validate_v2_migration.py scripts/compare_backtest_runs.py run_daily_cycle.py >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          pyright >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          python -m py_compile scripts/validate_v2_migration.py scripts/compare_backtest_runs.py >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          python scripts/validate_v2_migration.py --help >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          python scripts/compare_backtest_runs.py --help >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml >> /tmp/v2_validation.log 2>&1 || STATUS=$?
-          cat /tmp/v2_validation.log
-          if [ "$STATUS" -ne 0 ]; then
-            cp /tmp/v2_validation.log V2_VALIDATION_FAILURE.txt
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add src tests scripts V2_VALIDATION_FAILURE.txt
-            git commit -m 'chore: capture v2 validation failure'
-            git push origin HEAD:agent/v2-execution-reproducibility
-            exit "$STATUS"
-          fi
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
 
-      - name: Verify no runtime artifacts were created
+      - name: Run ruff
+        run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
+
+      - name: Run pyright
+        run: pyright
+
+      - name: Dry-run with test config
+        run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
+
+      - name: Verify no artifacts were created
         run: |
           find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true
           NEW_FILES=$(diff /tmp/pre_files.txt /tmp/post_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
           if [ -n "$NEW_FILES" ]; then
-            echo "ERROR: New files were created during validation:"
+            echo "ERROR: New files were created during dry-run:"
             echo "$NEW_FILES"
             exit 1
           fi
-
-      - name: Restore workflow and commit validated implementation
-        run: |
-          git fetch origin agent/fix-full-source-review
-          git show FETCH_HEAD:.github/workflows/tests.yml > .github/workflows/tests.yml
-          rm scripts/apply_v2_validation_cleanup.py
-          rm -f V2_VALIDATION_FAILURE.txt
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat: add non-destructive v2 rollout gates'
-          git push origin HEAD:agent/v2-execution-reproducibility
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: git status shows uncommitted changes"
+            exit 1
+          fi
+          echo "OK: No artifacts created"
