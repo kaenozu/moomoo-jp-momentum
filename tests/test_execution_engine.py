@@ -11,17 +11,52 @@ def test_buy_and_sell_transitions_share_one_accounting_model() -> None:
     assert bought.cash == 490
     assert bought.cash_delta == -510
     assert bought.gross == 500
+    assert bought.commission == 10
     assert bought.position.quantity == 5
-    assert bought.position.avg_cost == 100
+    assert bought.position.avg_cost == 102
 
     sold = engine.apply_fill(bought.cash, bought.position, "SELL", 120, 2)
     assert sold.cash == 720
     assert sold.cash_delta == 230
     assert sold.gross == 240
+    assert sold.commission == 10
     assert sold.position.quantity == 3
-    assert sold.position.avg_cost == 100
-    assert sold.realized_pl_delta == 30
-    assert sold.position.realized_pl == 30
+    assert sold.position.avg_cost == 102
+    assert sold.realized_pl_delta == 26
+    assert sold.position.realized_pl == 26
+
+
+def test_full_round_trip_reconciles_cash_realized_pl_and_total_fees() -> None:
+    initial_cash = 1000.0
+    quantity = 5
+    buy_price = 100.0
+    sell_price = 120.0
+    engine = ExecutionEngine(commission=10)
+
+    bought = engine.apply_fill(
+        initial_cash,
+        PositionState(),
+        "BUY",
+        buy_price,
+        quantity,
+    )
+    sold = engine.apply_fill(
+        bought.cash,
+        bought.position,
+        "SELL",
+        sell_price,
+        quantity,
+    )
+
+    total_fees = bought.commission + sold.commission
+    gross_profit = (sell_price - buy_price) * quantity
+    cash_profit = sold.cash - initial_cash
+
+    assert total_fees == 20
+    assert cash_profit == gross_profit - total_fees == 80
+    assert sold.position.quantity == 0
+    assert sold.realized_pl_delta == cash_profit
+    assert sold.position.realized_pl == cash_profit
 
 
 def test_weighted_average_cost_is_deterministic() -> None:
