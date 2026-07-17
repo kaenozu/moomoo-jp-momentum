@@ -4,39 +4,49 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/v2-execution-reproducibility
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - name: Apply final V2 validation patch
-        run: python scripts/apply_v2_validation_final_patch.py
-      - name: Install dependencies
-        run: pip install -r requirements.txt && pip install -r requirements-dev.txt
-      - name: Validate final implementation
+
+      - name: Install production dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install development dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Record pre-run file listing
+        run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_files.txt || true
+
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
+
+      - name: Run ruff
+        run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
+
+      - name: Run pyright
+        run: pyright
+
+      - name: Dry-run with test config
+        run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
+
+      - name: Verify no artifacts were created
         run: |
-          python -m pytest tests/ -m "not slow" -q
-          ruff check src/ tests/ scripts/validate_v2_migration.py scripts/compare_backtest_runs.py run_daily_cycle.py
-          pyright
-          python -m py_compile scripts/validate_v2_migration.py scripts/compare_backtest_runs.py
-          python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
-      - name: Restore workflow and commit validated source
-        run: |
-          git fetch origin agent/fix-full-source-review
-          git show FETCH_HEAD:.github/workflows/tests.yml > .github/workflows/tests.yml
-          rm scripts/apply_v2_validation_final_patch.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'fix: reject unsafe v2 validation inputs'
-          git push origin HEAD:agent/v2-execution-reproducibility
+          find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true
+          NEW_FILES=$(diff /tmp/pre_files.txt /tmp/post_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
+          if [ -n "$NEW_FILES" ]; then
+            echo "ERROR: New files were created during dry-run:"
+            echo "$NEW_FILES"
+            exit 1
+          fi
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: git status shows uncommitted changes"
+            exit 1
+          fi
+          echo "OK: No artifacts created"
