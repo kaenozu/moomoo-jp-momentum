@@ -29,6 +29,7 @@ REQUIRED_BACKTEST_RUN_COLUMNS = {
     "adjustment_policy",
 }
 
+# These tables may legitimately gain rows as part of DataStore initialization.
 MIGRATION_MANAGED_TABLES = {"corporate_actions", "data_quality_flags"}
 
 
@@ -152,7 +153,9 @@ def project_table(
 ) -> TableProjection:
     selected = tuple(columns or table_columns(conn, table))
     if not selected:
-        return TableProjection(table, (), 0, hashlib.sha256(b"").hexdigest(), ())
+        empty_digest = hashlib.sha256(b"").hexdigest()
+        return TableProjection(table, (), 0, empty_digest, ())
+
     select_clause = ", ".join(_quote_identifier(column) for column in selected)
     order_clause = ", ".join(_quote_identifier(column) for column in selected)
     table_name = _quote_identifier(table)
@@ -195,8 +198,11 @@ def logical_database_digest(path: str | Path) -> str:
 
 
 def online_backup(source: str | Path, destination: str | Path) -> Path:
+    """Create a consistent SQLite backup without modifying the source database."""
     source_path = Path(source).resolve()
     destination_path = Path(destination).resolve()
+    if source_path == destination_path:
+        raise ValueError("source and destination database must be different")
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     if destination_path.exists():
         destination_path.unlink()
@@ -244,6 +250,7 @@ def validate_database_migration(
     source = Path(source_database).resolve()
     if not source.exists():
         raise FileNotFoundError(f"database not found: {source}")
+
     output = Path(output_directory).resolve()
     output.mkdir(parents=True, exist_ok=True)
     copied_database = output / f"{source.stem}.v2-validation{source.suffix or '.db'}"
@@ -267,18 +274,26 @@ def validate_database_migration(
         after_first = _schema_and_data_snapshot(copied_database)
 
         for table, before_projection in before.items():
-            if table not in after_first:
+            after_projection = after_first.get(table)
+            if after_projection is None:
                 errors.append(f"table removed by migration: {table}")
                 changed_tables.append(table)
                 continue
-            after_columns = set(after_first[table].columns)
-            missing_columns = set(before_projection.columns) - after_columns
+
+            missing_columns = set(before_projection.columns) - set(
+                after_projection.columns
+            )
             if missing_columns:
                 errors.append(f"columns removed from {table}: {sorted(missing_columns)}")
                 changed_tables.append(table)
                 continue
+
             with sqlite3.connect(copied_database) as conn:
-                comparable_after = project_table(conn, table, before_projection.columns)
+                comparable_after = project_table(
+                    conn,
+                    table,
+                    before_projection.columns,
+                )
             if table in MIGRATION_MANAGED_TABLES:
                 preserved = _rows_preserved(before_projection, comparable_after)
             else:
@@ -296,16 +311,18 @@ def validate_database_migration(
             integrity_row = conn.execute("PRAGMA integrity_check").fetchone()
             integrity = str(integrity_row[0]) if integrity_row else "missing"
             foreign_key_violations = tuple(
-                tuple(row) for row in conn.execute("PRAGMA foreign_key_check").fetchall()
+                tuple(row) for row in conn.execute("PRAGMA foreign_key_check")
             )
             run_columns = set(table_columns(conn, "backtest_runs"))
-            required_columns_present = REQUIRED_BACKTEST_RUN_COLUMNS.issubset(run_columns)
+            required_columns_present = REQUIRED_BACKTEST_RUN_COLUMNS.issubset(
+                run_columns
+            )
 
         first_digest = logical_database_digest(copied_database)
         DataStore(Config(str(copied_config)))
         second_digest = logical_database_digest(copied_database)
         idempotent = first_digest == second_digest
-    except Exception as exc:  # pragma: no cover - defensive report path
+    except Exception as exc:  # pragma: no cover - defensive reporting path
         errors.append(f"migration failed: {type(exc).__name__}: {exc}")
 
     source_hash_after = file_sha256(source)
@@ -315,7 +332,9 @@ def validate_database_migration(
     if integrity != "ok":
         errors.append(f"integrity_check failed: {integrity}")
     if foreign_key_violations:
-        errors.append(f"foreign_key_check found {len(foreign_key_violations)} violation(s)")
+        errors.append(
+            f"foreign_key_check found {len(foreign_key_violations)} violation(s)"
+        )
     if not required_columns_present:
         errors.append("required backtest_runs metadata columns are missing")
     if not idempotent:
@@ -347,6 +366,24 @@ def _fetch_rows(
     with sqlite3.connect(database) as conn:
         conn.row_factory = sqlite3.Row
         return tuple(dict(row) for row in conn.execute(query, params).fetchall())
+
+
+def _ensure_backtest_run_exists(database: str | Path, run_id: int) -> None:
+    with sqlite3.connect(database) as conn:
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='backtest_runs'"
+        ).fetchone()
+        if table is None:
+            raise ValueError(f"backtest_runs table not found: {database}")
+        row = conn.execute(
+            "SELECT 1 FROM backtest_runs WHERE id=? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"backtest run not found: database={database}, run_id={run_id}"
+            )
 
 
 def _run_snapshot(
@@ -418,6 +455,8 @@ def compare_backtest_runs(
 ) -> BacktestComparisonReport:
     """Compare normalized order, fill, position, and equity outputs."""
     expected = set(expected_difference_fields)
+    _ensure_backtest_run_exists(legacy_database, legacy_run_id)
+    _ensure_backtest_run_exists(candidate_database, candidate_run_id)
     legacy = _run_snapshot(legacy_database, legacy_run_id)
     candidate = _run_snapshot(candidate_database, candidate_run_id)
     differences: list[BacktestDifference] = []
@@ -425,8 +464,7 @@ def compare_backtest_runs(
     for section in ("orders", "fills", "positions", "equity"):
         left_rows = legacy[section]
         right_rows = candidate[section]
-        max_rows = max(len(left_rows), len(right_rows))
-        for index in range(max_rows):
+        for index in range(max(len(left_rows), len(right_rows))):
             key = str(index)
             if index >= len(left_rows):
                 field_name = "__row__"
@@ -456,11 +494,15 @@ def compare_backtest_runs(
                     )
                 )
                 continue
+
             left = left_rows[index]
             right = right_rows[index]
-            fields = sorted(set(left) | set(right))
-            for field_name in fields:
-                if _values_equal(left.get(field_name), right.get(field_name), tolerance):
+            for field_name in sorted(set(left) | set(right)):
+                if _values_equal(
+                    left.get(field_name),
+                    right.get(field_name),
+                    tolerance,
+                ):
                     continue
                 path = f"{section}.{field_name}"
                 differences.append(
@@ -545,7 +587,8 @@ def write_markdown_report(
             "",
             f"- Status: **{report.status}**",
             f"- Legacy run: `{report.legacy_database}` / `{report.legacy_run_id}`",
-            f"- Candidate run: `{report.candidate_database}` / `{report.candidate_run_id}`",
+            f"- Candidate run: `{report.candidate_database}` / "
+            f"`{report.candidate_run_id}`",
             f"- Tolerance: `{report.tolerance}`",
             f"- Differences: `{len(report.differences)}`",
             "",
