@@ -4,12 +4,14 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 import yaml
 
 from src.v2_validation import (
     REQUIRED_BACKTEST_RUN_COLUMNS,
     compare_backtest_runs,
     file_sha256,
+    online_backup,
     validate_database_migration,
     write_json_report,
     write_markdown_report,
@@ -67,10 +69,16 @@ def create_legacy_database(path: Path) -> None:
             INSERT INTO backtest_runs (
                 run_name, strategy_name, start_date, end_date,
                 initial_cash, final_equity
-            ) VALUES ('legacy', 'momentum', '2026-06-01', '2026-06-30', 100000, 103000);
+            ) VALUES (
+                'legacy', 'momentum', '2026-06-01', '2026-06-30',
+                100000, 103000
+            );
             INSERT INTO signals (
                 code, date, signal_type, score, reason, price_at_signal
-            ) VALUES ('JP.1111', '2026-06-01', 'BUY', 80, 'legacy signal', 100);
+            ) VALUES (
+                'JP.1111', '2026-06-01', 'BUY', 80,
+                'legacy signal', 100
+            );
             """
         )
 
@@ -126,6 +134,11 @@ def create_backtest_result_database(path: Path, fill_price: float = 110.0) -> No
     with sqlite3.connect(path) as conn:
         conn.executescript(
             """
+            CREATE TABLE backtest_runs (
+                id INTEGER PRIMARY KEY,
+                strategy_name TEXT NOT NULL
+            );
+            INSERT INTO backtest_runs(id, strategy_name) VALUES (1, 'momentum');
             CREATE TABLE backtest_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id INTEGER NOT NULL,
@@ -169,7 +182,10 @@ def create_backtest_result_database(path: Path, fill_price: float = 110.0) -> No
             );
             INSERT INTO backtest_orders (
                 run_id, code, side, quantity, order_type, status, signal_date
-            ) VALUES (1, 'JP.1111', 'BUY', 1, 'MARKET_SIM', 'FILLED', '2026-07-01');
+            ) VALUES (
+                1, 'JP.1111', 'BUY', 1,
+                'MARKET_SIM', 'FILLED', '2026-07-01'
+            );
             INSERT INTO backtest_positions (
                 run_id, code, quantity, avg_cost, market_price,
                 market_value, unrealized_pl, realized_pl
@@ -183,7 +199,10 @@ def create_backtest_result_database(path: Path, fill_price: float = 110.0) -> No
             """
             INSERT INTO backtest_fills (
                 run_id, code, side, quantity, price, filled_at, fill_mode
-            ) VALUES (1, 'JP.1111', 'BUY', 1, ?, '2026-07-02', 'next_day_open')
+            ) VALUES (
+                1, 'JP.1111', 'BUY', 1, ?,
+                '2026-07-02', 'next_day_open'
+            )
             """,
             (fill_price,),
         )
@@ -241,3 +260,24 @@ def test_validation_reports_are_machine_and_human_readable(tmp_path: Path) -> No
     parsed = json.loads(json_path.read_text(encoding="utf-8"))
     assert parsed["status"] == "PASS"
     assert "# V2 Backtest Comparison" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_backtest_comparison_rejects_unknown_run_id(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy-missing-run.db"
+    candidate = tmp_path / "candidate-missing-run.db"
+    create_backtest_result_database(legacy)
+    create_backtest_result_database(candidate)
+
+    with pytest.raises(ValueError, match="backtest run not found"):
+        compare_backtest_runs(legacy, 999, candidate, 1)
+
+
+def test_online_backup_rejects_source_as_destination(tmp_path: Path) -> None:
+    database = tmp_path / "same.db"
+    create_backtest_result_database(database)
+    before = file_sha256(database)
+
+    with pytest.raises(ValueError, match="must be different"):
+        online_backup(database, database)
+
+    assert file_sha256(database) == before
