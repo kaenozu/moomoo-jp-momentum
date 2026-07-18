@@ -4,7 +4,7 @@
 ファイルパス: src/config.py
 何をするか: YAML設定ファイルの読み込みと管理
 なぜ存在するか: アプリケーション全体の設定を一元管理するため
-関連ファイル: config.example.yaml, main.py
+関連ファイル: config.example.yaml, main.py, filters/quality_risk_filter.py
 """
 
 from pathlib import Path
@@ -48,7 +48,7 @@ class Config:
             設定値
         """
         keys = key_path.split(".")
-        value = self._config
+        value: Any = self._config
 
         for key in keys:
             if isinstance(value, dict) and key in value:
@@ -89,22 +89,27 @@ class Config:
         return self.get("watchlist.max_symbols", 50)
 
     @property
-    def trading_hours(self) -> dict:
+    def trading_hours(self) -> dict[str, Any]:
         """取引時間設定"""
         return self.get("trading_hours", {})
 
     @property
-    def signals_config(self) -> dict:
+    def signals_config(self) -> dict[str, Any]:
         """シグナル判定設定"""
         return self.get("signals", {})
 
     @property
-    def scoring_config(self) -> dict:
+    def quality_filter_config(self) -> dict[str, Any]:
+        """モメンタム戦略で使用する品質・過熱フィルター設定"""
+        return self.get("signals.quality_filter", {})
+
+    @property
+    def scoring_config(self) -> dict[str, Any]:
         """スコアリング設定"""
         return self.get("scoring", {})
 
     @property
-    def benchmark_config(self) -> dict:
+    def benchmark_config(self) -> dict[str, Any]:
         """ベンチマーク設定"""
         return self.get("benchmark", {})
 
