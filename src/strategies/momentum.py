@@ -4,14 +4,15 @@
 ファイルパス: src/strategies/momentum.py
 何をするか: MA上、出来高増、20日高値圏、相対強度を重視する戦術
 なぜ存在するか: 短中期の上昇トレンドを捉えるため
-関連ファイル: base.py, signals.py, scoring.py
+関連ファイル: base.py, signals.py, scoring.py, ../filters/quality_risk_filter.py
 """
 
 from typing import Optional
 
-from ..indicators import StockIndicators
 from ..config import Config
-from . import BaseStrategy, StrategyResult, StrategyRegistry
+from ..filters import QualityRiskFilter
+from ..indicators import StockIndicators
+from . import BaseStrategy, StrategyRegistry, StrategyResult
 
 
 @StrategyRegistry.register("momentum")
@@ -19,6 +20,7 @@ class MomentumStrategy(BaseStrategy):
     """モメンタム戦術"""
 
     def __init__(self, config: Config):
+        """設定からモメンタム条件と任意の品質フィルターを初期化する。"""
         super().__init__(config)
         self.strategy_name = "momentum"
 
@@ -40,12 +42,21 @@ class MomentumStrategy(BaseStrategy):
         self.volume_percentile_threshold = volume_cfg.get("percentile_threshold", 60)
         self.volume_market_low_threshold = volume_cfg.get("market_low_volume_threshold", 0.8)
 
+        # quality_low_risk戦略の過熱回避条件を任意フィルターとして再利用する。
+        quality_cfg = config.quality_filter_config
+        self.quality_filter = QualityRiskFilter(
+            enabled=bool(quality_cfg.get("enabled", False)),
+            max_daily_return=float(quality_cfg.get("max_daily_return", 5.0)),
+            max_return_5d=float(quality_cfg.get("max_return_5d", 10.0)),
+            max_volume_ratio=float(quality_cfg.get("max_volume_ratio", 3.0)),
+        )
+
     def evaluate(
         self,
         indicators: StockIndicators,
         benchmark_returns: Optional[dict] = None,
     ) -> StrategyResult:
-        """モメンタム戦術で評価する"""
+        """モメンタム戦術で評価する。"""
         result = StrategyResult(
             code=indicators.code,
             name=indicators.name,
@@ -72,6 +83,13 @@ class MomentumStrategy(BaseStrategy):
             result.reason = "除外: 売買代金が無効"
             return result
 
+        # 基礎データが有効な候補だけに過熱フィルターを適用する。
+        rejection_reason = self.quality_filter.rejection_reason(indicators)
+        if rejection_reason is not None:
+            result.reason = f"除外: quality_filter: overheat ({rejection_reason})"
+            result.risk_warnings.append(f"quality_filter: {rejection_reason}")
+            return result
+
         # ベンチマーク超過リターンの計算
         if benchmark_returns:
             result.return_5d_vs_benchmark = self._calc_vs_benchmark(
@@ -79,7 +97,7 @@ class MomentumStrategy(BaseStrategy):
                 benchmark_returns.get("return_5d"),
             )
             result.return_20d_vs_benchmark = self._calc_vs_benchmark(
-                None,  # 20日リターンは別途計算が必要
+                None,
                 benchmark_returns.get("return_20d"),
             )
             result.return_60d_vs_benchmark = self._calc_vs_benchmark(
@@ -88,7 +106,7 @@ class MomentumStrategy(BaseStrategy):
             )
 
         # 買い候補条件チェック
-        buy_reasons = []
+        buy_reasons: list[str] = []
         is_buy_candidate = True
 
         # 条件1: close > MA5
@@ -104,10 +122,7 @@ class MomentumStrategy(BaseStrategy):
             is_buy_candidate = False
 
         # 条件3: MA5 > MA25
-        if (
-            indicators.ma5 is not None
-            and indicators.ma5 > indicators.ma25
-        ):
+        if indicators.ma5 is not None and indicators.ma5 > indicators.ma25:
             buy_reasons.append("MA5>MA25（上昇トレンド）")
         else:
             is_buy_candidate = False
@@ -122,7 +137,11 @@ class MomentumStrategy(BaseStrategy):
             is_buy_candidate = False
 
         # 条件5: 5日リターン（プラスだが過熱していないこと）
-        ret_5d = result.return_5d_vs_benchmark if result.return_5d_vs_benchmark is not None else indicators.return_5d
+        ret_5d = (
+            result.return_5d_vs_benchmark
+            if result.return_5d_vs_benchmark is not None
+            else indicators.return_5d
+        )
         if ret_5d is not None and 0 < ret_5d < self.max_return_5d:
             buy_reasons.append(f"5日リターン{ret_5d:.1f}%")
         else:
@@ -143,7 +162,10 @@ class MomentumStrategy(BaseStrategy):
                 vol_ok = indicators.volume_ratio >= self.min_volume_ratio * 0.5
         if vol_ok:
             if indicators.volume_ratio_percentile is not None:
-                buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍(P{indicators.volume_ratio_percentile:.0f})")
+                buy_reasons.append(
+                    f"出来高{indicators.volume_ratio:.1f}倍"
+                    f"(P{indicators.volume_ratio_percentile:.0f})"
+                )
             else:
                 buy_reasons.append(f"出来高{indicators.volume_ratio:.1f}倍")
         else:
@@ -173,7 +195,8 @@ class MomentumStrategy(BaseStrategy):
                 else:
                     result.signal_type = "WATCH"
                     result.reason = (
-                        "監視候補: " + ", ".join(buy_reasons)
+                        "監視候補: "
+                        + ", ".join(buy_reasons)
                         + f"（出来高比率{indicators.volume_ratio:.1f}倍のため監視に格下げ）"
                     )
             else:
@@ -182,7 +205,7 @@ class MomentumStrategy(BaseStrategy):
             return result
 
         # 監視候補チェック
-        watch_reasons = []
+        watch_reasons: list[str] = []
 
         if (
             indicators.close > indicators.ma25
@@ -198,11 +221,7 @@ class MomentumStrategy(BaseStrategy):
             else:
                 vol_low = indicators.volume_ratio < self.min_volume_ratio
 
-        if (
-            indicators.return_5d is not None
-            and indicators.return_5d > 0
-            and vol_low
-        ):
+        if indicators.return_5d is not None and indicators.return_5d > 0 and vol_low:
             watch_reasons.append("リターンは良いが出来高不足")
 
         if (
@@ -225,15 +244,12 @@ class MomentumStrategy(BaseStrategy):
             return result
 
         # 除外
-        exclude_reasons = []
+        exclude_reasons: list[str] = []
 
         if indicators.close < indicators.ma25:
             exclude_reasons.append("終値が25日移動平均線を下回っています")
 
-        if (
-            indicators.ma5 is not None
-            and indicators.ma5 < indicators.ma25
-        ):
+        if indicators.ma5 is not None and indicators.ma5 < indicators.ma25:
             exclude_reasons.append("5日移動平均線が25日移動平均線を下回っています")
 
         if indicators.return_5d is not None and indicators.return_5d < -10:
