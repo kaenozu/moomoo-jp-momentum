@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import math
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
