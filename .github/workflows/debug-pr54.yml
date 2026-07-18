@@ -4,28 +4,98 @@ on:
   pull_request:
 
 jobs:
-  pytest-debug:
+  validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Capture pytest output
-        id: pytest
+
+      - name: Run independent validation commands
         shell: bash
         run: |
           set +e
-          python -m pytest tests/ -m "not slow" -q --tb=short > pytest-output.txt 2>&1
-          STATUS=$?
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+          python -m pytest \
+            tests/test_backtest_ranking.py \
+            tests/test_quality_risk_filter.py \
+            -q --tb=short > targeted-tests.txt 2>&1
+          echo "$?" > targeted-tests.status
+
+          python -m pytest \
+            tests/test_accounting_invariants.py \
+            -q --tb=short > accounting-tests.txt 2>&1
+          echo "$?" > accounting-tests.status
+
+          ruff check --output-format=concise \
+            src/backtest_runner.py \
+            src/ranking.py \
+            src/screener.py \
+            src/strategy_runner.py \
+            src/config.py \
+            src/filters \
+            src/strategies/momentum.py \
+            tests/test_backtest_ranking.py \
+            tests/test_quality_risk_filter.py \
+            tests/test_accounting_invariants.py \
+            > ruff-changed.txt 2>&1
+          echo "$?" > ruff-changed.status
+
+          pyright > pyright.txt 2>&1
+          echo "$?" > pyright.status
+
+          python run_daily_cycle.py \
+            --dry-run \
+            --config tests/fixtures/config.test.yaml \
+            > dry-run.txt 2>&1
+          echo "$?" > dry-run.status
+
+          git diff origin/master...HEAD \
+            -- . ':!.github/workflows/debug-pr54.yml' \
+            > pr54.patch
+
+          git diff --name-only origin/master...HEAD \
+            -- . ':!.github/workflows/debug-pr54.yml' \
+            > changed-files.txt
+
+          zip -q changed-files.zip -@ < changed-files.txt
           exit 0
+
       - uses: actions/upload-artifact@v4
         with:
-          name: pytest-output
-          path: pytest-output.txt
-      - name: Preserve pytest status
+          name: pr54-validation
+          path: |
+            targeted-tests.txt
+            targeted-tests.status
+            accounting-tests.txt
+            accounting-tests.status
+            ruff-changed.txt
+            ruff-changed.status
+            pyright.txt
+            pyright.status
+            dry-run.txt
+            dry-run.status
+            pr54.patch
+            changed-files.txt
+            changed-files.zip
+
+      - name: Preserve required validation status
         shell: bash
-        run: exit "${{ steps.pytest.outputs.status }}"
+        run: |
+          STATUS=0
+          for FILE in \
+            targeted-tests.status \
+            accounting-tests.status \
+            ruff-changed.status \
+            pyright.status
+          do
+            if [ "$(cat "$FILE")" != "0" ]; then
+              STATUS=1
+            fi
+          done
+          exit "$STATUS"
