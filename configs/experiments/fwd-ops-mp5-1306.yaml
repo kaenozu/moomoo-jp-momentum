@@ -1,0 +1,31 @@
+# ファイルパス: configs/experiments/fwd-ops-mp5-1306.yaml
+# 何をするか: 10万円・5銘柄・1306 idle sleeveの実運用フォワード実験を固定する
+# なぜ存在するか: 小額運用時の約定、cash配分、保有枠を再現可能な条件で検証するため
+# 関連ファイル: ../../config.yaml, ../../run_daily_cycle.py, ../../src/virtual_trade.py
+
+manifest_version: 1  # manifestスキーマのバージョン
+extends: "../../config.yaml"  # 継承元設定。実行開始時に下記resolved_configで完全上書きする
+resolution_policy: "frozen_snapshot"  # 実行時は継承元の現在値ではなく、このファイルの固定値を使用する
+immutable_after_start: true  # 実験開始後のmanifest編集を禁止する運用フラグ
+manifest_sha256: "__SHA256_PENDING__"  # 正規化済みmanifestを後続スクリプトがSHA-256で置換する
+base_config_sha256: "__SHA256_PENDING__"  # 実験作成時のconfig.yaml SHA-256を後続スクリプトが置換する
+source_commit: "__GIT_COMMIT_PENDING__"  # 実行コードのGit commit SHAを後続スクリプトが置換する
+created_at: "2026-07-21T00:00:00+09:00"  # 実験開始予定日を含む固定作成時刻
+
+experiment:
+  id: "fwd-ops-mp5-1306-20260721"  # 実験を一意に識別するID
+  purpose: "operational_validation"  # 10万円での実運用挙動検証を目的とする
+
+resolved_config:
+  strategy: "momentum"  # 評価する戦略
+  max_positions: 5  # 小額資金で実際に維持できる最大保有銘柄数
+  idle_cash_policy: "benchmark_sleeve"  # 未使用資金を独立したベンチマーク枠で運用する
+  idle_cash_ticker: "JP.1306"  # idle sleeveとして使用するTOPIX連動ETF
+  initial_cash: 100000  # 実運用想定の初期資金
+  fractional_weights: false  # 端数weightを許可せず実売買に近い数量制約を適用する
+  stop_loss_pct: 5.0  # エントリー後の損失上限率
+  slippage_bps: 10  # 売買価格へ片道10bpsのスリッページを適用する
+  commission: 0  # 現段階では売買手数料を0円とする
+  lot_size_mode: "one_share_simulation"  # 1株単位の仮想約定を使用する
+  fill_time: "next_trading_day_open"  # シグナル翌営業日の始値で約定する
+  benchmark: "JP.1306"  # 運用成績比較の主ベンチマーク
