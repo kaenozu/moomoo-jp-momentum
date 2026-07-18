@@ -1,4 +1,7 @@
-# Moomoo日本株モメンタム検証ツール 設定ファイル
+# ファイルパス: config.example.yaml
+# 何をするか: Moomoo日本株モメンタム検証ツールの設定例を定義する
+# なぜ存在するか: config.yamlを安全かつ再現可能に作成できるようにするため
+# 関連ファイル: src/config.py, src/strategies/momentum.py, src/filters/quality_risk_filter.py
 # config.yaml としてコピーして使用してください
 
 opend:
@@ -56,6 +59,12 @@ signals:
   relative_strength:
     benchmark_code: "JP.1306"
     period_days: 5
+  # momentum候補の過熱をquality_low_risk相当の条件で除外する任意フィルター
+  quality_filter:
+    enabled: false
+    max_daily_return: 5.0
+    max_return_5d: 10.0
+    max_volume_ratio: 3.0
 
 screening:
   min_turnover: 1000000000
