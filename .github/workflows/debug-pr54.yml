@@ -1,9 +1,7 @@
 name: debug-pr54
 
 on:
-  push:
-    branches:
-      - agent/ranking-accounting-manifests-quality-filter
+  pull_request:
 
 jobs:
   pytest-debug:
