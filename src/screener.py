@@ -1,8 +1,10 @@
 """
-スクリーナーモジュール
+スクリーナーモジュール。
 
-indicatorsテーブルから候補を抽出し、スコア順に並び替える。
-role/tradable/価格レンジによるユニバース判定もここで強制する。
+ファイルパス: src/screener.py
+何をするか: indicatorsテーブルから候補を抽出し、スコア順に並び替える
+なぜ存在するか: 同じデータから常に同じ候補順を生成し、運用判断を再現可能にするため
+関連ファイル: scoring.py, signals.py, ranking.py, strategy_runner.py
 """
 
 import logging
@@ -16,6 +18,7 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators
+from .ranking import sort_scored_candidates
 from .scoring import Scorer
 from .signals import SignalDetector
 
@@ -24,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Candidate:
-    """売買候補"""
+    """売買候補。"""
+
     code: str
     name: Optional[str]
     date: str
@@ -52,6 +56,7 @@ class Candidate:
 
 
 def _none_if_nan(value):
+    """pandasのNaNをNoneへ変換する。"""
     if value is None:
         return None
     try:
@@ -63,9 +68,10 @@ def _none_if_nan(value):
 
 
 class Screener:
-    """スクリーナークラス"""
+    """スクリーナークラス。"""
 
     def __init__(self, config: Config):
+        """設定とDBパス、売買価格帯を初期化する。"""
         self.config = config
         self.db_path = Path(config.database_path)
         universe = config.get("universe", {})
@@ -73,6 +79,7 @@ class Screener:
         self.max_trade_price = universe.get("max_trade_price", 20000)
 
     def get_latest_indicators(self, date: Optional[str] = None) -> pd.DataFrame:
+        """指定日または最新日の指標を銘柄コード順で取得する。"""
         if not self.db_path.exists():
             logger.error("データベースが見つかりません: %s", self.db_path)
             return pd.DataFrame()
@@ -101,6 +108,7 @@ class Screener:
         return df
 
     def get_indicators_history(self, code: str, days: int = 30) -> pd.DataFrame:
+        """指定銘柄の指標履歴を新しい順で取得する。"""
         if not self.db_path.exists():
             return pd.DataFrame()
         with sqlite3.connect(self.db_path) as conn:
@@ -116,6 +124,7 @@ class Screener:
             )
 
     def _row_to_indicators(self, row: pd.Series) -> StockIndicators:
+        """DB行をStockIndicatorsへ変換する。"""
         return StockIndicators(
             code=_none_if_nan(row.get("code")) or "",
             name=_none_if_nan(row.get("name")),
@@ -148,6 +157,7 @@ class Screener:
         )
 
     def _apply_universe(self, candidate: Candidate) -> Candidate:
+        """銘柄ロール・売買可否・価格帯を候補判定へ反映する。"""
         role = candidate.role or "trade_candidate"
         tradable = bool(candidate.tradable)
         close = candidate.close or 0
@@ -194,6 +204,7 @@ class Screener:
         return candidate
 
     def screen_candidates(self, date: Optional[str] = None) -> list[Candidate]:
+        """候補を評価し、score DESC・code ASCで返す。"""
         indicators_df = self.get_latest_indicators(date)
         if indicators_df.empty:
             logger.warning("指標データがありません")
@@ -204,12 +215,13 @@ class Screener:
 
         # クロスセクション統計（パーセンタイル等）を計算
         from .indicators import add_cross_sectional_stats
+
         pairs: list[tuple[pd.Series, StockIndicators]] = []
         for _, row in indicators_df.iterrows():
             ind = self._row_to_indicators(row)
             pairs.append((row, ind))
         all_indicators = [ind for _, ind in pairs]
-        all_indicators = add_cross_sectional_stats(all_indicators)
+        add_cross_sectional_stats(all_indicators)
 
         candidates: list[Candidate] = []
 
@@ -244,7 +256,7 @@ class Screener:
             )
             candidates.append(self._apply_universe(candidate))
 
-        candidates.sort(key=lambda x: x.score, reverse=True)
+        candidates = sort_scored_candidates(candidates)
         logger.info(
             "スクリーニング完了: %s銘柄 (候補: %s, 監視: %s, 除外: %s, benchmark: %s)",
             len(candidates),
@@ -266,7 +278,20 @@ class Screener:
             (code, date, signal_type, strategy_name, score, reason, risk_warnings, price_at_signal, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = [(c.code, c.date, c.signal_type, c.strategy_name, c.score, c.reason, c.risk_warnings, c.close, now) for c in rows]
+        params = [
+            (
+                c.code,
+                c.date,
+                c.signal_type,
+                c.strategy_name,
+                c.score,
+                c.reason,
+                c.risk_warnings,
+                c.close,
+                now,
+            )
+            for c in rows
+        ]
         with sqlite3.connect(self.db_path) as conn:
             conn.executemany(sql, params)
         return len(rows)
