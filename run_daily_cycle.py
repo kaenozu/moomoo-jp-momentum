@@ -28,24 +28,39 @@ from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
 
-log_dir = Path("logs")
-log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+_file_logging_configured = False
+
+
+def configure_live_file_logging() -> None:
+    """実運用時だけログファイルを作成する。dry-runとimportはread-onlyに保つ。"""
+    global _file_logging_configured
+    if _file_logging_configured:
+        return
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    handler.setFormatter(formatter)
+    logging.getLogger().addHandler(handler)
+    _file_logging_configured = True
 
 
 def get_daily_cycle_symbols(
     data_store: DataStore,
     markets: Collection[str],
 ) -> list[Symbol]:
-    """dry-runと実運用で共通の日次サイクル対象銘柄を取得する。"""
+    """実運用の日次サイクル対象銘柄を取得する。"""
     return data_store.get_enabled_symbols(
         include_benchmarks=True,
         markets=markets,
@@ -119,6 +134,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
     if dry_run:
         return inspect_dry_run_inputs(config, configured_markets)
 
+    configure_live_file_logging()
     opend_conn = OpenDConnection(config)
     status = opend_conn.connect()
     if not status.connected:
@@ -130,20 +146,20 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
     data_store = DataStore(config)
     data_store.sync_symbols_from_json(config.watchlist_file)
     symbols = get_daily_cycle_symbols(data_store, configured_markets)
-    codes = [s.code for s in symbols]
-    symbols_info = {s.code: s.name for s in symbols}
-    benchmark_codes = {s.code for s in symbols if s.role == "benchmark"}
+    codes = [symbol.code for symbol in symbols]
+    symbols_info = {symbol.code: symbol.name for symbol in symbols}
+    benchmark_codes = {symbol.code for symbol in symbols if symbol.role == "benchmark"}
     results["symbols"] = len(codes)
 
     if quote_ctx:
         quote_service = QuoteService(config, quote_ctx)
         data_dict = {}
-        for i, code in enumerate(codes, 1):
-            logger.info("[%d/%d] %s の日足を取得中...", i, len(codes), code)
-            df = quote_service.get_daily_klines_latest_only(code, num=latest_bar_count)
-            if not df.empty:
-                data_store.save_dataframe_to_daily_bars(df, code)
-                data_dict[code] = df
+        for index, code in enumerate(codes, 1):
+            logger.info("[%d/%d] %s の日足を取得中...", index, len(codes), code)
+            dataframe = quote_service.get_daily_klines_latest_only(code, num=latest_bar_count)
+            if not dataframe.empty:
+                data_store.save_dataframe_to_daily_bars(dataframe, code)
+                data_dict[code] = dataframe
         results["daily_bars"] = len(data_dict)
     else:
         data_dict = {}
@@ -155,12 +171,15 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         benchmark_code = config.get("signals.relative_strength.benchmark_code", "JP.1306")
         indicators_df = add_relative_strength(indicators_df, benchmark_code)
         results["indicators"] = save_indicators_to_db(data_store, indicators_df)
-        results["benchmark_prices"] = save_benchmark_prices_from_indicators(data_store, indicators_df, benchmark_codes)
+        results["benchmark_prices"] = save_benchmark_prices_from_indicators(
+            data_store,
+            indicators_df,
+            benchmark_codes,
+        )
     else:
         results["indicators"] = 0
         results["benchmark_prices"] = 0
 
-    # 鮮度チェック（日足更新後、シグナル判定前）
     guard = DataFreshnessGuard(config)
     freshness = guard.check_freshness()
     if freshness.level == "error" and freshness.days_stale < 9000:
