@@ -52,8 +52,9 @@ def test_quality_filter_null_falls_back_to_empty_mapping(tmp_path: Path) -> None
     assert _config(tmp_path).quality_filter_config == {}
 
 
-def test_nan_score_has_a_deterministic_zero_score_key() -> None:
-    assert score_desc_code_asc_key(math.nan, "JP.7203") == (0.0, "JP.7203")
+def test_non_finite_scores_have_a_deterministic_zero_score_key() -> None:
+    for score in (math.nan, math.inf, -math.inf):
+        assert score_desc_code_asc_key(score, "JP.7203") == (0.0, "JP.7203")
 
 
 def test_signal_warning_applies_configured_penalty(tmp_path: Path) -> None:
