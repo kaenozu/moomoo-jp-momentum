@@ -49,7 +49,6 @@ class StrategyRunner:
             bench_return_5d = None
 
             for indicators in indicators_list:
-                # 戦略ごとにベンチマークリターンを取得する。
                 if (
                     bench_return_5d is None
                     and indicators.return_5d_vs_benchmark is not None
@@ -60,7 +59,7 @@ class StrategyRunner:
                     indicators,
                     {"return_5d": bench_return_5d},
                 )
-                result.score = self.scorer.score(indicators).total
+                result.score = self.scorer.score(indicators, result).total
                 signals.append(result)
 
             ranked_signals = sort_scored_candidates(signals)
