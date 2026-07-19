@@ -54,7 +54,7 @@ class TestIdempotency:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, ("default", "JP.7203", "BUY", 1, "MARKET_SIM", "PENDING", now, now, now))
         cursor = conn.execute("SELECT COUNT(*) FROM virtual_orders")
-        assert cursor.fetchone()[0] == 1  # 1件のみで重複なし
+        assert cursor.fetchone()[0] == 1
         conn.close()
 
     def test_upsert_equity_curve(self):
@@ -83,13 +83,14 @@ class TestDailyCycle:
     """日次サイクルテスト"""
 
     def test_dry_run_returns(self):
-        """dry-runがエラーなく終了する"""
+        """dry-runが外部接続・DB書込みなしで終了する"""
         from run_daily_cycle import run_cycle
-        # --dry-run相当を直接実行（テスト用設定ファイルを使用）
         results = run_cycle("2026-07-01", dry_run=True, config_path="tests/fixtures/config.test.yaml")
         assert results is not None
-        assert results.get("connection") is True
+        assert results.get("connection_attempted") is False
+        assert results.get("database_write_attempted") is False
         assert results.get("symbols", 0) > 0
+        assert results.get("benchmarks", 0) > 0
 
     def test_freshness_guard_stale(self):
         """DBがない場合、鮮度チェックがエラーになる"""
