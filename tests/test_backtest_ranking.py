@@ -44,6 +44,7 @@ class _BuyStrategy:
             strategy_name="test",
             signal_type="BUY_CANDIDATE",
             price_at_signal=indicators.close,
+            risk_warnings=["warning"] if indicators.code == "JP.WARN" else [],
         )
 
 
@@ -60,6 +61,21 @@ class _ScoreByCode:
     ) -> ScoreBreakdown:
         """固定スコアをScoreBreakdownで返す。"""
         return ScoreBreakdown(total=self.scores[indicators.code])
+
+
+class _RequireSignalScorer:
+    """戦略評価結果がスコアラーへ渡ることを検証する。"""
+
+    def score(
+        self,
+        indicators: StockIndicators,
+        signal: StrategyResult | None = None,
+    ) -> ScoreBreakdown:
+        assert signal is not None
+        assert signal.code == indicators.code
+        if indicators.code == "JP.WARN":
+            assert signal.risk_warnings == ["warning"]
+        return ScoreBreakdown(total=80.0)
 
 
 def test_score_order_replaces_database_input_order() -> None:
@@ -121,3 +137,13 @@ def test_ranking_is_independent_of_input_order() -> None:
     expected = ["JP.0002", "JP.0003", "JP.0001"]
     assert [code for code, _, _ in forward] == expected
     assert [code for code, _, _ in reverse] == expected
+
+
+def test_strategy_result_is_passed_to_backtest_scorer() -> None:
+    ranked = _rank_buy_candidates(
+        [("JP.WARN", _indicator("JP.WARN"))],
+        _BuyStrategy(),
+        _RequireSignalScorer(),
+    )
+
+    assert [code for code, _, _ in ranked] == ["JP.WARN"]
