@@ -33,8 +33,9 @@ class Config:
                 f"config.example.yaml を config.yaml としてコピーしてください"
             )
 
-        with open(self.config_path, encoding="utf-8") as f:
-            self._config = yaml.safe_load(f)
+        with open(self.config_path, encoding="utf-8") as file:
+            loaded = yaml.safe_load(file)
+        self._config = loaded if isinstance(loaded, dict) else {}
 
     def get(self, key_path: str, default: Any = None) -> Any:
         """
@@ -91,27 +92,27 @@ class Config:
     @property
     def trading_hours(self) -> dict[str, Any]:
         """取引時間設定"""
-        return self.get("trading_hours", {})
+        return self.get("trading_hours") or {}
 
     @property
     def signals_config(self) -> dict[str, Any]:
         """シグナル判定設定"""
-        return self.get("signals", {})
+        return self.get("signals") or {}
 
     @property
     def quality_filter_config(self) -> dict[str, Any]:
         """モメンタム戦略で使用する品質・過熱フィルター設定"""
-        return self.get("signals.quality_filter", {})
+        return self.get("signals.quality_filter") or {}
 
     @property
     def scoring_config(self) -> dict[str, Any]:
         """スコアリング設定"""
-        return self.get("scoring", {})
+        return self.get("scoring") or {}
 
     @property
     def benchmark_config(self) -> dict[str, Any]:
         """ベンチマーク設定"""
-        return self.get("benchmark", {})
+        return self.get("benchmark") or {}
 
 
 def load_config(config_path: str = "config.yaml") -> Config:
