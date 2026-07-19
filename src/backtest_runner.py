@@ -60,8 +60,12 @@ class _StrategyEvaluator(Protocol):
 class _IndicatorScorer(Protocol):
     """候補ランキングに必要なスコアラーインターフェース。"""
 
-    def score(self, indicators: StockIndicators) -> ScoreBreakdown:
-        """指標から共通スコアを計算する。"""
+    def score(
+        self,
+        indicators: StockIndicators,
+        signal: StrategyResult | None = None,
+    ) -> ScoreBreakdown:
+        """指標と戦略評価結果から共通スコアを計算する。"""
         ...
 
 
@@ -78,7 +82,7 @@ def _rank_buy_candidates(
     evaluated: list[tuple[str, StockIndicators, float]] = []
     for code, indicators in valid_pairs:
         result = strategy.evaluate(indicators)
-        score = scorer.score(indicators).total
+        score = scorer.score(indicators, result).total
         result.score = score
         if result.signal_type == "BUY_CANDIDATE":
             evaluated.append((code, indicators, score))
