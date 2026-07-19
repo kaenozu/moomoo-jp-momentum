@@ -1,4 +1,4 @@
-"""受益権分割をまたぐ価格系列の連続性テスト。"""
+"""QFQ価格と受益権分割メタデータの契約テスト。"""
 
 import sqlite3
 from pathlib import Path
@@ -46,42 +46,40 @@ def _return_pct(store: DataStore, code: str, start: str, end: str) -> float:
     return (end_close - start_close) / start_close * 100
 
 
-def test_1306_split_does_not_create_minus_90_percent_return(tmp_path: Path) -> None:
+def test_1306_qfq_prices_are_not_adjusted_twice(tmp_path: Path) -> None:
     store = _create_store(tmp_path)
     _insert_prices(
         store,
         "JP.1306",
-        [("2026-03-31", 2500.0), ("2026-04-01", 252.0)],
+        [("2026-03-31", 250.0), ("2026-04-01", 252.0)],
     )
 
-    adjusted_return = _return_pct(
+    observed_return = _return_pct(
         store,
         "JP.1306",
         "2026-03-31",
         "2026-04-01",
     )
 
-    assert adjusted_return == pytest.approx(0.8, abs=0.01)
-    assert adjusted_return > -20.0
+    assert observed_return == pytest.approx(0.8, abs=0.01)
 
 
-def test_2559_split_does_not_create_minus_90_percent_return(tmp_path: Path) -> None:
+def test_2559_qfq_prices_are_not_adjusted_twice(tmp_path: Path) -> None:
     store = _create_store(tmp_path)
     _insert_prices(
         store,
         "JP.2559",
-        [("2026-06-08", 20000.0), ("2026-06-09", 2010.0)],
+        [("2026-06-08", 2000.0), ("2026-06-09", 2010.0)],
     )
 
-    adjusted_return = _return_pct(
+    observed_return = _return_pct(
         store,
         "JP.2559",
         "2026-06-08",
         "2026-06-09",
     )
 
-    assert adjusted_return == pytest.approx(0.5, abs=0.01)
-    assert adjusted_return > -20.0
+    assert observed_return == pytest.approx(0.5, abs=0.01)
 
 
 def test_schema_and_confirmed_actions_are_initialized(tmp_path: Path) -> None:
