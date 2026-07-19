@@ -6,6 +6,7 @@ moomoo APIの注文系APIは呼ばない。
 """
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -65,21 +66,65 @@ def get_daily_cycle_settings(config: Config) -> tuple[Collection[str], int]:
     return markets, latest_bar_count
 
 
+def inspect_dry_run_inputs(
+    config: Config,
+    markets: Collection[str],
+) -> dict[str, int | bool]:
+    """外部接続やDB初期化をせず、日次サイクル入力だけを検証する。"""
+    watchlist_path = Path(config.watchlist_file)
+    try:
+        with watchlist_path.open(encoding="utf-8") as file:
+            raw_watchlist = json.load(file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"watchlistを読み込めません: {watchlist_path}") from error
+
+    if not isinstance(raw_watchlist, list):
+        raise RuntimeError("watchlistのトップレベルがlistではありません")
+
+    allowed_markets = {str(market) for market in markets}
+    symbols = 0
+    benchmarks = 0
+    for index, item in enumerate(raw_watchlist):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"watchlist[{index}]がobjectではありません")
+        code = str(item.get("code", "")).strip()
+        if not code:
+            raise RuntimeError(f"watchlist[{index}]にcodeがありません")
+        if not bool(item.get("enabled", True)):
+            continue
+        market = str(item.get("market", "JP"))
+        if allowed_markets and market not in allowed_markets:
+            continue
+        symbols += 1
+        if str(item.get("role", "trade_candidate")) == "benchmark":
+            benchmarks += 1
+
+    if benchmarks == 0:
+        raise RuntimeError("watchlistのbenchmark が0件です")
+
+    return {
+        "connection_attempted": False,
+        "database_write_attempted": False,
+        "virtual_trade_enabled": bool(config.get("virtual_trade.enabled", False)),
+        "symbols": symbols,
+        "benchmarks": benchmarks,
+    }
+
+
 def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
     results: dict[str, int | bool] = {}
     config = load_config(config_path)
     configured_markets, latest_bar_count = get_daily_cycle_settings(config)
 
-    if not dry_run:
-        opend_conn = OpenDConnection(config)
-        status = opend_conn.connect()
-        if not status.connected:
-            logger.error("OpenD接続失敗: %s", status.message)
-            return results
-        quote_ctx = status.quote_context
-    else:
-        opend_conn = None
-        quote_ctx = None
+    if dry_run:
+        return inspect_dry_run_inputs(config, configured_markets)
+
+    opend_conn = OpenDConnection(config)
+    status = opend_conn.connect()
+    if not status.connected:
+        logger.error("OpenD接続失敗: %s", status.message)
+        return results
+    quote_ctx = status.quote_context
     results["connection"] = True
 
     data_store = DataStore(config)
@@ -90,7 +135,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
     benchmark_codes = {s.code for s in symbols if s.role == "benchmark"}
     results["symbols"] = len(codes)
 
-    if not dry_run and quote_ctx:
+    if quote_ctx:
         quote_service = QuoteService(config, quote_ctx)
         data_dict = {}
         for i, code in enumerate(codes, 1):
@@ -104,7 +149,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         data_dict = {}
         results["daily_bars"] = 0
 
-    if not dry_run and data_dict:
+    if data_dict:
         indicators = calculate_indicators_batch(data_dict, symbols_info)
         indicators_df = indicators_to_dataframe(indicators)
         benchmark_code = config.get("signals.relative_strength.benchmark_code", "JP.1306")
@@ -116,75 +161,56 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         results["benchmark_prices"] = 0
 
     # 鮮度チェック（日足更新後、シグナル判定前）
-    if not dry_run:
-        guard = DataFreshnessGuard(config)
-        status = guard.check_freshness()
-        if status.level == "error" and status.days_stale < 9000:
-            raise SystemError(f"データが古すぎるため処理を停止します: {status.message}")
-        if status.level == "warning":
-            logger.warning("データが古いですが処理を続行します: %s", status.message)
+    guard = DataFreshnessGuard(config)
+    freshness = guard.check_freshness()
+    if freshness.level == "error" and freshness.days_stale < 9000:
+        raise SystemError(f"データが古すぎるため処理を停止します: {freshness.message}")
+    if freshness.level == "warning":
+        logger.warning("データが古いですが処理を続行します: %s", freshness.message)
 
-    if not dry_run:
-        screener = Screener(config)
-        candidates = screener.screen_candidates(date=target_date)
-        results["signals"] = screener.save_signals_to_db(candidates)
-    else:
-        candidates = []
-        results["signals"] = 0
+    screener = Screener(config)
+    candidates = screener.screen_candidates(date=target_date)
+    results["signals"] = screener.save_signals_to_db(candidates)
 
-    if not dry_run:
-        manager = VirtualTradeManager(config)
-        vt_config = config.get("virtual_trade", {})
-        score_threshold = vt_config.get("score_threshold_for_order", 70)
-        cash = manager.get_cash("default")
-        created = 0
-        for c in candidates:
-            if c.signal_type != "BUY_CANDIDATE":
-                continue
-            if c.role != "trade_candidate" or not c.tradable:
-                continue
-            if c.score < score_threshold:
-                continue
-            if c.close and c.close > cash:
-                continue
-            order = manager.place_order(
-                strategy_name="default",
-                code=c.code,
-                side="BUY",
-                quantity=1,
-                order_type="MARKET_SIM",
-                submitted_at=c.date,
-            )
-            if order:
-                created += 1
-                cash -= c.close or 0
-        results["virtual_orders"] = created
-    else:
-        results["virtual_orders"] = 0
+    manager = VirtualTradeManager(config)
+    vt_config = config.get("virtual_trade", {})
+    score_threshold = vt_config.get("score_threshold_for_order", 70)
+    cash = manager.get_cash("default")
+    created = 0
+    for candidate in candidates:
+        if candidate.signal_type != "BUY_CANDIDATE":
+            continue
+        if candidate.role != "trade_candidate" or not candidate.tradable:
+            continue
+        if candidate.score < score_threshold:
+            continue
+        if candidate.close and candidate.close > cash:
+            continue
+        order = manager.place_order(
+            strategy_name="default",
+            code=candidate.code,
+            side="BUY",
+            quantity=1,
+            order_type="MARKET_SIM",
+            submitted_at=candidate.date,
+        )
+        if order:
+            created += 1
+            cash -= candidate.close or 0
+    results["virtual_orders"] = created
 
-    if not dry_run:
-        manager = VirtualTradeManager(config)
-        fills = manager.process_fills("default", target_date)
-        results["fills"] = len(fills)
-        exits = manager.generate_exits("default", target_date)
-        results["exits"] = len(exits)
-        results["price_updates"] = manager.update_market_prices("default", target_date)
-        manager.save_equity_curve("default", target_date)
-    else:
-        results["fills"] = 0
-        results["exits"] = 0
-        results["price_updates"] = 0
+    fills = manager.process_fills("default", target_date)
+    results["fills"] = len(fills)
+    exits = manager.generate_exits("default", target_date)
+    results["exits"] = len(exits)
+    results["price_updates"] = manager.update_market_prices("default", target_date)
+    manager.save_equity_curve("default", target_date)
 
-    if not dry_run:
-        alert_mgr = AlertManager(config)
-        alerts = alert_mgr.run_all_checks()
-        results["alerts"] = len(alerts)
-    else:
-        results["alerts"] = 0
+    alert_mgr = AlertManager(config)
+    alerts = alert_mgr.run_all_checks()
+    results["alerts"] = len(alerts)
 
-    if opend_conn and not dry_run:
-        opend_conn.disconnect()
-
+    opend_conn.disconnect()
     return results
 
 
@@ -203,19 +229,19 @@ def main() -> int:
     start = time.time()
     try:
         results = run_cycle(args.date, dry_run=args.dry_run, config_path=args.config)
-    except SystemError as e:
-        logger.error("日次サイクル停止: %s", e)
+    except SystemError as error:
+        logger.error("日次サイクル停止: %s", error)
         return 1
-    except Exception as e:
-        logger.error("日次サイクル失敗: %s", e)
+    except Exception as error:
+        logger.error("日次サイクル失敗: %s", error)
         return 1
 
     elapsed = time.time() - start
     print("\n" + "=" * 60)
     print("日次サイクル結果")
     print("=" * 60)
-    for k, v in results.items():
-        print(f"  {k}: {v}")
+    for key, value in results.items():
+        print(f"  {key}: {value}")
     print(f"  所要時間: {elapsed:.1f}秒")
     print("\n[DONE] dry-run 完了" if args.dry_run else f"\n[DONE] 日次サイクル完了: {args.date}")
     return 0
