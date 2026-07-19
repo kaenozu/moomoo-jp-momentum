@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BenchmarkRecord:
     """ベンチマーク価格記録"""
+
     id: Optional[int] = None
     benchmark_code: str = ""
     date: str = ""
@@ -58,8 +59,8 @@ class BenchmarkManager:
         secondary = benchmark_config.get("secondary", [])
 
         self.benchmark_codes = [primary.get("code", "JP.1306")]
-        for s in secondary:
-            code = s.get("code", "")
+        for secondary_entry in secondary:
+            code = secondary_entry.get("code", "")
             if code and code not in self.benchmark_codes:
                 self.benchmark_codes.append(code)
 
@@ -75,43 +76,31 @@ class BenchmarkManager:
         df: pd.DataFrame,
     ) -> int:
         """
-        ベンチマーク価格を保存する
+        ベンチマーク価格を保存する。
 
-        Args:
-            code: ベンチマークコード
-            df: 日足DataFrame
-
-        Returns:
-            int: 保存件数
+        daily_returnはここでは計算しない。保存データの調整方針を一元化するため、
+        update_daily_returns() が分割調整ポリシーを適用して後から設定する。
         """
         count = 0
         now = datetime.now().isoformat()
 
         with self._get_connection() as conn:
-            prev_close: Optional[float] = None
             for _, row in df.iterrows():
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
-
-                # 前日終値から日次リターンを計算
-                daily_return: Optional[float] = None
-                if prev_close is not None and close is not None and prev_close > 0:
-                    daily_return = (float(close) - float(prev_close)) / float(prev_close) * 100
-                if close is not None:
-                    prev_close = float(close)
 
                 try:
                     conn.execute(
                         """
                         INSERT OR REPLACE INTO benchmark_prices
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, NULL, ?, ?)
                         """,
-                        (code, date, close, daily_return, now, now),
+                        (code, date, close, now, now),
                     )
                     count += 1
-                except sqlite3.Error as e:
-                    logger.error(f"ベンチマーク保存エラー: {code} {date} - {e}")
+                except sqlite3.Error as error:
+                    logger.error("ベンチマーク保存エラー: %s %s - %s", code, date, error)
 
         return count
 
@@ -144,12 +133,12 @@ class BenchmarkManager:
                 for row in rows
             ]
 
-            for i, row in enumerate(rows):
-                if i == 0:
+            for index, row in enumerate(rows):
+                if index == 0:
                     continue
 
-                prev_close = adjusted_closes[i - 1]
-                current_close = adjusted_closes[i]
+                prev_close = adjusted_closes[index - 1]
+                current_close = adjusted_closes[index]
 
                 if prev_close and current_close and prev_close > 0:
                     daily_return = (current_close - prev_close) / prev_close * 100
@@ -262,17 +251,17 @@ class BenchmarkManager:
             if not code:
                 continue
 
-            logger.info(f"ベンチマーク取得: {code}")
+            logger.info("ベンチマーク取得: %s", code)
             df = quote_service.get_daily_klines(code, num=num_days)
 
             if df.empty:
-                logger.warning(f"ベンチマーク取得失敗: {code}")
+                logger.warning("ベンチマーク取得失敗: %s", code)
                 results[code] = 0
                 continue
 
             count = self.save_benchmark_prices(code, df)
             self.update_daily_returns(code)
-            logger.info(f"ベンチマーク保存完了: {code} - {count}件")
+            logger.info("ベンチマーク保存完了: %s - %s件", code, count)
             results[code] = count
 
         return results
