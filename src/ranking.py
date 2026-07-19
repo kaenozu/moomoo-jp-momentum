@@ -7,6 +7,7 @@
 関連ファイル: backtest_runner.py, screener.py, strategy_runner.py, scoring.py
 """
 
+import math
 from collections.abc import Callable, Iterable
 from typing import Protocol, TypeVar
 
@@ -25,6 +26,8 @@ ItemT = TypeVar("ItemT")
 def score_desc_code_asc_key(score: float | None, code: str) -> tuple[float, str]:
     """score降順、code昇順になる安定ソートキーを返す。"""
     normalized_score = float(score) if score is not None else 0.0
+    if not math.isfinite(normalized_score):
+        normalized_score = 0.0
     return (-normalized_score, code)
 
 
