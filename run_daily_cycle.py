@@ -96,7 +96,7 @@ def inspect_dry_run_inputs(
     if not isinstance(raw_watchlist, list):
         raise RuntimeError("watchlistのトップレベルがlistではありません")
 
-    allowed_markets = {str(market) for market in markets}
+    allowed_markets = {str(market).upper() for market in markets}
     symbols = 0
     benchmarks = 0
     for index, item in enumerate(raw_watchlist):
@@ -107,7 +107,7 @@ def inspect_dry_run_inputs(
             raise RuntimeError(f"watchlist[{index}]にcodeがありません")
         if not bool(item.get("enabled", True)):
             continue
-        market = str(item.get("market", "JP"))
+        market = str(item.get("market", "JP")).upper()
         if allowed_markets and market not in allowed_markets:
             continue
         symbols += 1
