@@ -1,0 +1,54 @@
+name: Apply PR54 backtest review fix
+
+on:
+  push:
+    branches:
+      - agent/ranking-accounting-manifests-quality-filter
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: agent/ranking-accounting-manifests-quality-filter
+          fetch-depth: 0
+      - name: Apply focused source replacement
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/backtest_runner.py')
+          text = path.read_text(encoding='utf-8')
+          old_protocol = '''    def score(self, indicators: StockIndicators) -> ScoreBreakdown:
+                  """指標から共通スコアを計算する。"""
+                  ...
+          '''
+          new_protocol = '''    def score(
+                  self,
+                  indicators: StockIndicators,
+                  signal: StrategyResult | None = None,
+              ) -> ScoreBreakdown:
+                  """指標と戦略評価結果から共通スコアを計算する。"""
+                  ...
+          '''
+          if old_protocol not in text:
+              raise SystemExit('scorer protocol target not found')
+          text = text.replace(old_protocol, new_protocol, 1)
+          old_call = '        score = scorer.score(indicators).total\n'
+          new_call = '        score = scorer.score(indicators, result).total\n'
+          if old_call not in text:
+              raise SystemExit('backtest scorer call target not found')
+          path.write_text(text.replace(old_call, new_call, 1), encoding='utf-8')
+          Path('.github/workflows/apply-pr54-backtest-review-fix.yml').unlink()
+      - name: Commit focused fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/backtest_runner.py .github/workflows/apply-pr54-backtest-review-fix.yml
+          git commit -m "fix: include strategy warnings in backtest scores"
+          git push origin HEAD:agent/ranking-accounting-manifests-quality-filter
