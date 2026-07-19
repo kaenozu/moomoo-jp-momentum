@@ -20,9 +20,6 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Record pre-run file listing
-        run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_files.txt || true
-
       - name: Run fast tests
         shell: bash
         run: |
@@ -44,13 +41,16 @@ jobs:
       - name: Run pyright
         run: pyright
 
+      - name: Record pre-dry-run file listing
+        run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_dry_run_files.txt || true
+
       - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
 
-      - name: Verify no artifacts were created
+      - name: Verify dry-run created no artifacts
         run: |
-          find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true
-          NEW_FILES=$(diff /tmp/pre_files.txt /tmp/post_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
+          find data logs reports -type f 2>/dev/null | sort > /tmp/post_dry_run_files.txt || true
+          NEW_FILES=$(diff /tmp/pre_dry_run_files.txt /tmp/post_dry_run_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
           if [ -n "$NEW_FILES" ]; then
             echo "ERROR: New files were created during dry-run:"
             echo "$NEW_FILES"
@@ -61,4 +61,4 @@ jobs:
             echo "ERROR: git status shows uncommitted changes"
             exit 1
           fi
-          echo "OK: No artifacts created"
+          echo "OK: No artifacts created by dry-run"
