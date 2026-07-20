@@ -23,6 +23,7 @@ from src.data_freshness import DataFreshnessGuard
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
 from src.models import Symbol
+from src.portfolio_beta_risk import PortfolioBetaRiskManager
 from src.quote_service import QuoteService
 from src.screener import Screener
 from src.virtual_trade import VirtualTradeManager
@@ -66,7 +67,7 @@ def get_daily_cycle_settings(config: Config) -> tuple[Collection[str], int]:
 
 
 def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "config.yaml") -> dict:
-    results: dict[str, int | bool] = {}
+    results: dict[str, int | float | bool | None] = {}
     config = load_config(config_path)
     configured_markets, latest_bar_count = get_daily_cycle_settings(config)
 
@@ -134,9 +135,28 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
 
     if not dry_run:
         manager = VirtualTradeManager(config)
+
+        # 前日までのpendingを先に約定し、当日終値でexitとβ下限を評価する。
+        fills = manager.process_fills("default", target_date)
+        results["fills"] = len(fills)
+        exits = manager.generate_exits("default", target_date)
+        results["exits"] = len(exits)
+        results["price_updates"] = manager.update_market_prices("default", target_date)
+
+        risk_manager = PortfolioBetaRiskManager(config)
+        decision = risk_manager.apply(manager, "default", target_date)
+        results["holdings_implied_beta"] = decision.snapshot.holdings_implied_beta
+        results["beta_floor_ratio"] = decision.snapshot.target_investment_ratio
+        results["beta_floor_orders"] = decision.trim_orders
+        results["beta_floor_cancelled_buys"] = decision.cancelled_buy_orders
+        results["beta_floor_missing_codes"] = len(decision.snapshot.missing_codes)
+
         vt_config = config.get("virtual_trade", {})
         score_threshold = vt_config.get("score_threshold_for_order", 70)
-        cash = manager.get_cash("default")
+        cash = min(
+            manager.get_cash("default", target_date),
+            decision.max_new_investment,
+        )
         created = 0
         for c in candidates:
             if c.signal_type != "BUY_CANDIDATE":
@@ -159,21 +179,17 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
                 created += 1
                 cash -= c.close or 0
         results["virtual_orders"] = created
-    else:
-        results["virtual_orders"] = 0
-
-    if not dry_run:
-        manager = VirtualTradeManager(config)
-        fills = manager.process_fills("default", target_date)
-        results["fills"] = len(fills)
-        exits = manager.generate_exits("default", target_date)
-        results["exits"] = len(exits)
-        results["price_updates"] = manager.update_market_prices("default", target_date)
         manager.save_equity_curve("default", target_date)
     else:
+        results["virtual_orders"] = 0
         results["fills"] = 0
         results["exits"] = 0
         results["price_updates"] = 0
+        results["holdings_implied_beta"] = None
+        results["beta_floor_ratio"] = 1.0
+        results["beta_floor_orders"] = 0
+        results["beta_floor_cancelled_buys"] = 0
+        results["beta_floor_missing_codes"] = 0
 
     if not dry_run:
         alert_mgr = AlertManager(config)
