@@ -90,6 +90,11 @@ benchmark:
     - code: "JP.2559"
       name: "MAXIS全世界株式（オール・カントリー）上場投信"
 
+# ポートフォリオリスク制御
+risk_controls:
+  min_portfolio_beta: 0.5
+  min_portfolio_beta_holdings_lookback: 60
+
 # データベース設定
 database:
   path: "data/moomoo.db"
