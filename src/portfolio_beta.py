@@ -188,3 +188,50 @@ class HoldingsBetaFloor:
             symbol_betas=symbol_betas,
             missing_codes=tuple(sorted(missing_codes)),
         )
+
+
+def allocate_proportional_reduction(
+    quantities: Mapping[str, int],
+    prices: Mapping[str, float],
+    reduction_value: float,
+) -> dict[str, int]:
+    """目標削減額を整数株へ比例配分する。
+
+    各銘柄の保有比率を極力維持しつつ、少なくとも ``reduction_value`` に
+    到達するまで最大1株ずつ端数を配分する。単元未満株を含む整数数量を前提とする。
+    """
+    positions = {
+        code: (int(quantity), float(prices.get(code, 0.0)))
+        for code, quantity in quantities.items()
+        if int(quantity) > 0 and float(prices.get(code, 0.0)) > 0.0
+    }
+    total_value = sum(quantity * price for quantity, price in positions.values())
+    if reduction_value <= 0.0 or total_value <= 0.0:
+        return {}
+
+    ratio = min(1.0, float(reduction_value) / total_value)
+    allocations: dict[str, int] = {}
+    fractional: list[tuple[float, str]] = []
+    allocated_value = 0.0
+
+    for code, (quantity, price) in positions.items():
+        raw_quantity = quantity * ratio
+        base_quantity = min(quantity, int(raw_quantity))
+        if base_quantity > 0:
+            allocations[code] = base_quantity
+            allocated_value += base_quantity * price
+        if base_quantity < quantity:
+            fractional.append((raw_quantity - base_quantity, code))
+
+    # Largest-remainder法。価格差で多少オーバーしても、削減不足より安全側を選ぶ。
+    for _, code in sorted(fractional, reverse=True):
+        if allocated_value >= reduction_value:
+            break
+        quantity, price = positions[code]
+        current = allocations.get(code, 0)
+        if current >= quantity:
+            continue
+        allocations[code] = current + 1
+        allocated_value += price
+
+    return {code: quantity for code, quantity in allocations.items() if quantity > 0}
