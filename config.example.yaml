@@ -91,6 +91,11 @@ benchmark:
     - code: "JP.2558"
       name: "MAXIS米国株式（S&P500）"
 
+# ポートフォリオリスク制御
+risk_controls:
+  min_portfolio_beta: 0.5
+  min_portfolio_beta_holdings_lookback: 60
+
 database:
   path: "data/moomoo.db"
 
