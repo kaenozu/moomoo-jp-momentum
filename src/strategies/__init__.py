@@ -119,3 +119,7 @@ class StrategyRegistry:
     def list_names(cls) -> list[str]:
         """登録済み戦術名の一覧を返す"""
         return list(cls._strategies.keys())
+
+
+# Cross-sectional戦略はパッケージimport時に登録する。
+from . import sector_relative_momentum as sector_relative_momentum  # noqa: E402,F401

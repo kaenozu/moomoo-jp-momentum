@@ -8,6 +8,8 @@
 """
 
 import logging
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -65,6 +67,44 @@ class StockIndicators:
     volume_ratio_rank: Optional[int] = None
     relative_volume_ratio: Optional[float] = None
     market_median_volume_ratio: Optional[float] = None
+
+
+CrossSectionalObserver = Callable[[list[StockIndicators]], None]
+_cross_sectional_observers: list[weakref.ReferenceType] = []
+
+
+def register_cross_sectional_observer(observer: CrossSectionalObserver) -> None:
+    """日次クロスセクション計算後に呼ぶobserverを弱参照で登録する。"""
+    reference: weakref.ReferenceType
+    if getattr(observer, "__self__", None) is not None:
+        reference = weakref.WeakMethod(observer)
+    else:
+        reference = weakref.ref(observer)
+
+    for existing in _cross_sectional_observers:
+        if existing() == observer:
+            return
+    _cross_sectional_observers.append(reference)
+
+
+def unregister_cross_sectional_observer(observer: CrossSectionalObserver) -> None:
+    """登録済みobserverを解除する。"""
+    _cross_sectional_observers[:] = [
+        reference
+        for reference in _cross_sectional_observers
+        if reference() is not None and reference() != observer
+    ]
+
+
+def _notify_cross_sectional_observers(indicators: list[StockIndicators]) -> None:
+    live_references: list[weakref.ReferenceType] = []
+    for reference in _cross_sectional_observers:
+        observer = reference()
+        if observer is None:
+            continue
+        live_references.append(reference)
+        observer(indicators)
+    _cross_sectional_observers[:] = live_references
 
 
 def _normalize_daily_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -165,30 +205,27 @@ def calculate_indicators(df: pd.DataFrame, code: str, name: Optional[str] = None
 
 
 def add_cross_sectional_stats(indicators: list[StockIndicators]) -> list[StockIndicators]:
-    """クロスセクション統計を計算する（volume_ratio_percentile, relative_volume_ratio等）。
-    全銘柄の指標が揃った後に呼び出すこと。"""
+    """クロスセクション統計を計算し、登録済み戦略へ日次候補集合を通知する。"""
     if not indicators:
         return indicators
 
     ratios = [ind.volume_ratio for ind in indicators if ind.volume_ratio is not None]
-    if not ratios:
-        return indicators
+    if ratios:
+        import statistics
 
-    import statistics
-    market_median = statistics.median(ratios)
-    sorted_ratios = sorted(ratios)
+        market_median = statistics.median(ratios)
+        sorted_ratios = sorted(ratios)
 
-    for ind in indicators:
-        vr = ind.volume_ratio
-        if vr is not None:
-            ind.market_median_volume_ratio = market_median
-            ind.relative_volume_ratio = vr / market_median if market_median > 0 else 1.0
-            # パーセンタイル計算: 値以下の要素の割合
-            count_le = sum(1 for r in sorted_ratios if r <= vr)
-            ind.volume_ratio_percentile = count_le / len(sorted_ratios) * 100
-            # 順位
-            ind.volume_ratio_rank = sum(1 for r in sorted_ratios if r > vr) + 1
+        for ind in indicators:
+            vr = ind.volume_ratio
+            if vr is not None:
+                ind.market_median_volume_ratio = market_median
+                ind.relative_volume_ratio = vr / market_median if market_median > 0 else 1.0
+                count_le = sum(1 for ratio in sorted_ratios if ratio <= vr)
+                ind.volume_ratio_percentile = count_le / len(sorted_ratios) * 100
+                ind.volume_ratio_rank = sum(1 for ratio in sorted_ratios if ratio > vr) + 1
 
+    _notify_cross_sectional_observers(indicators)
     return indicators
 
 

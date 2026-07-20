@@ -81,6 +81,16 @@ scoring:
     high_20d: 10
     risk_warning: -30
 
+# 実験戦略設定
+strategies:
+  sector_relative_momentum:
+    enabled: false  # 実験用、デフォルト無効
+    raw_weight: 0.5
+    relative_weight: 0.5
+    max_sector_active_weight: 1.5
+    top_n_per_sector: 3
+    min_sector_size: 5  # 業種内銘柄数がこれ未満なら業種スキップ
+
 # ベンチマーク設定
 benchmark:
   primary:
