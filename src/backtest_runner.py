@@ -23,7 +23,11 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
-from .portfolio_beta import HoldingsBetaFloor, PortfolioBetaSnapshot
+from .portfolio_beta import (
+    HoldingsBetaFloor,
+    PortfolioBetaSnapshot,
+    allocate_proportional_reduction,
+)
 from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
@@ -163,8 +167,8 @@ class BacktestRunner:
         self,
         day: str,
         pending_orders: list[_PendingOrder],
-    ) -> tuple[PortfolioBetaSnapshot, float, float]:
-        """当日終値のholdings betaと既存/pending投資額を返す。"""
+    ) -> tuple[PortfolioBetaSnapshot, dict[str, float], float]:
+        """当日終値のholdings beta、保有時価、pending BUY額を返す。"""
         position_values = self._position_values_at_close(day)
         snapshot = self.beta_floor.evaluate(position_values, day)
         self.beta_floor_last_snapshot = snapshot
@@ -187,13 +191,93 @@ class BacktestRunner:
                 snapshot.target_investment_ratio,
             )
 
-        current_position_value = sum(position_values.values())
         pending_buy_value = sum(
             order.fill_price * order.quantity + self.commission
             for order in pending_orders
             if order.side == "BUY"
         )
-        return snapshot, current_position_value, pending_buy_value
+        return snapshot, position_values, pending_buy_value
+
+    def _cancel_pending_buys(self, pending_orders: list[_PendingOrder]) -> int:
+        """未約定BUYを取消し、予約cashを解放する。"""
+        cancelled = [order for order in pending_orders if order.side == "BUY"]
+        if not cancelled:
+            return 0
+        for order in cancelled:
+            cost = order.fill_price * order.quantity + self.commission
+            self.reserved_cash = max(0.0, self.reserved_cash - cost)
+        pending_orders[:] = [order for order in pending_orders if order.side != "BUY"]
+        return len(cancelled)
+
+    def _schedule_beta_floor_reductions(
+        self,
+        day: str,
+        position_values: dict[str, float],
+        target_position_value: float,
+        pending_orders: list[_PendingOrder],
+    ) -> tuple[int, float]:
+        """翌営業日openで約定するβ下限用の比例縮小SELLを作成する。"""
+        positions = {
+            position["code"]: position
+            for position in self._get_all_positions()
+            if position["quantity"] > 0
+        }
+        pending_sell_codes = {
+            order.code for order in pending_orders if order.side == "SELL"
+        }
+        pending_sell_value = sum(
+            position_values.get(order.code, 0.0)
+            * min(order.quantity, int(positions.get(order.code, {}).get("quantity", 0)))
+            / max(1, int(positions.get(order.code, {}).get("quantity", 0)))
+            for order in pending_orders
+            if order.side == "SELL" and order.code in positions
+        )
+        effective_position_value = max(
+            0.0,
+            sum(position_values.values()) - pending_sell_value,
+        )
+        reduction_value = max(0.0, effective_position_value - target_position_value)
+        if reduction_value <= 0.0:
+            return 0, 0.0
+
+        quantities = {
+            code: int(position["quantity"])
+            for code, position in positions.items()
+            if code not in pending_sell_codes
+        }
+        prices = {
+            code: position_values[code] / quantity
+            for code, quantity in quantities.items()
+            if quantity > 0 and code in position_values
+        }
+        allocation = allocate_proportional_reduction(
+            quantities,
+            prices,
+            reduction_value,
+        )
+
+        created = 0
+        scheduled_value = 0.0
+        for code, quantity in allocation.items():
+            next_bar = self._next_open_bar(code, day)
+            position = positions.get(code)
+            if next_bar is None or position is None:
+                continue
+            fill_date, next_open = next_bar
+            fill_price = next_open * (1 - self.slippage_bps / 10000)
+            pending_orders.append(_PendingOrder(
+                code=code,
+                side="SELL",
+                quantity=quantity,
+                fill_price=fill_price,
+                fill_date=fill_date,
+                signal_date=day,
+                exit_reason="beta_floor",
+                avg_cost=float(position["avg_cost"]),
+            ))
+            created += 1
+            scheduled_value += prices.get(code, fill_price) * quantity
+        return created, scheduled_value
 
     def run(self, strategy_name: str, start_date: str, end_date: str) -> int:
         """バックテスト実行
@@ -306,11 +390,16 @@ class BacktestRunner:
                         )
                         realized_pl = (order.fill_price - order.avg_cost) * order.quantity
                         conn.execute(
-                            "UPDATE backtest_positions SET quantity=0, realized_pl=realized_pl + ? WHERE run_id=? AND strategy_name=? AND code=?",
-                            (realized_pl, self.run_id, strategy_name, order.code),
+                            "UPDATE backtest_positions SET quantity=MAX(0, quantity - ?), realized_pl=realized_pl + ? WHERE run_id=? AND strategy_name=? AND code=?",
+                            (order.quantity, realized_pl, self.run_id, strategy_name, order.code),
                         )
+                        remaining = conn.execute(
+                            "SELECT quantity FROM backtest_positions WHERE run_id=? AND strategy_name=? AND code=?",
+                            (self.run_id, strategy_name, order.code),
+                        ).fetchone()
                     self.cash += order.fill_price * order.quantity - self.commission
-                    trailing_highs.pop(order.code, None)
+                    if not remaining or remaining[0] <= 0:
+                        trailing_highs.pop(order.code, None)
                     exits_generated += 1
                     fills_processed += 1
 
@@ -367,28 +456,57 @@ class BacktestRunner:
                         ))
 
             # ── Phase 2.5: Holdings Beta Floor ──
-            snapshot, current_position_value, pending_buy_value = self._evaluate_beta_floor(
+            snapshot, position_values, pending_buy_value = self._evaluate_beta_floor(
                 day,
                 pending_orders,
             )
             target_ratio = snapshot.target_investment_ratio
+            current_position_value = sum(position_values.values())
             equity_before_orders = self.cash + current_position_value
             target_total_position_value = equity_before_orders * target_ratio
             desired_cash_reserve = max(
                 0.0,
                 equity_before_orders - target_total_position_value,
             )
+
+            beta_trim_orders = 0
+            beta_trim_value = 0.0
+            if target_ratio < 1.0:
+                cancelled_buys = self._cancel_pending_buys(pending_orders)
+                if cancelled_buys:
+                    logger.info(
+                        "beta floorによりpending BUYを取消: date=%s count=%d",
+                        day,
+                        cancelled_buys,
+                    )
+                pending_buy_value = 0.0
+                beta_trim_orders, beta_trim_value = self._schedule_beta_floor_reductions(
+                    day,
+                    position_values,
+                    target_total_position_value,
+                    pending_orders,
+                )
+                if beta_trim_orders:
+                    logger.info(
+                        "beta floor縮小注文: date=%s orders=%d value=%.0f",
+                        day,
+                        beta_trim_orders,
+                        beta_trim_value,
+                    )
+
+            effective_future_position_value = max(
+                0.0,
+                current_position_value - beta_trim_value,
+            )
             remaining_exposure = max(
                 0.0,
-                target_total_position_value - current_position_value - pending_buy_value,
+                target_total_position_value
+                - effective_future_position_value
+                - pending_buy_value,
             )
-            if target_ratio < 1.0 and current_position_value > target_total_position_value:
-                logger.info(
-                    "beta floor目標超過: date=%s current=%.0f target=%.0f; 強制売却せずexit後に収束",
-                    day,
-                    current_position_value,
-                    target_total_position_value,
-                )
+            if target_ratio < 1.0 and beta_trim_orders:
+                # 同日に縮小SELLと新規BUYを交差させず、翌日約定後に再評価する。
+                remaining_exposure = 0.0
 
             # ── Phase 3: 新規シグナル評価 ──
             day_indicators: list[StockIndicators] = []
