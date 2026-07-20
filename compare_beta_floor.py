@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pandas as pd
 
 from src.backtest_runner import BacktestRunner
-from src.beta_floor_backtest_runner import BetaFloorBacktestRunner
 from src.config import Config, load_config
 from src.strategies import StrategyRegistry
 
@@ -66,11 +65,7 @@ def _result_row(
     }
 
 
-def _print_comparison(
-    strategy_name: str,
-    off: dict[str, Any],
-    on: dict[str, Any],
-) -> None:
+def _print_comparison(strategy_name: str, off: dict[str, Any], on: dict[str, Any]) -> None:
     return_diff = float(on["total_return_pct"]) - float(off["total_return_pct"])
     drawdown_diff = float(on["max_drawdown_pct"]) - float(off["max_drawdown_pct"])
 
@@ -100,7 +95,7 @@ def run_comparison(
     start_date: str,
     end_date: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    baseline_runner = BacktestRunner(config)
+    baseline_runner = BacktestRunner(config, beta_floor_enabled=False)
     baseline_run_id = baseline_runner.run(strategy_name, start_date, end_date)
     baseline = _result_row(
         strategy_name,
@@ -108,7 +103,7 @@ def run_comparison(
         _load_run(config, baseline_run_id),
     )
 
-    beta_runner = BetaFloorBacktestRunner(config, enabled_override=True)
+    beta_runner = BacktestRunner(config, beta_floor_enabled=True)
     beta_run_id = beta_runner.run(strategy_name, start_date, end_date)
     enabled = _result_row(
         strategy_name,
@@ -148,7 +143,7 @@ def main() -> int:
 
     print(
         f"設定: min_portfolio_beta={floor:.2f}, lookback={lookback}, "
-        "benchmark=JP.2559"
+        f"benchmark=JP.2559"
     )
 
     strategies = (
