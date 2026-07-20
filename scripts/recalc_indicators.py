@@ -1,8 +1,8 @@
-"""
-Recalculate indicators from daily_bars for all codes with sufficient history.
+"""daily_bars全期間からindicatorsを再計算する。"""
 
-Uses existing calculate_indicators_batch which calls add_cross_sectional_stats.
-"""
+from __future__ import annotations
+
+import argparse
 import logging
 import sqlite3
 import sys
@@ -10,94 +10,130 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path("C:/gemini-desktop/moomoo").resolve()))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
-from src.indicators import calculate_indicators_batch, indicators_to_dataframe
-from src.data_store import DataStore
+from daily_update import save_benchmark_prices_from_indicators, save_indicators_to_db
 from src.config import load_config
-from src.indicators import add_relative_strength
-
-DB_PATH = "data/moomoo.db"
-MIN_HISTORY = 25
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from src.data_store import DataStore
+from src.indicators import (
+    add_relative_strength,
+    calculate_indicators_batch,
+    indicators_to_dataframe,
 )
+
 logger = logging.getLogger(__name__)
 
 
-def main():
-    config = load_config("config.yaml")
-    data_store = DataStore(config)
-    db_path = Path(DB_PATH)
-
-    # Get all symbols with their names
-    with sqlite3.connect(db_path) as conn:
-        sym_rows = conn.execute(
-            "SELECT code, name FROM symbols WHERE enabled=1"
-        ).fetchall()
-    symbols_info = {r[0]: r[1] for r in sym_rows}
-    logger.info("symbols: %d enabled codes", len(symbols_info))
-
-    # Get all codes in daily_bars
-    with sqlite3.connect(db_path) as conn:
-        bar_codes = [
-            r[0] for r in conn.execute("SELECT DISTINCT code FROM daily_bars").fetchall()
-        ]
-    logger.info("daily_bars codes: %d", len(bar_codes))
-
-    # For each code, read daily_bars sorted by date
-    data_dict = {}
-    for code in bar_codes:
-        with sqlite3.connect(db_path) as conn:
-            df = pd.read_sql_query(
-                "SELECT code, date as time_key, open, high, low, close, volume, turnover "
-                "FROM daily_bars WHERE code = ? ORDER BY date",
-                conn, params=(code,),
-            )
-        if len(df) < MIN_HISTORY:
-            logger.debug("  skip %s: %d rows (< %d)", code, len(df), MIN_HISTORY)
-            continue
-        data_dict[code] = df
-
-    logger.info("codes with >= %d days: %d", MIN_HISTORY, len(data_dict))
-
-    # Calculate indicators (includes cross-sectional stats internally)
-    indicators = calculate_indicators_batch(data_dict, symbols_info)
-    logger.info("indicators computed: %d", len(indicators))
-
-    # Convert to DataFrame
-    df = indicators_to_dataframe(indicators)
-    logger.info("indicators DataFrame: %d rows", len(df))
-
-    if df.empty:
-        logger.error("No indicators computed!")
+def configure_logging() -> None:
+    if logging.getLogger().handlers:
         return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
-    # Add relative strength vs benchmark
-    benchmark_code = config.get("signals.relative_strength.benchmark_code", "JP.1306")
-    df = add_relative_strength(df, benchmark_code)
-    logger.info("relative strength added (benchmark=%s)", benchmark_code)
 
-    # Save to indicators table using the shared helper
-    from daily_update import save_indicators_to_db, save_benchmark_prices_from_indicators
-    saved_count = save_indicators_to_db(data_store, df)
-    benchmark_code_set = set()
+def recalculate(config_path: str, *, min_history: int = 25) -> dict[str, int | str | None]:
+    if min_history <= 0:
+        raise ValueError("min_historyは1以上にしてください")
+
+    config = load_config(config_path)
+    data_store = DataStore(config)
+    db_path = Path(config.database_path)
+
     with sqlite3.connect(db_path) as conn:
-        for r in conn.execute("SELECT code FROM symbols WHERE role='benchmark'").fetchall():
-            benchmark_code_set.add(r[0])
-    bench_count = save_benchmark_prices_from_indicators(data_store, df, benchmark_code_set)
-    logger.info("saved indicators=%d benchmark_prices=%d", saved_count, bench_count)
+        symbol_rows = conn.execute(
+            "SELECT code, name FROM symbols WHERE enabled = 1 ORDER BY code"
+        ).fetchall()
+        bar_codes = [
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT DISTINCT d.code
+                FROM daily_bars d
+                JOIN symbols s ON s.code = d.code
+                WHERE s.enabled = 1
+                  AND COALESCE(s.role, 'trade_candidate') != 'excluded'
+                ORDER BY d.code
+                """
+            ).fetchall()
+        ]
+    symbols_info = {str(row[0]): str(row[1]) for row in symbol_rows}
+    logger.info("symbols=%d daily_bars_codes=%d", len(symbols_info), len(bar_codes))
 
-    # Report
+    data_dict: dict[str, pd.DataFrame] = {}
     with sqlite3.connect(db_path) as conn:
-        cnt = conn.execute("SELECT COUNT(DISTINCT code) FROM indicators").fetchone()[0]
-        total = conn.execute("SELECT COUNT(*) FROM indicators").fetchone()[0]
-        latest = conn.execute("SELECT MAX(date) FROM indicators").fetchone()[0]
-    logger.info("indicators table: %d unique codes, %d rows, latest date=%s", cnt, total, latest)
+        for code in bar_codes:
+            frame = pd.read_sql_query(
+                """
+                SELECT code, date AS time_key, open, high, low, close, volume, turnover
+                FROM daily_bars
+                WHERE code = ?
+                ORDER BY date
+                """,
+                conn,
+                params=(code,),
+            )
+            if len(frame) >= min_history:
+                data_dict[code] = frame
+
+    logger.info("codes_with_history>=%d: %d", min_history, len(data_dict))
+    indicators = calculate_indicators_batch(data_dict, symbols_info)
+    indicators_df = indicators_to_dataframe(indicators)
+    if indicators_df.empty:
+        raise RuntimeError("指標を計算できませんでした")
+
+    benchmark_code = config.get(
+        "signals.relative_strength.benchmark_code",
+        "JP.1306",
+    )
+    indicators_df = add_relative_strength(indicators_df, benchmark_code)
+    saved_count = save_indicators_to_db(data_store, indicators_df)
+
+    with sqlite3.connect(db_path) as conn:
+        benchmark_codes = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT code FROM symbols WHERE role = 'benchmark' AND enabled = 1"
+            ).fetchall()
+        }
+    benchmark_count = save_benchmark_prices_from_indicators(
+        data_store,
+        indicators_df,
+        benchmark_codes,
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT code), COUNT(*), MAX(date) FROM indicators"
+        ).fetchone()
+    result: dict[str, int | str | None] = {
+        "eligible_codes": len(data_dict),
+        "indicator_rows_saved": int(saved_count),
+        "benchmark_rows_saved": int(benchmark_count),
+        "indicator_codes": int(row[0] or 0),
+        "indicator_rows": int(row[1] or 0),
+        "latest_date": row[2],
+    }
+    logger.info("recalculation complete: %s", result)
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="daily_barsからindicatorsを再計算")
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--min-history", type=int, default=25)
+    args = parser.parse_args()
+    configure_logging()
+    try:
+        recalculate(args.config, min_history=args.min_history)
+    except Exception:
+        logger.exception("指標再計算に失敗しました")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
