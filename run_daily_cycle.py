@@ -26,7 +26,7 @@ from src.models import Symbol
 from src.portfolio_beta_risk import PortfolioBetaRiskManager
 from src.quote_service import QuoteService
 from src.screener import Screener
-from src.virtual_trade import VirtualTradeManager
+from src.virtual_trade_safe import OperationalVirtualTradeManager
 
 log_dir = Path("logs")
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -134,7 +134,7 @@ def run_cycle(target_date: str, dry_run: bool = False, config_path: str = "confi
         results["signals"] = 0
 
     if not dry_run:
-        manager = VirtualTradeManager(config)
+        manager = OperationalVirtualTradeManager(config)
 
         # 前日までのpendingを先に約定し、当日終値でexitとβ下限を評価する。
         fills = manager.process_fills("default", target_date)
