@@ -23,6 +23,7 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
+from .portfolio_beta import HoldingsBetaFloor, PortfolioBetaSnapshot
 from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
@@ -50,7 +51,12 @@ BM1306 = "JP.1306"
 class BacktestRunner:
     """バックテスト実行エンジン"""
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: Config,
+        *,
+        beta_floor_enabled: Optional[bool] = None,
+    ):
         self.config = config
         self.db_path = Path(config.database_path)
         self.split_adjustments = SplitAdjustmentService(self.db_path)
@@ -68,6 +74,15 @@ class BacktestRunner:
         universe_cfg = config.get("universe", {})
         self.min_trade_price = universe_cfg.get("min_trade_price", 500)
         self.max_trade_price = universe_cfg.get("max_trade_price", 20000)
+        self.beta_floor = HoldingsBetaFloor(
+            config,
+            self.db_path,
+            enabled_override=beta_floor_enabled,
+        )
+        self.beta_floor_trigger_days = 0
+        self.beta_floor_missing_days = 0
+        self.beta_floor_min_beta: Optional[float] = None
+        self.beta_floor_last_snapshot: Optional[PortfolioBetaSnapshot] = None
 
     def _benchmark_code(self) -> str:
         return self.config.get("signals.relative_strength.benchmark_code", BM1306)
@@ -130,24 +145,85 @@ class BacktestRunner:
             raise RuntimeError("backtest_runs の作成に失敗しました")
         return self.run_id
 
+    def _position_values_at_close(self, day: str) -> dict[str, float]:
+        """当日終値で評価した保有銘柄別時価。"""
+        values: dict[str, float] = {}
+        for position in self._get_all_positions():
+            if position["quantity"] <= 0:
+                continue
+            bars = self._bars_up_to(position["code"], day)
+            if bars.empty:
+                continue
+            values[position["code"]] = (
+                float(bars.iloc[0]["close"]) * int(position["quantity"])
+            )
+        return values
+
+    def _evaluate_beta_floor(
+        self,
+        day: str,
+        pending_orders: list[_PendingOrder],
+    ) -> tuple[PortfolioBetaSnapshot, float, float]:
+        """当日終値のholdings betaと既存/pending投資額を返す。"""
+        position_values = self._position_values_at_close(day)
+        snapshot = self.beta_floor.evaluate(position_values, day)
+        self.beta_floor_last_snapshot = snapshot
+
+        if snapshot.missing_codes:
+            self.beta_floor_missing_days += 1
+        if snapshot.target_investment_ratio < 1.0:
+            self.beta_floor_trigger_days += 1
+            beta = snapshot.holdings_implied_beta
+            if beta is not None:
+                self.beta_floor_min_beta = (
+                    beta
+                    if self.beta_floor_min_beta is None
+                    else min(self.beta_floor_min_beta, beta)
+                )
+            logger.info(
+                "beta floor発動: date=%s holdings_beta=%.4f target_ratio=%.4f",
+                day,
+                beta if beta is not None else float("nan"),
+                snapshot.target_investment_ratio,
+            )
+
+        current_position_value = sum(position_values.values())
+        pending_buy_value = sum(
+            order.fill_price * order.quantity + self.commission
+            for order in pending_orders
+            if order.side == "BUY"
+        )
+        return snapshot, current_position_value, pending_buy_value
+
     def run(self, strategy_name: str, start_date: str, end_date: str) -> int:
         """バックテスト実行
 
         1日ループの順序:
           ① pending約定処理（前日に作成した注文の約定）
           ② exit判定（既存ポジションのみ）
-          ③ 新規シグナル評価 → pending注文作成
+          ③ holdings beta評価 → 新規シグナル評価 → pending注文作成
           ④ idle cash allocation
           ⑤ equity curve更新
         """
         self.strategy_name = strategy_name
         self.cash = self.initial_cash
         self.reserved_cash = 0.0  # pending BUY予約額（signal日で増加、fill日で解放）
+        self.beta_floor_trigger_days = 0
+        self.beta_floor_missing_days = 0
+        self.beta_floor_min_beta = None
+        self.beta_floor_last_snapshot = None
         run_id = self.create_run(strategy_name, start_date, end_date)
 
         strategy = StrategyRegistry.get(strategy_name, self.config)
         days = self._trading_days(start_date, end_date)
-        logger.info("バックテスト: %s %s〜%s (%d日, strategy=%s)", start_date, end_date, len(days), strategy_name)
+        logger.info(
+            "バックテスト: %s %s〜%s (%d日, strategy=%s, beta_floor=%s)",
+            start_date,
+            end_date,
+            len(days),
+            strategy_name,
+            self.beta_floor.enabled,
+        )
         if not days:
             raise ValueError(f"バックテスト対象日のデータがありません: {start_date}〜{end_date}")
 
@@ -290,6 +366,30 @@ class BacktestRunner:
                             avg_cost=avg_cost,
                         ))
 
+            # ── Phase 2.5: Holdings Beta Floor ──
+            snapshot, current_position_value, pending_buy_value = self._evaluate_beta_floor(
+                day,
+                pending_orders,
+            )
+            target_ratio = snapshot.target_investment_ratio
+            equity_before_orders = self.cash + current_position_value
+            target_total_position_value = equity_before_orders * target_ratio
+            desired_cash_reserve = max(
+                0.0,
+                equity_before_orders - target_total_position_value,
+            )
+            remaining_exposure = max(
+                0.0,
+                target_total_position_value - current_position_value - pending_buy_value,
+            )
+            if target_ratio < 1.0 and current_position_value > target_total_position_value:
+                logger.info(
+                    "beta floor目標超過: date=%s current=%.0f target=%.0f; 強制売却せずexit後に収束",
+                    day,
+                    current_position_value,
+                    target_total_position_value,
+                )
+
             # ── Phase 3: 新規シグナル評価 ──
             day_indicators: list[StockIndicators] = []
             valid_pairs = []
@@ -328,6 +428,8 @@ class BacktestRunner:
                 code = sym["code"]
 
                 available_cash = self.cash - self.reserved_cash
+                if target_ratio < 1.0:
+                    available_cash = max(0.0, available_cash - desired_cash_reserve)
                 if ind.close and ind.close > available_cash:
                     continue
 
@@ -341,7 +443,17 @@ class BacktestRunner:
                 fill_date, next_open = next_bar
 
                 fill_price = next_open * (1 + self.slippage_bps / 10000)
-                qty = max(1, int(target_pos_value / fill_price))
+                if target_ratio < 1.0:
+                    max_order_value = min(
+                        target_pos_value * target_ratio,
+                        remaining_exposure,
+                        available_cash,
+                    )
+                    qty = int(max_order_value / fill_price)
+                    if qty <= 0:
+                        continue
+                else:
+                    qty = max(1, int(target_pos_value / fill_price))
                 cost = fill_price * qty + self.commission
                 if cost > available_cash:
                     continue
@@ -355,6 +467,8 @@ class BacktestRunner:
                     signal_date=day,
                 ))
                 self.reserved_cash += cost
+                if target_ratio < 1.0:
+                    remaining_exposure = max(0.0, remaining_exposure - cost)
                 slots_available -= 1
                 orders_created += 1
 
@@ -363,7 +477,12 @@ class BacktestRunner:
                 bm_today = self._benchmark_value(idle_code, day)
                 if bm_today is not None and idle_bench_prev is not None:
                     daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                    self.cash = self.cash * (1 + daily_bm_ret)
+                    if target_ratio < 1.0:
+                        protected_cash = min(self.cash, desired_cash_reserve)
+                        benchmark_cash = self.cash - protected_cash
+                        self.cash = protected_cash + benchmark_cash * (1 + daily_bm_ret)
+                    else:
+                        self.cash = self.cash * (1 + daily_bm_ret)
                 idle_bench_prev = bm_today
 
             # ── Phase 5: equity curve更新 ──
@@ -431,8 +550,14 @@ class BacktestRunner:
                  self.run_id),
             )
 
-        logger.info("バックテスト完了: return=%.2f%%, orders=%d, fills=%d, exits=%d",
-                     total_return, orders_created, fills_processed, exits_generated)
+        logger.info(
+            "バックテスト完了: return=%.2f%%, orders=%d, fills=%d, exits=%d, beta_floor_days=%d",
+            total_return,
+            orders_created,
+            fills_processed,
+            exits_generated,
+            self.beta_floor_trigger_days,
+        )
         return run_id
 
     def _get_position(self, code: str) -> Optional[dict]:
