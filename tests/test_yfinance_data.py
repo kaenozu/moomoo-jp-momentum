@@ -214,3 +214,46 @@ def test_fetch_adjusted_history_skips_invalid_price_row() -> None:
     )
 
     assert list(result.bars["time_key"]) == ["2022-01-04"]
+
+
+def test_record_splits_preserves_user_confirmed_action(tmp_path: Path) -> None:
+    from src.yfinance_data import DetectedSplit
+
+    db_path = tmp_path / "test.db"
+    _create_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO corporate_actions (
+                code, action_type, effective_date, ratio_before, ratio_after,
+                adjustment_factor, source_name, status, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "JP.1306",
+                "split",
+                "2026-04-01",
+                1.0,
+                10.0,
+                0.1,
+                "user-confirmed",
+                "confirmed",
+                "verified",
+            ),
+        )
+
+    record_splits(
+        db_path,
+        "JP.1306",
+        (DetectedSplit("2026-04-01", 5.0),),
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT ratio_after, adjustment_factor, source_name, notes
+            FROM corporate_actions
+            WHERE code = 'JP.1306'
+            """
+        ).fetchone()
+    assert row == (10.0, 0.1, "user-confirmed", "verified")
