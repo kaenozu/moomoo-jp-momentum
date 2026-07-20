@@ -126,3 +126,27 @@ def test_disabled_floor_keeps_full_investment(tmp_path):
 
     assert snapshot.holdings_implied_beta == pytest.approx(0.2)
     assert snapshot.target_investment_ratio == pytest.approx(1.0)
+
+
+def test_allocate_proportional_reduction_with_single_share_positions():
+    from src.portfolio_beta import allocate_proportional_reduction
+
+    quantities = {f"JP.{index:04d}": 1 for index in range(20)}
+    prices = {code: 1_000.0 for code in quantities}
+
+    allocation = allocate_proportional_reduction(quantities, prices, 4_000.0)
+
+    assert sum(allocation.values()) == 4
+    assert all(quantity == 1 for quantity in allocation.values())
+
+
+def test_allocate_proportional_reduction_preserves_weight_approximately():
+    from src.portfolio_beta import allocate_proportional_reduction
+
+    allocation = allocate_proportional_reduction(
+        {"JP.1111": 10, "JP.2222": 20},
+        {"JP.1111": 1_000.0, "JP.2222": 1_000.0},
+        9_000.0,
+    )
+
+    assert allocation == {"JP.1111": 3, "JP.2222": 6}
