@@ -219,6 +219,7 @@ def record_splits(
                 source_name = excluded.source_name,
                 status = excluded.status,
                 notes = excluded.notes
+            WHERE corporate_actions.source_name = 'yfinance'
             """,
             params,
         )
