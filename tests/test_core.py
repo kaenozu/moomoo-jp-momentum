@@ -246,6 +246,10 @@ class TestDailyBarSource:
         config = Config("tests/fixtures/config.test.yaml")
         config._config = {"database": {"path": str(db_path)}}
         store = DataStore(config)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO symbols(code, name) VALUES('JP.0001', 'テスト')"
+            )
 
         df = pd.DataFrame([{
             "time_key": "2026-07-01",

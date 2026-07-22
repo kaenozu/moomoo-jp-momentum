@@ -120,7 +120,7 @@ def job_send_alerts() -> None:
 def job_weekly_report() -> None:
     """週次レポートジョブ"""
     logger.info("週次レポートジョブを実行します")
-    _run_script(["generate_reports.py", "--weekly"], timeout=600, name="週次レポート")
+    _run_script(["strategy_compare.py", "--csv", "--html"], timeout=600, name="週次レポート")
 
 
 def parse_cron(cron_str: str) -> dict:

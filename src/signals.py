@@ -72,8 +72,11 @@ class SignalDetector:
         self.volume_market_low_threshold = volume_cfg.get("market_low_volume_threshold", 0.8)
 
     def _is_etf(self, code: str) -> bool:
-        """ETFかどうかを簡易判定する"""
-        return code.startswith("JP.13") or code.startswith("JP.25")
+        """設定に明示されたETFコードだけをETFとして扱う。"""
+        configured = self.config.get("strategies.etf_rotation.codes", None)
+        if configured is None:
+            configured = ["JP.2559", "JP.1306", "JP.1320", "JP.2558", "JP.2563"]
+        return code in {str(item) for item in configured}
 
     def check_data_quality(self, indicators: StockIndicators) -> tuple[bool, str]:
         """データ品質チェック"""

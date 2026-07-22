@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BenchmarkRecord:
     """ベンチマーク価格記録"""
-
     id: Optional[int] = None
     benchmark_code: str = ""
     date: str = ""
@@ -59,8 +58,8 @@ class BenchmarkManager:
         secondary = benchmark_config.get("secondary", [])
 
         self.benchmark_codes = [primary.get("code", "JP.1306")]
-        for secondary_entry in secondary:
-            code = secondary_entry.get("code", "")
+        for s in secondary:
+            code = s.get("code", "")
             if code and code not in self.benchmark_codes:
                 self.benchmark_codes.append(code)
 
@@ -70,38 +69,30 @@ class BenchmarkManager:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def save_benchmark_prices(
-        self,
-        code: str,
-        df: pd.DataFrame,
-    ) -> int:
-        """
-        ベンチマーク価格を保存する。
-
-        daily_returnはここでは計算しない。保存データの調整方針を一元化するため、
-        update_daily_returns() が分割調整ポリシーを適用して後から設定する。
-        """
+    def save_benchmark_prices(self, code: str, df: pd.DataFrame) -> int:
+        """Save benchmark prices without precomputing unadjusted returns."""
         count = 0
         now = datetime.now().isoformat()
-
         with self._get_connection() as conn:
             for _, row in df.iterrows():
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
-
                 try:
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO benchmark_prices
+                        INSERT INTO benchmark_prices
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
                         VALUES (?, ?, ?, NULL, ?, ?)
+                        ON CONFLICT(benchmark_code, date) DO UPDATE SET
+                            close = excluded.close,
+                            daily_return = NULL,
+                            updated_at = excluded.updated_at
                         """,
                         (code, date, close, now, now),
                     )
                     count += 1
-                except sqlite3.Error as error:
-                    logger.error("ベンチマーク保存エラー: %s %s - %s", code, date, error)
-
+                except sqlite3.Error as exc:
+                    logger.error("ベンチマーク保存エラー: %s %s - %s", code, date, exc)
         return count
 
     def update_daily_returns(self, code: str) -> int:
@@ -133,12 +124,12 @@ class BenchmarkManager:
                 for row in rows
             ]
 
-            for index, row in enumerate(rows):
-                if index == 0:
+            for i, row in enumerate(rows):
+                if i == 0:
                     continue
 
-                prev_close = adjusted_closes[index - 1]
-                current_close = adjusted_closes[index]
+                prev_close = adjusted_closes[i - 1]
+                current_close = adjusted_closes[i]
 
                 if prev_close and current_close and prev_close > 0:
                     daily_return = (current_close - prev_close) / prev_close * 100
@@ -251,17 +242,17 @@ class BenchmarkManager:
             if not code:
                 continue
 
-            logger.info("ベンチマーク取得: %s", code)
+            logger.info(f"ベンチマーク取得: {code}")
             df = quote_service.get_daily_klines(code, num=num_days)
 
             if df.empty:
-                logger.warning("ベンチマーク取得失敗: %s", code)
+                logger.warning(f"ベンチマーク取得失敗: {code}")
                 results[code] = 0
                 continue
 
             count = self.save_benchmark_prices(code, df)
             self.update_daily_returns(code)
-            logger.info("ベンチマーク保存完了: %s - %s件", code, count)
+            logger.info(f"ベンチマーク保存完了: {code} - {count}件")
             results[code] = count
 
         return results

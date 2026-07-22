@@ -9,7 +9,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Optional
 
 from .config import Config
 from .indicators import StockIndicators
@@ -18,16 +18,9 @@ from .signals import SignalResult
 logger = logging.getLogger(__name__)
 
 
-class RiskWarningSource(Protocol):
-    """リスク警告を持つシグナル評価結果。"""
-
-    risk_warnings: list
-
-
 @dataclass
 class ScoreBreakdown:
     """スコア内訳"""
-
     trend: float = 0.0
     volume: float = 0.0
     relative_strength: float = 0.0
@@ -42,67 +35,63 @@ class Scorer:
 
     def __init__(self, config: Config):
         self.config = config
-        scoring_config = config.get("scoring", {}) or {}
-        self.enable_risk_penalty = scoring_config.get(
-            "enable_risk_penalty",
-            True,
-        )
-        weights = scoring_config.get("weights", {}) or {}
-        configured_warning_penalty = float(weights.get("risk_warning", -30.0))
-        self.risk_warning_penalty = min(0.0, configured_warning_penalty)
+        scoring_config = config.get("scoring", {})
+        self.enable_risk_penalty = scoring_config.get("enable_risk_penalty", True)
+        configured_weights = scoring_config.get("weights", {})
+        self.weights = {
+            "trend": float(configured_weights.get("trend", 30)),
+            "volume": float(configured_weights.get("volume", 20)),
+            "relative_strength": float(configured_weights.get("relative_strength", 25)),
+            "liquidity": float(configured_weights.get("liquidity", 15)),
+            "high_20d": float(configured_weights.get("high_20d", 10)),
+            "risk_warning": abs(float(configured_weights.get("risk_warning", -30))),
+        }
+        configured_weights = scoring_config.get("weights", {})
+        self.weights = {
+            "trend": float(configured_weights.get("trend", 30)),
+            "volume": float(configured_weights.get("volume", 20)),
+            "relative_strength": float(configured_weights.get("relative_strength", 25)),
+            "liquidity": float(configured_weights.get("liquidity", 15)),
+            "high_20d": float(configured_weights.get("high_20d", 10)),
+            "risk_warning": abs(float(configured_weights.get("risk_warning", -30))),
+        }
 
-        screening_config = config.get("screening", {}) or {}
-        self.min_turnover = screening_config.get(
-            "min_turnover",
-            1_000_000_000,
-        )
+        screening_config = config.get("screening", {})
+        self.min_turnover = screening_config.get("min_turnover", 1_000_000_000)
         self.risk_daily_return_threshold = screening_config.get(
-            "risk_daily_return_threshold",
-            8.0,
+            "risk_daily_return_threshold", 8.0
         )
         self.risk_return_5d_threshold = screening_config.get(
-            "risk_return_5d_threshold",
-            15.0,
+            "risk_return_5d_threshold", 15.0
         )
         self.risk_volume_ratio_threshold = screening_config.get(
-            "risk_volume_ratio_threshold",
-            5.0,
+            "risk_volume_ratio_threshold", 5.0
         )
 
     def score_trend(self, indicators: StockIndicators) -> float:
         """トレンドスコア（最大30点）"""
         score = 0.0
 
-        if (
-            indicators.ma5 is not None
-            and indicators.close is not None
-            and indicators.close > indicators.ma5
-        ):
+        if indicators.ma5 is not None and indicators.close is not None and indicators.close > indicators.ma5:
             score += 10.0
-        if (
-            indicators.ma25 is not None
-            and indicators.close is not None
-            and indicators.close > indicators.ma25
-        ):
+        if indicators.ma25 is not None and indicators.close is not None and indicators.close > indicators.ma25:
             score += 10.0
-        if (
-            indicators.ma5 is not None
-            and indicators.ma25 is not None
-            and indicators.ma5 > indicators.ma25
-        ):
+        if indicators.ma5 is not None and indicators.ma25 is not None and indicators.ma5 > indicators.ma25:
             score += 10.0
 
-        return score
+        return score / 30.0 * self.weights["trend"]
 
     def score_volume(self, indicators: StockIndicators) -> float:
-        """出来高スコア（最大20点）。"""
+        """出来高スコア（最大20点）
+        クロスセクションのパーセンタイル加点と絶対値加点のハイブリッド。"""
         score = 0.0
         ratio = indicators.volume_ratio
-        percentile = indicators.volume_ratio_percentile
+        pct = indicators.volume_ratio_percentile
 
         if ratio is None:
             return score
 
+        # 絶対値加点（従来）
         if ratio >= 1.2:
             score += 4.0
         if ratio >= 1.5:
@@ -110,36 +99,34 @@ class Scorer:
         if ratio >= 2.0:
             score += 3.0
 
-        if percentile is not None:
-            if percentile >= 80:
+        # クロスセクション相対加点
+        if pct is not None:
+            if pct >= 80:
                 score += 10.0
-            elif percentile >= 60:
+            elif pct >= 60:
                 score += 6.0
-            elif percentile < 20:
+            elif pct < 20:
                 score -= 5.0
 
-        return max(0.0, min(20.0, score))
+        return max(0.0, min(20.0, score)) / 20.0 * self.weights["volume"] / 20.0 * self.weights["volume"]
 
     def score_relative_strength(self, indicators: StockIndicators) -> float:
-        """相対強度スコア（最大25点）。"""
+        """相対強度スコア（最大25点）。ベンチマーク比較ベース。"""
         score = 0.0
-        relative_return = (
-            indicators.return_5d_vs_benchmark
-            if indicators.return_5d_vs_benchmark is not None
-            else indicators.return_5d
-        )
+        # 相対強度を優先、なければ5日リターンで代替
+        ret = indicators.return_5d_vs_benchmark if indicators.return_5d_vs_benchmark is not None else indicators.return_5d
 
-        if relative_return is None:
+        if ret is None:
             return score
 
-        if relative_return > 0:
+        if ret > 0:
             score += 8.0
-        if relative_return >= 2.0:
+        if ret >= 2.0:
             score += 8.0
-        if relative_return >= 5.0:
+        if ret >= 5.0:
             score += 9.0
 
-        return min(score, 25.0)
+        return min(score, 25.0) / 25.0 * self.weights["relative_strength"] / 25.0 * self.weights["relative_strength"]
 
     def score_liquidity(self, indicators: StockIndicators) -> float:
         """流動性スコア（最大15点）"""
@@ -157,7 +144,7 @@ class Scorer:
         if turnover_oku >= 100:
             score += 3.0
 
-        return min(score, 15.0)
+        return min(score, 15.0) / 15.0 * self.weights["liquidity"] / 15.0 * self.weights["liquidity"]
 
     def score_high_20d(self, indicators: StockIndicators) -> float:
         """20日高値圏スコア（最大10点）"""
@@ -172,39 +159,30 @@ class Scorer:
         if distance >= -2.0:
             score += 5.0
 
-        return min(score, 10.0)
+        return min(score, 10.0) / 10.0 * self.weights["high_20d"] / 10.0 * self.weights["high_20d"]
 
     def calculate_risk_penalty(self, indicators: StockIndicators) -> float:
-        """指標由来のリスク減点を計算する（最大-30点）。"""
+        """リスク減点を計算する（最大-30点）"""
         if not self.enable_risk_penalty:
             return 0.0
 
         penalty = 0.0
 
-        if (
-            indicators.daily_return is not None
-            and indicators.daily_return >= self.risk_daily_return_threshold
-        ):
+        if indicators.daily_return is not None and indicators.daily_return >= self.risk_daily_return_threshold:
             penalty -= 10.0
-        if (
-            indicators.return_5d is not None
-            and indicators.return_5d >= self.risk_return_5d_threshold
-        ):
+        if indicators.return_5d is not None and indicators.return_5d >= self.risk_return_5d_threshold:
             penalty -= 10.0
-        if (
-            indicators.volume_ratio is not None
-            and indicators.volume_ratio >= self.risk_volume_ratio_threshold
-        ):
+        if indicators.volume_ratio is not None and indicators.volume_ratio >= self.risk_volume_ratio_threshold:
             penalty -= 10.0
 
-        return max(penalty, -30.0)
+        return max(penalty, -30.0) / 30.0 * self.weights["risk_warning"] / 30.0 * self.weights["risk_warning"]
 
     def score(
         self,
         indicators: StockIndicators,
-        signal: Optional[RiskWarningSource] = None,
+        signal: Optional[SignalResult] = None,
     ) -> ScoreBreakdown:
-        """指標とシグナル警告からスコアを計算する。"""
+        """スコアを計算する"""
         if indicators.ma25 is None or indicators.close is None:
             return ScoreBreakdown(total=0.0)
 
@@ -214,21 +192,8 @@ class Scorer:
         liquidity = self.score_liquidity(indicators)
         high_20d = self.score_high_20d(indicators)
         risk_penalty = self.calculate_risk_penalty(indicators)
-        if (
-            self.enable_risk_penalty
-            and signal is not None
-            and signal.risk_warnings
-        ):
-            risk_penalty = min(risk_penalty, self.risk_warning_penalty)
 
-        total = (
-            trend
-            + volume
-            + relative_strength
-            + liquidity
-            + high_20d
-            + risk_penalty
-        )
+        total = trend + volume + relative_strength + liquidity + high_20d + risk_penalty
         total = max(0.0, min(100.0, total))
 
         return ScoreBreakdown(
@@ -250,8 +215,7 @@ def score_batch(
     """複数銘柄のスコアを一括計算する"""
     if len(indicators_list) != len(signal_results):
         raise ValueError(
-            f"indicators_list ({len(indicators_list)}) と "
-            f"signal_results ({len(signal_results)}) の長さが一致しません"
+            f"indicators_list ({len(indicators_list)}) と signal_results ({len(signal_results)}) の長さが一致しません"
         )
 
     scorer = Scorer(config)
@@ -262,12 +226,8 @@ def score_batch(
         results.append((indicators, signal, score_breakdown))
 
     if results:
-        average_score = sum(result[2].total for result in results) / len(results)
-        logger.info(
-            "スコアリング完了: %s銘柄 (平均スコア: %.1f)",
-            len(results),
-            average_score,
-        )
+        avg_score = sum(r[2].total for r in results) / len(results)
+        logger.info("スコアリング完了: %s銘柄 (平均スコア: %.1f)", len(results), avg_score)
     else:
         logger.info("スコアリング完了: 0銘柄")
 

@@ -1,10 +1,8 @@
 """
-スクリーナーモジュール。
+スクリーナーモジュール
 
-ファイルパス: src/screener.py
-何をするか: indicatorsテーブルから候補を抽出し、スコア順に並び替える
-なぜ存在するか: 同じデータから常に同じ候補順を生成し、運用判断を再現可能にするため
-関連ファイル: scoring.py, signals.py, ranking.py, strategy_runner.py
+indicatorsテーブルから候補を抽出し、スコア順に並び替える。
+role/tradable/価格レンジによるユニバース判定もここで強制する。
 """
 
 import logging
@@ -18,7 +16,6 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators
-from .ranking import sort_scored_candidates
 from .scoring import Scorer
 from .signals import SignalDetector
 
@@ -27,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Candidate:
-    """売買候補。"""
-
+    """売買候補"""
     code: str
     name: Optional[str]
     date: str
@@ -56,7 +52,6 @@ class Candidate:
 
 
 def _none_if_nan(value):
-    """pandasのNaNをNoneへ変換する。"""
     if value is None:
         return None
     try:
@@ -68,10 +63,9 @@ def _none_if_nan(value):
 
 
 class Screener:
-    """スクリーナークラス。"""
+    """スクリーナークラス"""
 
     def __init__(self, config: Config):
-        """設定とDBパス、売買価格帯を初期化する。"""
         self.config = config
         self.db_path = Path(config.database_path)
         universe = config.get("universe", {})
@@ -79,7 +73,6 @@ class Screener:
         self.max_trade_price = universe.get("max_trade_price", 20000)
 
     def get_latest_indicators(self, date: Optional[str] = None) -> pd.DataFrame:
-        """指定日または最新日の指標を銘柄コード順で取得する。"""
         if not self.db_path.exists():
             logger.error("データベースが見つかりません: %s", self.db_path)
             return pd.DataFrame()
@@ -108,7 +101,6 @@ class Screener:
         return df
 
     def get_indicators_history(self, code: str, days: int = 30) -> pd.DataFrame:
-        """指定銘柄の指標履歴を新しい順で取得する。"""
         if not self.db_path.exists():
             return pd.DataFrame()
         with sqlite3.connect(self.db_path) as conn:
@@ -124,13 +116,11 @@ class Screener:
             )
 
     def _row_to_indicators(self, row: pd.Series) -> StockIndicators:
-        """DB行をStockIndicatorsへ変換する。必須終値の欠損は明示的に拒否する。"""
-        code = _none_if_nan(row.get("code")) or ""
-        date = _none_if_nan(row.get("date")) or ""
+        code = str(_none_if_nan(row.get("code")) or "")
+        date = str(_none_if_nan(row.get("date")) or "")
         close = _none_if_nan(row.get("close"))
         if close is None:
-            raise ValueError(f"終値がありません: code={code}, date={date}")
-
+            raise ValueError(f"close is missing: code={code}, date={date}")
         return StockIndicators(
             code=code,
             name=_none_if_nan(row.get("name")),
@@ -163,7 +153,6 @@ class Screener:
         )
 
     def _apply_universe(self, candidate: Candidate) -> Candidate:
-        """銘柄ロール・売買可否・価格帯を候補判定へ反映する。"""
         role = candidate.role or "trade_candidate"
         tradable = bool(candidate.tradable)
         close = candidate.close or 0
@@ -210,7 +199,6 @@ class Screener:
         return candidate
 
     def screen_candidates(self, date: Optional[str] = None) -> list[Candidate]:
-        """候補を評価し、score DESC・code ASCで返す。"""
         indicators_df = self.get_latest_indicators(date)
         if indicators_df.empty:
             logger.warning("指標データがありません")
@@ -221,13 +209,12 @@ class Screener:
 
         # クロスセクション統計（パーセンタイル等）を計算
         from .indicators import add_cross_sectional_stats
-
         pairs: list[tuple[pd.Series, StockIndicators]] = []
         for _, row in indicators_df.iterrows():
             ind = self._row_to_indicators(row)
             pairs.append((row, ind))
         all_indicators = [ind for _, ind in pairs]
-        add_cross_sectional_stats(all_indicators)
+        all_indicators = add_cross_sectional_stats(all_indicators)
 
         candidates: list[Candidate] = []
 
@@ -262,7 +249,7 @@ class Screener:
             )
             candidates.append(self._apply_universe(candidate))
 
-        candidates = sort_scored_candidates(candidates)
+        candidates.sort(key=lambda x: x.score, reverse=True)
         logger.info(
             "スクリーニング完了: %s銘柄 (候補: %s, 監視: %s, 除外: %s, benchmark: %s)",
             len(candidates),
@@ -274,30 +261,32 @@ class Screener:
         return candidates
 
     def save_signals_to_db(self, candidates: list[Candidate]) -> int:
-        """シグナルをSQLiteに保存する。benchmarkはsignalsには保存しない。"""
-        rows = [c for c in candidates if c.signal_type != "BENCHMARK"]
+        """benchmarkを除き、signals.idを維持してUPSERTする。"""
+        rows = [item for item in candidates if item.signal_type != "BENCHMARK"]
         if not rows:
             return 0
         now = datetime.now().isoformat()
         sql = """
-            INSERT OR REPLACE INTO signals
-            (code, date, signal_type, strategy_name, score, reason, risk_warnings, price_at_signal, created_at)
+            INSERT INTO signals
+            (code, date, signal_type, strategy_name, score, reason,
+             risk_warnings, price_at_signal, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(strategy_name, code, date) DO UPDATE SET
+                signal_type = excluded.signal_type,
+                score = excluded.score,
+                reason = excluded.reason,
+                risk_warnings = excluded.risk_warnings,
+                price_at_signal = excluded.price_at_signal,
+                created_at = excluded.created_at
         """
         params = [
-            (
-                c.code,
-                c.date,
-                c.signal_type,
-                c.strategy_name,
-                c.score,
-                c.reason,
-                c.risk_warnings,
-                c.close,
-                now,
-            )
-            for c in rows
+            (item.code, item.date, item.signal_type, item.strategy_name,
+             item.score, item.reason, item.risk_warnings, item.close, now)
+            for item in rows
         ]
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
             conn.executemany(sql, params)
         return len(rows)
+
