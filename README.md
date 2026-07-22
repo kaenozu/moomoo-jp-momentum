@@ -7,7 +7,7 @@
 - **目的**: データ取得 → 売買候補抽出 → アプリ内仮想検証 → 人間が確認して手動注文
 - **対象**: 日本株、ETF、REIT（東証プライム中心）
 - **初期資金想定**: 5万円〜20万円
-- **主な比較対象**: 2559（オルカン系ETF）、1306（TOPIX ETF）
+- **主な比較対象**: primary=1306（TOPIX）、secondary=1321（日経225）、reference=2559（全世界株式）
 
 ## 重要な制約
 
@@ -230,4 +230,16 @@ python database_backup.py --config config.yaml restore \
 python database_backup.py --config config.yaml restore \
   backups/<backup>.sqlite3 data/recovery/moomoo-restored.db \
   --portfolio default
+```
+
+
+## ベンチマークと価格調整
+
+比較役割は `benchmark.primary` / `benchmark.secondary` / `benchmark.reference` から解決します。
+初期設定は 1306（TOPIX）/ 1321（日経225）/ 2559（全世界株式）です。
+`corporate_actions` に登録した分割係数は、バックテストのベンチマーク価格系列に自動適用されます。
+生の `daily_bars` は監査可能性のため書き換えません。異常値は `data_quality_flags` に記録します。
+
+```bash
+python scripts/rerun_p2_benchmarks.py --config config.yaml
 ```

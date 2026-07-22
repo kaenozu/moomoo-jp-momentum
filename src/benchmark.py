@@ -23,6 +23,12 @@ from typing import Optional
 import pandas as pd
 
 from .config import Config
+from .benchmarking import (
+    benchmark_return,
+    ensure_benchmark_schema,
+    load_benchmark_specs,
+    seed_configured_actions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +56,11 @@ class BenchmarkManager:
         self.config = config
         self.db_path = Path(config.database_path)
 
-        # ベンチマークコードを設定から取得
-        benchmark_config = config.get("benchmark", {})
-        primary = benchmark_config.get("primary", {})
-        secondary = benchmark_config.get("secondary", [])
-
-        self.benchmark_codes = [primary.get("code", "JP.1306")]
-        for s in secondary:
-            self.benchmark_codes.append(s.get("code", ""))
+        self.benchmarks = load_benchmark_specs(config)
+        self.benchmark_codes = [item.code for item in self.benchmarks.all()]
+        with self._get_connection() as connection:
+            ensure_benchmark_schema(connection)
+            seed_configured_actions(connection, config)
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""
@@ -204,18 +207,11 @@ class BenchmarkManager:
         Returns:
             Optional[float]: リターン（%）。データ不足の場合はNone
         """
-        df = self.get_benchmark_prices(code, start_date, end_date)
-
-        if df.empty or len(df) < 2:
-            return None
-
-        start_price = df.iloc[0]["close"]
-        end_price = df.iloc[-1]["close"]
-
-        if start_price and end_price and start_price > 0:
-            return (end_price - start_price) / start_price * 100
-
-        return None
+        with self._get_connection() as connection:
+            _, _, result = benchmark_return(
+                connection, code, start_date, end_date
+            )
+        return result
 
     def fetch_and_save_benchmarks(
         self,

@@ -21,6 +21,7 @@ from typing import Any
 import yaml
 
 from src.backtest_runner import BacktestRunner
+from src.benchmarking import load_benchmark_specs, load_run_benchmark_results
 from src.config import Config, load_config
 from src.scoring import Scorer
 from src.signals import SignalResult
@@ -249,6 +250,7 @@ def _load_report(
             "WHERE run_id = ? ORDER BY date",
             (run_id,),
         ).fetchall()
+        benchmark_rows = load_run_benchmark_results(connection, run_id)
     if run is None or not curve:
         raise RuntimeError("backtest result is incomplete")
 
@@ -272,18 +274,24 @@ def _load_report(
         / plan.account_initial_cash
         * 100.0
     )
-    benchmark_1306 = run["benchmark_1306_return"]
-    benchmark_2559 = run["benchmark_2559_return"]
-    excess_1306 = (
-        total_return - float(benchmark_1306)
-        if benchmark_1306 is not None
+    specs = load_benchmark_specs(config)
+    benchmark_by_role = {row["role"]: row for row in benchmark_rows}
+    primary_row = benchmark_by_role.get("primary")
+    primary_return = primary_row["return_pct"] if primary_row else None
+    excess_primary = (
+        total_return - float(primary_return)
+        if primary_return is not None
         else None
     )
-    excess_2559 = (
-        total_return - float(benchmark_2559)
-        if benchmark_2559 is not None
-        else None
-    )
+    benchmark_payload: dict[str, Any] = {}
+    for spec in specs.all():
+        row = benchmark_by_role.get(spec.role)
+        value = row["return_pct"] if row else None
+        excess = total_return - float(value) if value is not None else None
+        benchmark_payload[f"{spec.code}_return_pct"] = (
+            float(value) if value is not None else None
+        )
+        benchmark_payload[f"excess_vs_{spec.code}_pct"] = excess
     trade_count = int(run["trade_count"] or 0)
     raw_profit_factor = run["profit_factor"]
     profit_factor = (
@@ -296,7 +304,7 @@ def _load_report(
         trading_days=len(adjusted_curve),
         trade_count=trade_count,
         total_return_pct=total_return,
-        excess_vs_1306=excess_1306,
+        excess_vs_1306=excess_primary,
         profit_factor=profit_factor,
         max_drawdown_pct=max_drawdown,
         min_trading_days=min_trading_days,
@@ -342,20 +350,10 @@ def _load_report(
             "profit_factor": profit_factor,
             "closed_trade_count": trade_count,
         },
-        "benchmarks": {
-            "JP.1306_return_pct": (
-                float(benchmark_1306)
-                if benchmark_1306 is not None
-                else None
-            ),
-            "excess_vs_JP.1306_pct": excess_1306,
-            "JP.2559_return_pct": (
-                float(benchmark_2559)
-                if benchmark_2559 is not None
-                else None
-            ),
-            "excess_vs_JP.2559_pct": excess_2559,
+        "benchmark_roles": {
+            spec.role: spec.code for spec in specs.all()
         },
+        "benchmarks": benchmark_payload,
         "evidence_requirements": {
             "minimum_trading_days": min_trading_days,
             "minimum_closed_trades": min_closed_trades,

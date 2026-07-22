@@ -22,6 +22,7 @@ import sqlite3
 
 from src.config import load_config
 from src.backtest_runner import BacktestRunner
+from src.benchmarking import load_run_benchmark_results
 from src.strategies import StrategyRegistry
 
 
@@ -55,11 +56,15 @@ def display_run_summary(conn, run_id: int):
     print(f"  初期資金: {run['initial_cash']:,.0f}円")
     print(f"  最終資産: {run['final_equity']:,.0f}円")
     print(f"  総リターン: {run['total_return_pct']:.2f}%")
-    if run['benchmark_2559_return']:
-        print(f"  ベンチマークリターン: {run['benchmark_2559_return']:.2f}%")
-        print(f"  ベンチマーク超過: {run['excess_vs_2559']:.2f}%")
-    if run['benchmark_1306_return']:
-        print(f"  副ベンチマーク: {run['benchmark_1306_return']:.2f}%")
+    for benchmark in load_run_benchmark_results(conn, run_id):
+        value = benchmark["return_pct"]
+        excess = benchmark["excess_return_pct"]
+        value_text = f"{value:.2f}%" if value is not None else "N/A"
+        excess_text = f"{excess:.2f}%" if excess is not None else "N/A"
+        print(
+            f"  {benchmark['role']}: {benchmark['benchmark_code']} "
+            f"return={value_text}, excess={excess_text}"
+        )
 
     cnt = conn.execute("SELECT COUNT(*) FROM backtest_fills WHERE run_id=? AND side='SELL'", (run_id,)).fetchone()[0]
     print(f"  クローズドトレード: {cnt}件")

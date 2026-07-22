@@ -73,12 +73,25 @@ scoring:
 
 benchmark:
   primary:
-    code: "JP.2559"
-    name: "MAXIS 全世界株式（オール・カントリー）上場投信"
+    code: JP.1306
+    name: NEXT FUNDS TOPIX連動型上場投信
   secondary:
-    - code: "JP.1306"
-      name: "TOPIX連動型ETF"
-
+    code: JP.1321
+    name: NEXT FUNDS 日経225連動型上場投信
+  reference:
+    code: JP.2559
+    name: MAXIS全世界株式（オール・カントリー）上場投信
+corporate_actions:
+- code: JP.2559
+  action_date: '2026-06-09'
+  action_type: split
+  ratio_before: 1
+  ratio_after: 10
+  adjustment_factor: 0.1
+  status: confirmed
+  source_name: user-confirmed requirement; issuer notice pending attachment
+  source_url: ''
+  notes: 受益権1口を10口へ分割。分割前価格を0.1倍して連続系列化する。
 database:
   path: "data/moomoo.db"
 
