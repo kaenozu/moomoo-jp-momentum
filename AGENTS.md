@@ -16,6 +16,9 @@
 - **yfinance validation: PASS** (close_corr=0.9999, daily_return_corr=0.9999, MA agree=99.8%)
 - 既存テストは 100件パス (2026-07-15確認)
 - lint / pyright はクリーン (P0核心ファイル)
+- **P0/P1検証完了** (2026-07-15)
+  - P0: backtest audit, missing symbols, quota-aware fetch, price consistency
+  - P1: daily update, backtest robustness, data bias audit
 
 ## P0完了状況 (2026-07-15)
 
@@ -45,6 +48,49 @@
 1. P0変更をcommit/push（チェックポイント）
 2. 20 delisted銘柄を無効化 (enabled=0)
 3. P1検証作業開始
+
+## P1完了状況 (2026-07-15)
+
+### P1-1: Daily update dry-run ✅
+- quota確認: used=0, remaining=100
+- dry-run: 851 symbols identified, batch processing functional
+- ETF権限エラー: JP.1306で`request_history_kline`失敗 → `--mode latest`で対応可能
+
+### P1-2: Backtest robustness ✅
+- momentum戦略: +5.11% (max_positions=30)
+- 設定差異（max_positions）による結果違いのみ、ロジックにバグなし
+- 同じ設定で再実行すれば結果は再現可能
+
+### P1-3: Data bias audit ✅
+- サバイバーシップバイアス: PASS (`enabled=1`フィルタが全モジュールで適用中)
+- ルックアヘッドバイアス: PASS (全データアクセスが`date<=day`で制限)
+- データソース区別: PASS (moomoo=`actual`/yfinance=`estimated`でDBに明記)
+- yfinance推定誤差: 軽微（volume_ratio等の出来高指標に推定誤差あり）
+
+### P1-4: Result recording ✅
+- 詳細: `docs/validation/p1_validation_report.md`
+
+### P1 次のステップ
+1. 段階的比較計画に進む（100→200→300→366銘柄）
+2. moomoo quota回復後、不足29銘柄を補完
+
+## P2完了状況 (2026-07-15)
+
+### P2-0: Baseline Record ✅
+- 設定固定: max_positions=30, stop_loss=-8%, cost=0
+- 詳細: `docs/validation/p2_baseline.md`
+
+### P2-1: Extended Period Backtest ✅
+- 短期(40日): momentum +5.11%, quality_low_risk +5.37% → 2559/1306を上回る
+- 長期(120日): momentum +14.77%, quality_low_risk +12.93% → 2559/1306に大幅劣後
+- **結論**: 強気相場では個別株戦略が指数に追いつかない
+- 詳細: `docs/validation/p2_validation_report.md`
+
+### P2 次のステップ
+1. 月別分解分析（どの月で負けたか）
+2. momentum / quality_low_risk の重複分析
+3. 戦略改善の方向性検討
+4. ペーパートレード開始
 
 ## 主な変更ファイル
 
@@ -84,10 +130,12 @@ moomoo OpenD / K-line 取得で以下の制限あり。
 
 - 購読枠 100銘柄 → historyモードでは回避済み
 - レート制限 60 req / 30 sec → 1秒delayで対策済み
-- 履歴K-line枠 **100 stocks/week** → 未解決。366銘柄全取得には複数週かかる可能性あり
+- 履履歴K-line枠 **100 stocks/week** → 未解決。366銘柄全取得には複数週かかる可能性あり
 - **現状**: moomoo(127) + yfinance(210) = 337/366 (92.1%) まで補完済み
 
-## 7/8以降の手順
+## 次の手順
+
+履順
 
 履歴K-line枠が回復したら、不足29銘柄をmoomooで補完する。
 
@@ -104,14 +152,18 @@ python universe_diagnostics.py --date 2026-07-08 --csv
 python historical_backtest.py --from 2026-05-21 --to 2026-06-30 --strategy all --csv
 ```
 
-## 段階的比較計画
+## 段階的比較計画（終了）
 
-履歴K-line枠の制限があるため、以下の段階で比較する。
+旧計画「100 → 200 → 300 → 366銘柄」の段階的比較は終了した。
 
-- 100銘柄版
-- 200銘柄版
-- 300銘柄版
-- 366銘柄完全版
+2026-07-15時点:
+- symbols: 871
+- enabled: 851
+- daily_bars coverage: 851 / 851（100%）
+- delisted等: 20銘柄を無効化済み
+
+段階的なデータカバレッジ拡張は完了したため、
+今後は期間拡張、パラメータ堅牢性、フォワード検証を優先する。
 
 各段階で以下を記録する。
 
@@ -137,15 +189,32 @@ BUY候補数が増えること自体は目的ではない。最重要指標は�
 - **有望**: どちらかが 2559 / 1306 を上回る
 - **失敗**: BUY候補は増えたが、stop_loss と drawdown も増える
 
-## バックテスト結果（暫定: 337 codes, yfinance補完版）
+## バックテスト結果（851 codes, 2026-07-15）
 
-| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop Loss |
+### 短期（2026-05-21 ~ 06-30, 40日）
+
+| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop/Trail |
 |---|---|---|---|---|---|
-| momentum | +1.57% | -1.15% | -2.05% | 5 | 3 (60%) |
-| quality_low_risk | +0.74% | -1.98% | -2.88% | 3 | 1 (33%) |
-| etf_rotation | -6.31% | -9.02% | -9.93% | 8 | 2 (25%) |
+| momentum | +5.11% | +2.40% | +1.49% | 39 | 11 |
+| quality_low_risk | +5.37% | +2.65% | +1.75% | 29 | 9 |
+| etf_rotation | +1.60% | -1.11% | -2.02% | 10 | 4 |
 
-※ yfinance補完データによる暫定結果。moomoo実データで再検証推奨。
+### 長期（2026-01-01 ~ 06-30, 120日）
+
+| Strategy | Return | Excess vs 2559 | Excess vs 1306 | Trades | Stop/Trail |
+|---|---|---|---|---|---|
+| momentum | +14.77% | -22.81% | -26.01% | 203 | 86 |
+| quality_low_risk | +12.93% | -24.65% | -27.85% | 215 | 66 |
+| etf_rotation | +16.00% | -21.58% | -24.78% | 28 | 6 |
+
+### ベンチマーク
+- 2559: +2.71% (短期), +37.58% (長期)
+- 1306: +3.62% (短期), +40.78% (長期)
+
+### 重要な発見
+- 短期では2559/1306を上回るが、長期では大幅に劣後
+- 2026年上半期は強気相場で、個別株モメンタムでは指数に追いつかず
+- 詳細: `docs/validation/p2_validation_report.md`
 
 ## momentum診断結果（2026-07-01分析）
 
@@ -383,11 +452,11 @@ date, strategy_equity, benchmark_2559, benchmark_1306, daily_excess, cash_pct, p
 ### DBカバレッジ
 | 項目 | 値 |
 |---|---|
-| total symbols | 366 |
-| daily_bars codes | 337 (92.1%) |
-| moomoo | 127 codes, 23,612 rows |
-| yfinance | 210 codes, 76,029 rows |
-| missing | 29 (20 delisted tc + 6 wo + 3 ex) |
+| total symbols | 871 |
+| enabled symbols | 851 (20 delisted除外) |
+| daily_bars codes | 851 (100%) |
+| moomoo | 207 codes |
+| yfinance | 851 codes |
 
 ### moomoo quota状況
 - `get_history_kl_quota()` returns (100, 0, [])

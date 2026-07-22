@@ -87,8 +87,10 @@ class VirtualTradeManager:
         self.max_trade_price = float(universe_config.get("max_trade_price", 20000))
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
 
     def _submitted_date(self, order: VirtualOrder) -> str:
@@ -135,6 +137,44 @@ class VirtualTradeManager:
             return False, "tradable=false のため仮想注文対象外です"
         return True, ""
 
+    def _pending_buy_reservation_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+    ) -> float:
+        rows = conn.execute(
+            """
+            SELECT code, quantity, order_type, limit_price, submitted_at
+            FROM virtual_orders
+            WHERE strategy_name=? AND side='BUY' AND status='PENDING'
+            """,
+            (strategy_name,),
+        ).fetchall()
+        reserved = 0.0
+        for row in rows:
+            ref_date = as_of_date or str(row["submitted_at"])[:10]
+            price = (
+                float(row["limit_price"])
+                if row["order_type"] == "LIMIT_SIM" and row["limit_price"] is not None
+                else self._latest_close(conn, row["code"], ref_date)
+            )
+            if price is not None and price > 0:
+                reserved += price * int(row["quantity"]) + self.commission
+        return reserved
+
+    def get_available_cash(
+        self,
+        strategy_name: str = "default",
+        as_of_date: str | None = None,
+    ) -> float:
+        with self._get_connection() as conn:
+            cash = self._get_cash_with_conn(conn, strategy_name, as_of_date)
+            reserved = self._pending_buy_reservation_with_conn(
+                conn, strategy_name, as_of_date
+            )
+        return max(0.0, cash - reserved)
+
     def _validate_buy_order(
         self,
         conn: sqlite3.Connection,
@@ -148,36 +188,56 @@ class VirtualTradeManager:
         ok, reason = self._symbol_universe_status(conn, code)
         if not ok:
             return False, reason
-
-        ref_price = limit_price if order_type == "LIMIT_SIM" else self._latest_close(conn, code, submitted_at)
+        ref_price = limit_price if order_type == "LIMIT_SIM" else self._latest_close(
+            conn, code, submitted_at
+        )
         if ref_price is None or ref_price <= 0:
             return False, "参照価格を取得できません"
-        if ref_price < self.min_trade_price:
-            return False, f"価格が下限{self.min_trade_price:,.0f}円未満です"
-        if ref_price > self.max_trade_price:
-            return False, f"価格が上限{self.max_trade_price:,.0f}円を超えています"
+        if not self.min_trade_price <= ref_price <= self.max_trade_price:
+            return False, "価格が取引可能範囲外です"
+        order_amount = ref_price * quantity + self.commission
         if ref_price * quantity > self.max_position_amount:
-            return False, f"注文金額が1銘柄上限{self.max_position_amount:,.0f}円を超えています"
-        if ref_price * quantity + self.commission > self.get_cash(strategy_name, submitted_at):
-            return False, "仮想cashが不足しています"
+            return False, "注文金額が1銘柄上限を超えています"
 
-        positions = self.get_positions(strategy_name)
-        if len(positions) >= self.max_total_positions:
-            return False, f"保有銘柄数上限{self.max_total_positions}に達しています"
-        if any(p.code == code and p.quantity >= self.max_position_per_symbol for p in positions):
-            return False, "同一銘柄の保有上限に達しています"
-
-        pending = conn.execute(
+        duplicate = conn.execute(
             """
             SELECT 1 FROM virtual_orders
-            WHERE strategy_name = ? AND code = ? AND side = 'BUY' AND status = 'PENDING'
+            WHERE strategy_name=? AND code=? AND side='BUY' AND status='PENDING'
             LIMIT 1
             """,
             (strategy_name, code),
         ).fetchone()
-        if pending:
+        if duplicate:
             return False, "同一銘柄の未約定BUY注文が既に存在します"
 
+        position = conn.execute(
+            "SELECT quantity FROM virtual_positions WHERE strategy_name=? AND code=?",
+            (strategy_name, code),
+        ).fetchone()
+        current_quantity = int(position["quantity"]) if position else 0
+        if current_quantity + quantity > self.max_position_per_symbol:
+            return False, "同一銘柄の保有上限に達しています"
+
+        held_count = int(conn.execute(
+            "SELECT COUNT(*) FROM virtual_positions WHERE strategy_name=? AND quantity>0",
+            (strategy_name,),
+        ).fetchone()[0])
+        pending_count = int(conn.execute(
+            """
+            SELECT COUNT(DISTINCT code) FROM virtual_orders
+            WHERE strategy_name=? AND side='BUY' AND status='PENDING'
+            """,
+            (strategy_name,),
+        ).fetchone()[0])
+        if held_count + pending_count >= self.max_total_positions:
+            return False, "保有・未約定銘柄数上限に達しています"
+
+        cash = self._get_cash_with_conn(conn, strategy_name, submitted_at)
+        reserved = self._pending_buy_reservation_with_conn(
+            conn, strategy_name, submitted_at
+        )
+        if order_amount > max(0.0, cash - reserved):
+            return False, "未約定注文を含めると仮想cashが不足しています"
         return True, ""
 
     def _validate_sell_order(
@@ -233,15 +293,30 @@ class VirtualTradeManager:
                 return float(row["cash"])
         return self.initial_cash
 
-    def _get_cash_with_conn(self, conn: sqlite3.Connection, strategy_name: str) -> float:
-        row = conn.execute(
-            """
-            SELECT cash FROM virtual_equity_curve
-            WHERE strategy_name = ?
-            ORDER BY date DESC LIMIT 1
-            """,
-            (strategy_name,),
-        ).fetchone()
+    def _get_cash_with_conn(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        as_of_date: str | None = None,
+    ) -> float:
+        if as_of_date:
+            row = conn.execute(
+                """
+                SELECT cash FROM virtual_equity_curve
+                WHERE strategy_name=? AND date<=?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (strategy_name, as_of_date),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT cash FROM virtual_equity_curve
+                WHERE strategy_name=?
+                ORDER BY date DESC LIMIT 1
+                """,
+                (strategy_name,),
+            ).fetchone()
         if row and row["cash"] is not None:
             return float(row["cash"])
         return self.initial_cash
@@ -282,9 +357,20 @@ class VirtualTradeManager:
             (strategy_name, target_date, new_cash, position_value, total_equity, self.default_benchmark, now),
         )
 
-    def _apply_cash_delta(self, conn: sqlite3.Connection, strategy_name: str, target_date: str, delta: float) -> None:
-        current_cash = self._get_cash_with_conn(conn, strategy_name)
-        self._set_cash(conn, strategy_name, target_date, current_cash + delta)
+    def _apply_cash_delta(
+        self,
+        conn: sqlite3.Connection,
+        strategy_name: str,
+        target_date: str,
+        delta: float,
+    ) -> None:
+        current_cash = self._get_cash_with_conn(conn, strategy_name, target_date)
+        new_cash = current_cash + delta
+        if new_cash < -1e-9:
+            raise ValueError(
+                f"仮想cashがマイナスになります: current={current_cash}, delta={delta}"
+            )
+        self._set_cash(conn, strategy_name, target_date, max(0.0, new_cash))
 
     def get_positions(self, strategy_name: str = "default") -> list[VirtualPosition]:
         with self._get_connection() as conn:
@@ -478,6 +564,27 @@ class VirtualTradeManager:
                 else:
                     fill_price = fill_price * (1 - self.slippage_bps / 10000)
             fill_price = round(float(fill_price), 1)
+
+            if order.side == "BUY":
+                required_cash = fill_price * order.quantity + self.commission
+                actual_cash = self._get_cash_with_conn(
+                    conn, order.strategy_name, filled_at
+                )
+                if required_cash > actual_cash + 1e-9:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        """
+                        UPDATE virtual_orders
+                        SET status='CANCELLED', cancelled_at=?, fill_reason=?, updated_at=?
+                        WHERE id=? AND status='PENDING'
+                        """,
+                        (now, "約定時cash不足", now, order.id),
+                    )
+                    logger.warning(
+                        "BUY約定をキャンセル: %s required=%.1f cash=%.1f",
+                        order.code, required_cash, actual_cash,
+                    )
+                    return None
 
             existing_fill = conn.execute(
                 "SELECT 1 FROM virtual_fills WHERE order_id = ? LIMIT 1",

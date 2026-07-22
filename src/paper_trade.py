@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 from futu import (
     OpenSecTradeContext,
     OrderType,
@@ -171,6 +173,7 @@ class PaperTradeManager:
             if ret != RET_OK:
                 logger.error("注文失敗: %s", data)
                 return None
+            assert isinstance(data, pd.DataFrame)
 
             order_id = str(data["order_id"].iloc[0])
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -207,15 +210,16 @@ class PaperTradeManager:
             if ret != RET_OK:
                 logger.error("注文一覧取得失敗: %s", data)
                 return []
+            assert isinstance(data, pd.DataFrame)
 
             orders = []
             for _, row in data.iterrows():
                 orders.append(PaperOrder(
                     order_id=str(row.get("order_id", "")),
-                    code=row.get("code", ""),
+                    code=str(row.get("code", "")),
                     side="BUY" if row.get("trd_side") == TrdSide.BUY else "SELL",
-                    quantity=int(row.get("qty", 0)),
-                    price=float(row.get("price", 0)),
+                    quantity=int(row.get("qty", 0) or 0),
+                    price=float(row.get("price", 0) or 0),
                     order_type="MARKET" if row.get("order_type") == OrderType.MARKET else "LIMIT",
                     status=str(row.get("order_status", "")),
                     trd_env="SIMULATE",

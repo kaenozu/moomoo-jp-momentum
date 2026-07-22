@@ -260,7 +260,7 @@ def add_relative_strength(indicators_df: pd.DataFrame, benchmark_code: str = "JP
         return indicators_df
 
     df = indicators_df.copy()
-    bench = df[df["code"] == benchmark_code][["date", "return_5d", "return_20d", "return_60d"]]
+    bench = df.loc[df["code"] == benchmark_code, ["date", "return_5d", "return_20d", "return_60d"]]
     if bench.empty:
         return df
 

@@ -20,17 +20,36 @@ jobs:
       - name: Install development dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Record pre-run file listing
+        run: find data logs reports -type f 2>/dev/null | sort > /tmp/pre_files.txt || true
+
       - name: Run fast tests
         run: python -m pytest tests/ -m "not slow" -q
 
-      - name: Run ruff (src, tests, CLI)
+      - name: Run ruff
         run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
 
       - name: Run pyright
-        run: pyright run_daily_cycle.py src/virtual_trade.py src/config.py tests/
+        run: pyright
 
-      - name: Test dry-run with test config
+      - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
 
       - name: Test skip-fetch with test config
         run: python run_daily_cycle.py --date 2026-07-10 --skip-fetch --config tests/fixtures/config.test.yaml
+
+      - name: Verify no artifacts were created
+        run: |
+          find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true
+          NEW_FILES=$(diff /tmp/pre_files.txt /tmp/post_files.txt 2>/dev/null | grep "^>" | sed 's/^> //' || true)
+          if [ -n "$NEW_FILES" ]; then
+            echo "ERROR: New files were created during dry-run:"
+            echo "$NEW_FILES"
+            exit 1
+          fi
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: git status shows uncommitted changes"
+            exit 1
+          fi
+          echo "OK: No artifacts created"

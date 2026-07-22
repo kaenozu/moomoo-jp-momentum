@@ -18,6 +18,7 @@ import pandas as pd
 
 from .config import Config
 from .models import CREATE_TABLES_SQL, DailyBar, Quote, Symbol
+from .split_adjustment import SplitAdjustmentService
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +31,21 @@ class DataStore:
         self.db_path = Path(config.database_path)
         self._ensure_directory()
         self._init_db()
+        self.split_adjustments = SplitAdjustmentService(self.db_path)
 
     def _ensure_directory(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _init_db(self) -> None:
-        """データベースを初期化する（テーブル作成 + 軽量マイグレーション）"""
-        with sqlite3.connect(self.db_path) as conn:
+        """DB初期化と旧signals一意制約の移行を行う。"""
+        with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA foreign_keys = OFF")
             conn.executescript(CREATE_TABLES_SQL)
             self._ensure_columns(conn)
+            self._migrate_signals_unique_key(conn)
+            conn.execute("PRAGMA foreign_keys = ON")
             logger.info("データベースを初期化しました: %s", self.db_path)
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
@@ -82,12 +89,56 @@ class DataStore:
             "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
         })
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
+        """旧UNIQUE(code,date)をUNIQUE(strategy_name,code,date)へ移行する。"""
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='signals'"
+        ).fetchone()
+        table_sql = (row[0] if row and row[0] else "").replace(" ", "").lower()
+        legacy = (
+            "unique(code,date)" in table_sql
+            and "unique(strategy_name,code,date)" not in table_sql
+        )
+        if legacy:
+            conn.executescript(
+                """
+                ALTER TABLE signals RENAME TO signals_legacy;
+                CREATE TABLE signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    strategy_name TEXT NOT NULL DEFAULT 'momentum',
+                    score REAL,
+                    reason TEXT,
+                    risk_warnings TEXT,
+                    price_at_signal REAL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    UNIQUE(strategy_name, code, date)
+                );
+                INSERT INTO signals
+                    (id, code, date, signal_type, strategy_name, score, reason,
+                     risk_warnings, price_at_signal, created_at)
+                SELECT id, code, date, signal_type,
+                       COALESCE(strategy_name, 'momentum'), score, reason,
+                       risk_warnings, price_at_signal, created_at
+                FROM signals_legacy;
+                DROP TABLE signals_legacy;
+                """
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_strategy_code_date "
+            "ON signals(strategy_name, code, date)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_code ON signals(code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_date ON signals(date)")
 
-    # === 銘柄リスト関連 ===
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
 
     def load_symbols_from_json(self, json_path: str) -> int:
         """
@@ -269,7 +320,8 @@ class DataStore:
         query += " ORDER BY date DESC LIMIT ?"
         params.append(limit)
         with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(query, conn, params=params)
+        return self.split_adjustments.apply_to_dataframe(df, code, date_column="date")
 
     def save_dataframe_to_daily_bars(
         self,
@@ -326,4 +378,10 @@ class DataStore:
             params.append(end_date)
         query += " ORDER BY date"
         with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(query, conn, params=params)
+        return self.split_adjustments.apply_to_dataframe(
+            df,
+            benchmark_code,
+            date_column="date",
+            price_columns=("close",),
+        )

@@ -117,7 +117,7 @@ class TradeLog:
                     now,
                 ),
             )
-            return cursor.lastrowid
+            return cursor.lastrowid or -1
 
     def get_trade(self, trade_id: int) -> Optional[TradeRecord]:
         """売買記録を取得する"""

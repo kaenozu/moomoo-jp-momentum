@@ -155,9 +155,12 @@ class RelativeStrengthCalculator:
         # 各期間のリターンを計算
         for period in self.periods:
             stock_return = self._calc_return(code, target_date, period)
-            benchmark_return = self._calc_return(
-                benchmark_code, target_date, period
-            )
+            if benchmark_code is None:
+                benchmark_return = None
+            else:
+                benchmark_return = self._calc_return(
+                    benchmark_code, target_date, period
+                )
 
             if period == 5:
                 rs.return_5d = stock_return

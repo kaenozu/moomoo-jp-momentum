@@ -23,6 +23,7 @@ import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
+from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
 
@@ -52,6 +53,7 @@ class BacktestRunner:
     def __init__(self, config: Config):
         self.config = config
         self.db_path = Path(config.database_path)
+        self.split_adjustments = SplitAdjustmentService(self.db_path)
         self.run_id: Optional[int] = None
         self.strategy_name = ""
         self.initial_cash = 100000
@@ -96,7 +98,11 @@ class BacktestRunner:
                 "FROM daily_bars WHERE code = ? AND date <= ? ORDER BY date DESC LIMIT ?",
                 conn, params=[code, date, limit],
             )
-        return df
+        return self.split_adjustments.apply_to_dataframe(
+            df,
+            code,
+            date_column="time_key",
+        )
 
     def _next_open_bar(self, code: str, after_date: str) -> Optional[tuple[str, float]]:
         with self._conn() as conn:
@@ -104,10 +110,15 @@ class BacktestRunner:
                 "SELECT date, open FROM daily_bars WHERE code = ? AND date > ? ORDER BY date LIMIT 1",
                 (code, after_date),
             ).fetchone()
-            return (str(row[0]), float(row[1])) if row and row[1] is not None else None
+        if not row or row[1] is None:
+            return None
+        fill_date = str(row[0])
+        adjusted_open = self.split_adjustments.adjust_price(code, fill_date, row[1])
+        return (fill_date, adjusted_open) if adjusted_open is not None else None
 
     def _is_etf(self, code: str) -> bool:
-        return code.startswith("JP.13") or code.startswith("JP.25")
+        configured = self.config.get("strategies.etf_rotation.codes", ["JP.2559", "JP.1306", "JP.1320", "JP.2558", "JP.2563"])
+        return code in {str(item) for item in configured}
 
     def create_run(self, strategy_name: str, start_date: str, end_date: str) -> int:
         with self._conn() as conn:
@@ -144,12 +155,17 @@ class BacktestRunner:
         # symbols 取得
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT code, name, role, tradable FROM symbols WHERE enabled=1"
+                "SELECT code, name, market, role, tradable FROM symbols WHERE enabled=1"
             ).fetchall()
 
+        backtest_market = str(self.config.get("backtest.market", "JP")).upper()
+        rows = [
+            row for row in rows
+            if str(row["market"] or "JP").upper() == backtest_market
+        ]
         trade_candidates = [
-            r for r in rows
-            if r["role"] == "trade_candidate" and r["tradable"]
+            row for row in rows
+            if row["role"] == "trade_candidate" and row["tradable"]
         ]
         benchmark_codes = {
             r["code"] for r in rows if r["role"] == "benchmark"
@@ -188,6 +204,13 @@ class BacktestRunner:
             for order in today_fills:
                 if order.side == "BUY":
                     cost = order.fill_price * order.quantity + self.commission
+                    if cost > self.cash + 1e-9:
+                        logger.warning(
+                            "BUY fill skipped for insufficient cash: %s cost=%.2f cash=%.2f",
+                            order.code, cost, self.cash,
+                        )
+                        self.reserved_cash = max(0.0, self.reserved_cash - cost)
+                        continue
                     with self._conn() as conn:
                         cur = conn.execute(
                             "INSERT INTO backtest_orders (run_id, strategy_name, code, side, quantity, order_type, status, signal_date) VALUES (?,?,?,?,?,?,?,?)",
@@ -312,6 +335,21 @@ class BacktestRunner:
             pending_buy_count = sum(1 for o in pending_orders if o.side == "BUY")
             slots_available = self.max_total_positions - current_pos_count - pending_buy_count
 
+            valid_pairs.sort(
+                key=lambda pair: (
+                    pair[1].return_20d_vs_benchmark
+                    if pair[1].return_20d_vs_benchmark is not None
+                    else float("-inf"),
+                    pair[1].return_5d_vs_benchmark
+                    if pair[1].return_5d_vs_benchmark is not None
+                    else float("-inf"),
+                    pair[1].return_5d
+                    if pair[1].return_5d is not None
+                    else float("-inf"),
+                ),
+                reverse=True,
+            )
+
             for sym, ind in valid_pairs:
                 if slots_available <= 0:
                     break
@@ -353,7 +391,8 @@ class BacktestRunner:
                 bm_today = self._benchmark_value(idle_code, day)
                 if bm_today is not None and idle_bench_prev is not None:
                     daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                    self.cash = self.cash * (1 + daily_bm_ret)
+                    investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
+                    self.cash += investable_idle_cash * daily_bm_ret
                 idle_bench_prev = bm_today
 
             # ── Phase 5: equity curve更新 ──
@@ -447,10 +486,12 @@ class BacktestRunner:
     def _benchmark_value(self, code: str, date: str) -> Optional[float]:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
+                "SELECT date, close FROM daily_bars WHERE code=? AND date <= ? ORDER BY date DESC LIMIT 1",
                 (code, date),
             ).fetchone()
-            return float(row[0]) if row and row[0] is not None else None
+        if not row or row[1] is None:
+            return None
+        return self.split_adjustments.adjust_price(code, str(row[0]), row[1])
 
     def _calculate_run_stats(self) -> dict[str, Optional[float]]:
         with self._conn() as conn:

@@ -9,7 +9,7 @@
 
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -101,9 +101,9 @@ class VirtualReport:
     excess_vs_1306: Optional[float] = None
 
     # exit_reason別
-    exit_reason_stats: list[ExitReasonStats] = None
+    exit_reason_stats: list[ExitReasonStats] = field(default_factory=list)
     # クローズ済みトレード
-    closed_trades: list[ClosedTrade] = None
+    closed_trades: list[ClosedTrade] = field(default_factory=list)
 
 
 class VirtualReportGenerator:
@@ -114,69 +114,76 @@ class VirtualReportGenerator:
         self.db_path = Path(config.database_path)
         self.manager = VirtualTradeManager(config)
 
-    def get_closed_trades(self, strategy_name: str = "default") -> list[ClosedTrade]:
-        """BUY/SELLをFIFOで対応付けてクローズ済みトレードを生成"""
+    def get_closed_trades(
+        self,
+        strategy_name: str = "default",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> list[ClosedTrade]:
+        """銘柄別FIFOと数量消化でクローズ済みトレードを生成する。"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
+            rows = conn.execute(
                 """
-                SELECT code, side, quantity, fill_price as price,
-                       filled_at as filled_at, exit_reason
-                FROM (
-                    SELECT o.code, o.side, f.quantity, f.price as fill_price,
-                           f.filled_at, o.exit_reason,
-                           ROW_NUMBER() OVER (ORDER BY f.filled_at, f.id) as rn
-                    FROM virtual_fills f
-                    JOIN virtual_orders o ON f.order_id = o.id
-                    WHERE o.strategy_name = ?
-                )
-                ORDER BY filled_at
+                SELECT o.code, o.side, f.quantity, f.price,
+                       f.filled_at, o.exit_reason
+                FROM virtual_fills f
+                JOIN virtual_orders o ON f.order_id=o.id
+                WHERE o.strategy_name=?
+                ORDER BY f.filled_at, f.id
                 """,
                 (strategy_name,),
-            )
-            rows = cursor.fetchall()
+            ).fetchall()
 
-        buys: list[dict] = []
+        queues: dict[str, list[dict]] = {}
         closed: list[ClosedTrade] = []
-
         for row in rows:
+            code = str(row["code"])
+            fill_date = str(row["filled_at"])[:10]
             if row["side"] == "BUY":
-                buys.append({
-                    "code": row["code"],
-                    "date": row["filled_at"][:10],
-                    "price": row["price"],
-                    "quantity": row["quantity"],
+                queues.setdefault(code, []).append({
+                    "date": fill_date,
+                    "price": float(row["price"]),
+                    "quantity": int(row["quantity"]),
                 })
-            elif row["side"] == "SELL" and buys:
-                buy = buys.pop(0)
-                qty = min(buy["quantity"], row["quantity"])
-                realized_pl = (row["price"] - buy["price"]) * qty
-                return_pct = (row["price"] - buy["price"]) / buy["price"] * 100
+                continue
+            if row["side"] != "SELL":
+                continue
+            remaining_sell = int(row["quantity"])
+            queue = queues.setdefault(code, [])
+            while remaining_sell > 0 and queue:
+                buy = queue[0]
+                quantity = min(remaining_sell, int(buy["quantity"]))
+                entry_price = float(buy["price"])
+                exit_price = float(row["price"])
                 try:
-                    entry = datetime.strptime(buy["date"], "%Y-%m-%d")
-                    exit_dt = datetime.strptime(row["filled_at"][:10], "%Y-%m-%d")
-                    holding_days = (exit_dt - entry).days
+                    holding_days = (
+                        datetime.strptime(fill_date, "%Y-%m-%d")
+                        - datetime.strptime(str(buy["date"]), "%Y-%m-%d")
+                    ).days
                 except ValueError:
                     holding_days = 0
-
-                closed.append(ClosedTrade(
-                    code=row["code"],
+                trade = ClosedTrade(
+                    code=code,
                     strategy_name=strategy_name,
-                    entry_date=buy["date"],
-                    exit_date=row["filled_at"][:10],
-                    entry_price=buy["price"],
-                    exit_price=row["price"],
-                    quantity=qty,
-                    realized_pl=realized_pl,
-                    return_pct=return_pct,
+                    entry_date=str(buy["date"]),
+                    exit_date=fill_date,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    quantity=quantity,
+                    realized_pl=(exit_price-entry_price)*quantity,
+                    return_pct=(exit_price-entry_price)/entry_price*100 if entry_price else 0,
                     holding_days=holding_days,
                     exit_reason=row["exit_reason"] or "unknown",
-                ))
-
-                remaining = buy["quantity"] - qty
-                if remaining > 0:
-                    buys.insert(0, {**buy, "quantity": remaining})
-
+                )
+                if (not from_date or trade.exit_date >= from_date) and (
+                    not to_date or trade.exit_date <= to_date
+                ):
+                    closed.append(trade)
+                remaining_sell -= quantity
+                buy["quantity"] = int(buy["quantity"]) - quantity
+                if int(buy["quantity"]) == 0:
+                    queue.pop(0)
         return closed
 
     def _calc_max_drawdown(self, equity_curve: list[dict]) -> tuple:
@@ -227,10 +234,19 @@ class VirtualReportGenerator:
             return (end_price - start_price) / start_price * 100
         return None
 
-    def _get_equity_curve_sorted(self, strategy_name: str) -> list[dict]:
-        """ソート済みエクイティカーブ"""
-        curve = self.manager.get_equity_curve(strategy_name, limit=500)
-        curve.sort(key=lambda e: e["date"])
+    def _get_equity_curve_sorted(
+        self,
+        strategy_name: str,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> list[dict]:
+        curve = self.manager.get_equity_curve(strategy_name, limit=5000)
+        curve = [
+            row for row in curve
+            if (not from_date or row["date"] >= from_date)
+            and (not to_date or row["date"] <= to_date)
+        ]
+        curve.sort(key=lambda row: row["date"])
         return curve
 
     def generate(self, strategy_name: str = "default",
@@ -238,7 +254,7 @@ class VirtualReportGenerator:
                  to_date: Optional[str] = None) -> VirtualReport:
         """レポートを生成"""
         report = VirtualReport()
-        report.closed_trades = self.get_closed_trades(strategy_name)
+        report.closed_trades = self.get_closed_trades(strategy_name, from_date, to_date)
         perf = self.manager.get_strategy_performance(strategy_name)
 
         # 全体成績
@@ -282,7 +298,7 @@ class VirtualReportGenerator:
             report.min_holding_days = min(holding_days_list)
 
         # ドローダウン
-        equity_curve = self._get_equity_curve_sorted(strategy_name)
+        equity_curve = self._get_equity_curve_sorted(strategy_name, from_date, to_date)
         dd_pct, dd_amount, peak_date, trough_date = self._calc_max_drawdown(equity_curve)
         report.max_drawdown_pct = dd_pct
         report.max_drawdown_amount = dd_amount

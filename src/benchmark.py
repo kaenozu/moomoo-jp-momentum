@@ -7,8 +7,8 @@
 関連ファイル: quote_service.py, data_store.py, config.py
 
 ベンチマーク:
-- JP.2559: MAXIS全世界株式（オール・カントリー）- 第一ベンチマーク
-- JP.1306: TOPIX連動ETF - 補助
+- JP.1306: TOPIX連動ETF - 第一ベンチマーク
+- JP.2559: MAXIS全世界株式（オール・カントリー）- 補助
 - JP.1320: 日経平均連動ETF - 補助
 - JP.2558: MAXIS米国株式（S&P500）- 補助
 """
@@ -23,6 +23,7 @@ from typing import Optional
 import pandas as pd
 
 from .config import Config
+from .split_adjustment import SplitAdjustmentService
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +50,18 @@ class BenchmarkManager:
         """
         self.config = config
         self.db_path = Path(config.database_path)
+        self.split_adjustments = SplitAdjustmentService(self.db_path)
 
         # ベンチマークコードを設定から取得
         benchmark_config = config.get("benchmark", {})
         primary = benchmark_config.get("primary", {})
         secondary = benchmark_config.get("secondary", [])
 
-        self.benchmark_codes = [primary.get("code", "JP.2559")]
+        self.benchmark_codes = [primary.get("code", "JP.1306")]
         for s in secondary:
-            self.benchmark_codes.append(s.get("code", ""))
+            code = s.get("code", "")
+            if code and code not in self.benchmark_codes:
+                self.benchmark_codes.append(code)
 
     def _get_connection(self) -> sqlite3.Connection:
         """データベース接続を取得する"""
@@ -65,47 +69,35 @@ class BenchmarkManager:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def save_benchmark_prices(
-        self,
-        code: str,
-        df: pd.DataFrame,
-    ) -> int:
-        """
-        ベンチマーク価格を保存する
-
-        Args:
-            code: ベンチマークコード
-            df: 日足DataFrame
-
-        Returns:
-            int: 保存件数
-        """
+    def save_benchmark_prices(self, code: str, df: pd.DataFrame) -> int:
+        """Save benchmark prices without precomputing unadjusted returns."""
         count = 0
         now = datetime.now().isoformat()
-
         with self._get_connection() as conn:
             for _, row in df.iterrows():
                 date = str(row.get("time_key", ""))[:10]
                 close = row.get("close")
-
                 try:
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO benchmark_prices
+                        INSERT INTO benchmark_prices
                         (benchmark_code, date, close, daily_return, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, NULL, ?, ?)
+                        ON CONFLICT(benchmark_code, date) DO UPDATE SET
+                            close = excluded.close,
+                            daily_return = NULL,
+                            updated_at = excluded.updated_at
                         """,
-                        (code, date, close, None, now, now),
+                        (code, date, close, now, now),
                     )
                     count += 1
-                except sqlite3.Error as e:
-                    logger.error(f"ベンチマーク保存エラー: {code} {date} - {e}")
-
+                except sqlite3.Error as exc:
+                    logger.error("ベンチマーク保存エラー: %s %s - %s", code, date, exc)
         return count
 
     def update_daily_returns(self, code: str) -> int:
         """
-        ベンチマークの前日比を更新する
+        ベンチマークの分割調整後前日比を更新する
 
         Args:
             code: ベンチマークコード
@@ -117,7 +109,6 @@ class BenchmarkManager:
         now = datetime.now().isoformat()
 
         with self._get_connection() as conn:
-            # 日付順に取得
             cursor = conn.execute(
                 """
                 SELECT id, date, close FROM benchmark_prices
@@ -128,12 +119,17 @@ class BenchmarkManager:
             )
             rows = cursor.fetchall()
 
+            adjusted_closes = [
+                self.split_adjustments.adjust_price(code, str(row["date"]), row["close"])
+                for row in rows
+            ]
+
             for i, row in enumerate(rows):
                 if i == 0:
                     continue
 
-                prev_close = rows[i - 1]["close"]
-                current_close = row["close"]
+                prev_close = adjusted_closes[i - 1]
+                current_close = adjusted_closes[i]
 
                 if prev_close and current_close and prev_close > 0:
                     daily_return = (current_close - prev_close) / prev_close * 100
@@ -165,7 +161,7 @@ class BenchmarkManager:
             end_date: 終了日
 
         Returns:
-            pd.DataFrame: ベンチマーク価格データ
+            pd.DataFrame: 分割調整済みベンチマーク価格データ
         """
         if not self.db_path.exists():
             return pd.DataFrame()
@@ -185,7 +181,15 @@ class BenchmarkManager:
         with sqlite3.connect(self.db_path) as conn:
             df = pd.read_sql_query(query, conn, params=params)
 
-        return df
+        adjusted = self.split_adjustments.apply_to_dataframe(
+            df,
+            code,
+            date_column="date",
+            price_columns=("close",),
+        )
+        if not adjusted.empty and "close" in adjusted.columns:
+            adjusted["daily_return"] = adjusted["close"].pct_change() * 100
+        return adjusted
 
     def get_benchmark_return(
         self,
@@ -194,7 +198,7 @@ class BenchmarkManager:
         end_date: str,
     ) -> Optional[float]:
         """
-        指定期間のベンチマークリターンを計算する
+        指定期間のベンマークリターンを計算する
 
         Args:
             code: ベンチマークコード
