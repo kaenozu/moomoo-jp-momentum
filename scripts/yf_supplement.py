@@ -66,7 +66,7 @@ def fetch_yfinance(code: str, yahoo_ticker: str, start: str, end: str) -> pd.Dat
     """Fetch yfinance data for a single ticker"""
     try:
         t = yf.Ticker(yahoo_ticker)
-        df = t.history(start=start, end=end, auto_adjust=False)
+        df = t.history(start=start, end=end, auto_adjust=True)
     except Exception as e:
         print(f"    ERROR fetching {code} ({yahoo_ticker}): {e}")
         return pd.DataFrame()

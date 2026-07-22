@@ -51,7 +51,7 @@ def test_1306_split_does_not_create_minus_90_percent_return(tmp_path: Path) -> N
     _insert_prices(
         store,
         "JP.1306",
-        [("2026-03-31", 2500.0), ("2026-04-01", 252.0)],
+        [("2026-03-31", 250.0), ("2026-04-01", 252.0)],
     )
 
     adjusted_return = _return_pct(
@@ -70,7 +70,7 @@ def test_2559_split_does_not_create_minus_90_percent_return(tmp_path: Path) -> N
     _insert_prices(
         store,
         "JP.2559",
-        [("2026-06-08", 20000.0), ("2026-06-09", 2010.0)],
+        [("2026-06-08", 2000.0), ("2026-06-09", 2010.0)],
     )
 
     adjusted_return = _return_pct(

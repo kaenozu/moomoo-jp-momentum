@@ -31,7 +31,7 @@ trading_hours:
     close: "11:30"
   afternoon:
     open: "12:30"
-    close: "15:00"
+    close: "15:30"
   skip_weekends: true
 
 # 銘柄リスト設定
@@ -188,4 +188,8 @@ daily_cycle:
   markets:
     - JP
   fetch_mode: latest
-  latest_bar_count: 30
+  latest_bar_count: 120
+
+strategies:
+  etf_rotation:
+    codes: ["JP.2559", "JP.1306", "JP.1320", "JP.2558", "JP.2563"]

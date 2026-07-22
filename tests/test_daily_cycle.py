@@ -88,7 +88,8 @@ class TestDailyCycle:
         # --dry-run相当を直接実行（テスト用設定ファイルを使用）
         results = run_cycle("2026-07-01", dry_run=True, config_path="tests/fixtures/config.test.yaml")
         assert results is not None
-        assert results.get("connection") is True
+        assert results.get("connection_attempted") is False
+        assert results.get("database_write_attempted") is False
         assert results.get("symbols", 0) > 0
 
     def test_freshness_guard_stale(self):

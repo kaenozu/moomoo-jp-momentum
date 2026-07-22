@@ -1,9 +1,6 @@
 {
-  "include": [
-    "run_daily_cycle.py",
-    "src/virtual_trade.py",
-    "src/config.py",
-    "tests"
-  ],
-  "pythonVersion": "3.11"
+  "include": ["run_daily_cycle.py", "scheduler.py", "src", "tests"],
+  "exclude": ["scripts"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic"
 }

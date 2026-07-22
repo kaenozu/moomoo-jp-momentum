@@ -116,11 +116,16 @@ class Screener:
             )
 
     def _row_to_indicators(self, row: pd.Series) -> StockIndicators:
+        code = str(_none_if_nan(row.get("code")) or "")
+        date = str(_none_if_nan(row.get("date")) or "")
+        close = _none_if_nan(row.get("close"))
+        if close is None:
+            raise ValueError(f"close is missing: code={code}, date={date}")
         return StockIndicators(
-            code=_none_if_nan(row.get("code")) or "",
+            code=code,
             name=_none_if_nan(row.get("name")),
-            date=_none_if_nan(row.get("date")) or "",
-            close=_none_if_nan(row.get("close")) or 0.0,
+            date=date,
+            close=float(close),
             open=0.0,
             high=0.0,
             low=0.0,
@@ -256,17 +261,32 @@ class Screener:
         return candidates
 
     def save_signals_to_db(self, candidates: list[Candidate]) -> int:
-        """シグナルをSQLiteに保存する。benchmarkはsignalsには保存しない。"""
-        rows = [c for c in candidates if c.signal_type != "BENCHMARK"]
+        """benchmarkを除き、signals.idを維持してUPSERTする。"""
+        rows = [item for item in candidates if item.signal_type != "BENCHMARK"]
         if not rows:
             return 0
         now = datetime.now().isoformat()
         sql = """
-            INSERT OR REPLACE INTO signals
-            (code, date, signal_type, strategy_name, score, reason, risk_warnings, price_at_signal, created_at)
+            INSERT INTO signals
+            (code, date, signal_type, strategy_name, score, reason,
+             risk_warnings, price_at_signal, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(strategy_name, code, date) DO UPDATE SET
+                signal_type = excluded.signal_type,
+                score = excluded.score,
+                reason = excluded.reason,
+                risk_warnings = excluded.risk_warnings,
+                price_at_signal = excluded.price_at_signal,
+                created_at = excluded.created_at
         """
-        params = [(c.code, c.date, c.signal_type, c.strategy_name, c.score, c.reason, c.risk_warnings, c.close, now) for c in rows]
-        with sqlite3.connect(self.db_path) as conn:
+        params = [
+            (item.code, item.date, item.signal_type, item.strategy_name,
+             item.score, item.reason, item.risk_warnings, item.close, now)
+            for item in rows
+        ]
+        with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
             conn.executemany(sql, params)
         return len(rows)
+
