@@ -1,0 +1,31 @@
+# ファイルパス: configs/experiments/fwd-alpha-mp20-cash.yaml
+# 何をするか: max_positions=20・idle cash維持のalpha検出フォワード実験を固定する
+# なぜ存在するか: 実験条件の後日変更を防ぎ、結果を同一条件で再現できるようにするため
+# 関連ファイル: ../../config.yaml, ../../historical_backtest.py, ../../src/backtest_runner.py
+
+manifest_version: 1  # manifestスキーマのバージョン
+extends: "../../config.yaml"  # 継承元設定。実行開始時に下記resolved_configで完全上書きする
+resolution_policy: "frozen_snapshot"  # 実行時は継承元の現在値ではなく、このファイルの固定値を使用する
+immutable_after_start: true  # 実験開始後のmanifest編集を禁止する運用フラグ
+manifest_sha256: "__SHA256_PENDING__"  # 正規化済みmanifestを後続スクリプトがSHA-256で置換する
+base_config_sha256: "__SHA256_PENDING__"  # 実験作成時のconfig.yaml SHA-256を後続スクリプトが置換する
+source_commit: "__GIT_COMMIT_PENDING__"  # 実行コードのGit commit SHAを後続スクリプトが置換する
+created_at: "2026-07-21T00:00:00+09:00"  # 実験開始予定日を含む固定作成時刻
+
+experiment:
+  id: "fwd-alpha-mp20-cash-20260721"  # 実験を一意に識別するID
+  purpose: "alpha_detection"  # 戦略そのもののalpha検出を目的とする
+
+resolved_config:
+  strategy: "momentum"  # 評価する戦略
+  max_positions: 20  # 分散を確保し、ランキング上位20銘柄を対象にする
+  idle_cash_policy: "cash"  # 未使用資金はベンチマークへ投資せずcashで保持する
+  idle_cash_ticker: null  # cash方針のためidle sleeve銘柄は使用しない
+  initial_cash: 1000000  # research weight-based検証用の初期資金
+  fractional_weights: true  # 資金制約より戦略weightを優先する研究用設定
+  stop_loss_pct: 5.0  # エントリー後の損失上限率
+  slippage_bps: 10  # 売買価格へ片道10bpsのスリッページを適用する
+  commission: 0  # 現段階では売買手数料を0円とする
+  lot_size_mode: "research_fractional"  # 研究用の端数weight配分を許可する
+  fill_time: "next_trading_day_open"  # シグナル翌営業日の始値で約定する
+  benchmark: "JP.1306"  # alpha比較の主ベンチマーク

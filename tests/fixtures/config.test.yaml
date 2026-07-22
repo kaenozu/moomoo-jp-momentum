@@ -1,4 +1,7 @@
-# Moomoo テスト用設定ファイル
+# ファイルパス: tests/fixtures/config.test.yaml
+# 何をするか: 自動テスト用の安全な設定値を定義する
+# なぜ存在するか: 認証情報や本番パスを使わずに設定依存コードを検証するため
+# 関連ファイル: tests/conftest.py, src/config.py, src/filters/quality_risk_filter.py
 # 認証情報、Webhook URL、絶対パスは含めない
 # DBパスは各テストの tmp_path が優先される
 
@@ -53,6 +56,11 @@ signals:
     use_percentile: true
     percentile_threshold: 60
     market_low_volume_threshold: 0.8
+  quality_filter:
+    enabled: false
+    max_daily_return: 5.0
+    max_return_5d: 10.0
+    max_volume_ratio: 3.0
 
 screening:
   min_turnover: 100000000
