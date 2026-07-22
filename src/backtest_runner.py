@@ -4,7 +4,7 @@
 ファイルパス: src/backtest_runner.py
 何をするか: 過去日足データを使ってルックアヘッドなしのバックテストを実行する
 なぜ存在するか: 戦略の過去パフォーマンスを検証するため
-関連ファイル: models.py, indicators.py, strategies/*.py
+関連ファイル: models.py, indicators.py, scoring.py, ranking.py, strategies/*.py
 
 時系列整合性:
   1日ループは ①約定処理 → ②exit判定 → ③新規シグナル → ④idle cash → ⑤equity の順。
@@ -17,14 +17,16 @@ import sqlite3
 from dataclasses import dataclass
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
 
 import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
+from .ranking import sort_items_by_score
+from .scoring import ScoreBreakdown, Scorer
 from .split_adjustment import SplitAdjustmentService
-from .strategies import StrategyRegistry
+from .strategies import StrategyRegistry, StrategyResult
 from .strategies import momentum, quality_low_risk, etf_rotation  # noqa: F401 - register strategies
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,55 @@ class _PendingOrder:
     signal_date: str
     exit_reason: Optional[str] = None
     avg_cost: float = 0.0  # SELL時のみ使用
+
+
+class _StrategyEvaluator(Protocol):
+    """候補ランキングに必要な戦略評価インターフェース。"""
+
+    def evaluate(
+        self,
+        indicators: StockIndicators,
+        benchmark_returns: Optional[dict] = None,
+    ) -> StrategyResult:
+        """銘柄を評価する。"""
+        ...
+
+
+class _IndicatorScorer(Protocol):
+    """候補ランキングに必要なスコアラーインターフェース。"""
+
+    def score(
+        self,
+        indicators: StockIndicators,
+        signal: StrategyResult | None = None,
+    ) -> ScoreBreakdown:
+        """指標と戦略評価結果から共通スコアを計算する。"""
+        ...
+
+
+RankedBuyCandidate = tuple[str, StockIndicators, StrategyResult]
+
+
+def _rank_buy_candidates(
+    valid_pairs: list[tuple[str, StockIndicators]],
+    strategy: _StrategyEvaluator,
+    scorer: _IndicatorScorer,
+    benchmark_returns: dict[str, float | None] | None = None,
+) -> list[RankedBuyCandidate]:
+    """BUY候補を全件評価し、score DESC / code ASC でソートして返す。"""
+    buy_candidates: list[RankedBuyCandidate] = []
+    for code, indicators in valid_pairs:
+        result = strategy.evaluate(indicators, benchmark_returns)
+        if result.signal_type != "BUY_CANDIDATE":
+            continue
+        breakdown = scorer.score(indicators, result)
+        result.score = breakdown.total
+        buy_candidates.append((code, indicators, result))
+    return sort_items_by_score(
+        buy_candidates,
+        score_getter=lambda item: item[2].score,
+        code_getter=lambda item: item[0],
+    )
 
 
 BM2559 = "JP.2559"
@@ -71,6 +122,21 @@ class BacktestRunner:
 
     def _benchmark_code(self) -> str:
         return self.config.get("signals.relative_strength.benchmark_code", BM1306)
+
+    def _benchmark_returns_on_day(self, day: str) -> dict[str, float | None]:
+        """指定日のベンチマーク指標リターンを分割調整後データから返す。"""
+        code = self._benchmark_code()
+        bars = self._bars_up_to(code, day)
+        if bars.empty:
+            return {"return_5d": None, "return_20d": None, "return_60d": None}
+        indicators = calculate_indicators(bars, code, code)
+        if indicators is None:
+            return {"return_5d": None, "return_20d": None, "return_60d": None}
+        return {
+            "return_5d": indicators.return_5d,
+            "return_20d": indicators.return_20d,
+            "return_60d": indicators.return_60d,
+        }
 
     def _idle_cash_benchmark_code(self) -> Optional[str]:
         cfg = self.config.get("backtest.idle_cash_allocation", {})
@@ -147,6 +213,7 @@ class BacktestRunner:
         run_id = self.create_run(strategy_name, start_date, end_date)
 
         strategy = StrategyRegistry.get(strategy_name, self.config)
+        scorer = Scorer(self.config)
         days = self._trading_days(start_date, end_date)
         logger.info("バックテスト: %s %s〜%s (%d日, strategy=%s)", start_date, end_date, len(days), strategy_name)
         if not days:
@@ -305,7 +372,7 @@ class BacktestRunner:
 
             # ── Phase 3: 新規シグナル評価 ──
             day_indicators: list[StockIndicators] = []
-            valid_pairs = []
+            valid_pairs: list[tuple[str, StockIndicators]] = []
             for sym in candidates:
                 code = sym["code"]
                 # 既にポジション or pending BUY があればスキップ
@@ -325,7 +392,7 @@ class BacktestRunner:
                     continue
 
                 day_indicators.append(ind)
-                valid_pairs.append((sym, ind))
+                valid_pairs.append((code, ind))
 
             if day_indicators:
                 add_cross_sectional_stats(day_indicators)
@@ -335,32 +402,20 @@ class BacktestRunner:
             pending_buy_count = sum(1 for o in pending_orders if o.side == "BUY")
             slots_available = self.max_total_positions - current_pos_count - pending_buy_count
 
-            valid_pairs.sort(
-                key=lambda pair: (
-                    pair[1].return_20d_vs_benchmark
-                    if pair[1].return_20d_vs_benchmark is not None
-                    else float("-inf"),
-                    pair[1].return_5d_vs_benchmark
-                    if pair[1].return_5d_vs_benchmark is not None
-                    else float("-inf"),
-                    pair[1].return_5d
-                    if pair[1].return_5d is not None
-                    else float("-inf"),
-                ),
-                reverse=True,
+            benchmark_returns = self._benchmark_returns_on_day(day)
+            ranked_buys = _rank_buy_candidates(
+                valid_pairs,
+                strategy,
+                scorer,
+                benchmark_returns,
             )
 
-            for sym, ind in valid_pairs:
+            for code, ind, strategy_result in ranked_buys:
                 if slots_available <= 0:
                     break
-                code = sym["code"]
 
                 available_cash = self.cash - self.reserved_cash
                 if ind.close and ind.close > available_cash:
-                    continue
-
-                result = strategy.evaluate(ind)
-                if result.signal_type != "BUY_CANDIDATE":
                     continue
 
                 next_bar = self._next_open_bar(code, day)

@@ -9,13 +9,19 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol
 
 from .config import Config
 from .indicators import StockIndicators
 from .signals import SignalResult
 
 logger = logging.getLogger(__name__)
+
+
+class RiskWarningSource(Protocol):
+    """リスク警告減点に必要なシグナル属性。"""
+
+    risk_warnings: list
 
 
 @dataclass
@@ -37,15 +43,6 @@ class Scorer:
         self.config = config
         scoring_config = config.get("scoring", {})
         self.enable_risk_penalty = scoring_config.get("enable_risk_penalty", True)
-        configured_weights = scoring_config.get("weights", {})
-        self.weights = {
-            "trend": float(configured_weights.get("trend", 30)),
-            "volume": float(configured_weights.get("volume", 20)),
-            "relative_strength": float(configured_weights.get("relative_strength", 25)),
-            "liquidity": float(configured_weights.get("liquidity", 15)),
-            "high_20d": float(configured_weights.get("high_20d", 10)),
-            "risk_warning": abs(float(configured_weights.get("risk_warning", -30))),
-        }
         configured_weights = scoring_config.get("weights", {})
         self.weights = {
             "trend": float(configured_weights.get("trend", 30)),
@@ -177,10 +174,21 @@ class Scorer:
 
         return max(penalty, -30.0) / 30.0 * self.weights["risk_warning"] / 30.0 * self.weights["risk_warning"]
 
+    def calculate_signal_penalty(
+        self,
+        signal: Optional[RiskWarningSource],
+    ) -> float:
+        """戦略評価結果のrisk_warningsを設定済み減点へ変換する。"""
+        if not self.enable_risk_penalty:
+            return 0.0
+        if signal is None or not getattr(signal, "risk_warnings", None):
+            return 0.0
+        return -self.weights["risk_warning"]
+
     def score(
         self,
         indicators: StockIndicators,
-        signal: Optional[SignalResult] = None,
+        signal: Optional[RiskWarningSource] = None,
     ) -> ScoreBreakdown:
         """スコアを計算する"""
         if indicators.ma25 is None or indicators.close is None:
@@ -191,7 +199,9 @@ class Scorer:
         relative_strength = self.score_relative_strength(indicators)
         liquidity = self.score_liquidity(indicators)
         high_20d = self.score_high_20d(indicators)
-        risk_penalty = self.calculate_risk_penalty(indicators)
+        indicator_penalty = self.calculate_risk_penalty(indicators)
+        signal_penalty = self.calculate_signal_penalty(signal)
+        risk_penalty = min(indicator_penalty, signal_penalty)
 
         total = trend + volume + relative_strength + liquidity + high_20d + risk_penalty
         total = max(0.0, min(100.0, total))
