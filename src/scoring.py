@@ -9,13 +9,19 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol
 
 from .config import Config
 from .indicators import StockIndicators
 from .signals import SignalResult
 
 logger = logging.getLogger(__name__)
+
+
+class RiskWarningSource(Protocol):
+    """スコア減点に必要な警告情報。"""
+
+    risk_warnings: list[str]
 
 
 @dataclass
@@ -55,6 +61,10 @@ class Scorer:
             "high_20d": float(configured_weights.get("high_20d", 10)),
             "risk_warning": abs(float(configured_weights.get("risk_warning", -30))),
         }
+
+        self.risk_warning_penalty = -abs(
+            float(configured_weights.get("risk_warning", -30))
+        )
 
         screening_config = config.get("screening", {})
         self.min_turnover = screening_config.get("min_turnover", 1_000_000_000)
@@ -180,7 +190,7 @@ class Scorer:
     def score(
         self,
         indicators: StockIndicators,
-        signal: Optional[SignalResult] = None,
+        signal: Optional[RiskWarningSource] = None,
     ) -> ScoreBreakdown:
         """スコアを計算する"""
         if indicators.ma25 is None or indicators.close is None:
@@ -192,6 +202,12 @@ class Scorer:
         liquidity = self.score_liquidity(indicators)
         high_20d = self.score_high_20d(indicators)
         risk_penalty = self.calculate_risk_penalty(indicators)
+        if (
+            self.enable_risk_penalty
+            and signal is not None
+            and signal.risk_warnings
+        ):
+            risk_penalty = min(risk_penalty, self.risk_warning_penalty)
 
         total = trend + volume + relative_strength + liquidity + high_20d + risk_penalty
         total = max(0.0, min(100.0, total))
