@@ -35,6 +35,9 @@ jobs:
       - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
 
+      - name: Test skip-fetch with test config
+        run: python run_daily_cycle.py --date 2026-07-10 --skip-fetch --config tests/fixtures/config.test.yaml
+
       - name: Verify no artifacts were created
         run: |
           find data logs reports -type f 2>/dev/null | sort > /tmp/post_files.txt || true

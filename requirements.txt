@@ -6,6 +6,7 @@ futu-api>=9.1.0
 
 # データ処理
 pandas>=2.0.0
+yfinance>=0.2.54,<2
 
 # 設定管理
 pyyaml>=6.0
