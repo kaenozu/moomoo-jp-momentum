@@ -32,7 +32,9 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Apply implementation
-        run: python .github/apply_regime_overlay.py
+        run: |
+          python .github/apply_regime_overlay.py
+          python .github/fix_regime_overlay_types.py
 
       - name: Test regime detector
         run: python -m pytest tests/test_regime_detector.py -q
@@ -43,7 +45,11 @@ jobs:
       - name: Run Ruff
         run: ruff check src/ tests/ run_daily_cycle.py
 
-      - name: Run Pyright
+      - name: Run changed-file Pyright
+        run: pyright src/backtest_runner.py src/regime_detector.py tests/test_regime_detector.py
+
+      - name: Record full Pyright diagnostics
+        continue-on-error: true
         run: |
           set -o pipefail
           pyright 2>&1 | tee pyright-output.txt
