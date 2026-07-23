@@ -160,9 +160,9 @@ backtest:
     benchmark_code: "JP.1306"   # 配分先ベンチマーク
     regime:
       enabled: false      # falseなら従来どおり常時ETFリターンを適用
+      signal_code: "JP.1306"
       short_window: 50
       long_window: 200
-      range_threshold_pct: 1.0
       active_regimes: ["bull"]
 
 # 仮想トレード設定（ペーパートレードエンジン）
