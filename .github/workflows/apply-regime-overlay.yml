@@ -1,11 +1,7 @@
 name: apply regime overlay implementation
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - ".github/workflows/apply-regime-overlay.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,20 +10,15 @@ jobs:
   apply:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: master
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
       - name: Apply implementation
         run: |
           python - <<'PY'
           from pathlib import Path
+          import textwrap
+
+
+          def block(value: str) -> str:
+              return textwrap.dedent(value)
 
 
           def replace_once(path: str, old: str, new: str) -> None:
@@ -40,498 +31,529 @@ jobs:
 
           replace_once(
               "config.yaml",
-              '''  idle_cash_allocation:
-              enabled: true         # 未投資資金をベンチマークETFに自動配分
-              benchmark_code: "JP.1306"   # 配分先ベンチマーク
-          ''',
-              '''  idle_cash_allocation:
-              enabled: true         # 未投資資金をベンチマークETFに自動配分
-              benchmark_code: "JP.1306"   # 配分先ベンチマーク
-              regime:
-                enabled: false      # falseなら従来どおり常時ETFリターンを適用
-                short_window: 50
-                long_window: 200
-                range_threshold_pct: 1.0
-                active_regimes: ["bull"]
-          ''',
+              block('''\
+              `  idle_cash_allocation:
+                enabled: true         # 未投資資金をベンチマークETFに自動配分
+                benchmark_code: "JP.1306"   # 配分先ベンチマーク
+              `''').replace("`", ""),
+              block('''\
+              `  idle_cash_allocation:
+                enabled: true         # 未投資資金をベンチマークETFに自動配分
+                benchmark_code: "JP.1306"   # 配分先ベンチマーク
+                regime:
+                  enabled: false  # デフォルト無効（後方互換）
+                  signal_code: "JP.1306"
+                  short_window: 50
+                  long_window: 200
+                  active_regimes: ["bull"]
+              `''').replace("`", ""),
           )
 
           replace_once(
               "config.example.yaml",
-              '''  idle_cash_allocation:
-              enabled: true
-              benchmark_code: "JP.1306"
-          ''',
-              '''  idle_cash_allocation:
-              enabled: true
-              benchmark_code: "JP.1306"
-              # SMA短期/長期で相場レジームを判定し、指定レジームだけETFへ配分する
-              # enabled=false は後方互換モード（従来どおり常時配分）
-              regime:
-                enabled: false
-                short_window: 50
-                long_window: 200
-                range_threshold_pct: 1.0
-                active_regimes: ["bull"]
-          ''',
+              block('''\
+              `  idle_cash_allocation:
+                enabled: true
+                benchmark_code: "JP.1306"
+              `''').replace("`", ""),
+              block('''\
+              `  idle_cash_allocation:
+                enabled: true
+                benchmark_code: "JP.1306"
+                regime:
+                  enabled: false  # デフォルト無効（後方互換）
+                  signal_code: "JP.1306"
+                  short_window: 50
+                  long_window: 200
+                  active_regimes: ["bull"]
+              `''').replace("`", ""),
           )
 
           Path("src/regime_detector.py").write_text(
-              '''"""
-          相場レジーム検出器
+              block('''\
+              `"""
+              相場レジーム検出モジュール
 
-          ファイルパス: src/regime_detector.py
-          何をするか: ベンチマークの短期/長期SMAからbull/bear/rangeを判定する
-          なぜ存在するか: idle cash ETFオーバーレイを相場環境に応じて制御するため
-          関連ファイル: backtest_runner.py, config.yaml, config.example.yaml
-          """
+              ファイルパス: src/regime_detector.py
+              何をするか: SMA短期・長期線からbull/bear/rangeを判定する
+              なぜ存在するか: idle cash ETFオーバーレイを相場環境に連動させるため
+              関連ファイル: src/backtest_runner.py, config.yaml
+              """
 
-          from typing import Optional
+              from typing import Optional
 
-          import pandas as pd
+              import pandas as pd
 
-          from .config import Config
+              from .config import Config
 
 
-          class RegimeDetector:
-              """短期・長期SMAで相場レジームを判定する。"""
+              class RegimeDetector:
+                  """終値と移動平均から相場レジームを判定する。"""
 
-              VALID_REGIMES = frozenset({"bull", "bear", "range"})
+                  def __init__(self, config: Config):
+                      cfg = config.get("backtest.idle_cash_allocation.regime", {}) or {}
+                      self.enabled = bool(cfg.get("enabled", False))
+                      self.signal_code = str(cfg.get("signal_code", "JP.1306"))
+                      self.short_window = int(cfg.get("short_window", 50))
+                      self.long_window = int(cfg.get("long_window", 200))
 
-              def __init__(self, config: Config):
-                  regime_cfg = config.get("backtest.idle_cash_allocation.regime", {})
-                  if not isinstance(regime_cfg, dict):
-                      regime_cfg = {}
+                      if self.short_window <= 0 or self.long_window <= 0:
+                          raise ValueError("SMAウィンドウは正の整数で指定してください")
 
-                  self.enabled = bool(regime_cfg.get("enabled", False))
-                  self.short_window = int(regime_cfg.get("short_window", 50))
-                  self.long_window = int(regime_cfg.get("long_window", 200))
-                  self.range_threshold_pct = float(
-                      regime_cfg.get("range_threshold_pct", 1.0)
-                  )
+                      active_regimes = cfg.get("active_regimes", ["bull"])
+                      if isinstance(active_regimes, str):
+                          active_regimes = [active_regimes]
+                      self.active_regimes = [
+                          str(regime) for regime in active_regimes
+                      ]
 
-                  raw_active = regime_cfg.get("active_regimes", ["bull"])
-                  if isinstance(raw_active, str):
-                      raw_active = [raw_active]
-                  if not isinstance(raw_active, list):
-                      raise ValueError("active_regimes は文字列のリストで指定してください")
+                  def detect(self, df: pd.DataFrame) -> list[dict]:
+                      """日付順のレジーム系列を返す。"""
+                      if df.empty:
+                          return []
 
-                  active_regimes = frozenset(str(item).lower() for item in raw_active)
-                  unknown = active_regimes - self.VALID_REGIMES
-                  if unknown:
-                      raise ValueError(
-                          "未対応のレジームが指定されています: "
-                          + ", ".join(sorted(unknown))
-                      )
-                  if self.short_window <= 0 or self.long_window <= 0:
-                      raise ValueError("SMA期間は正の整数で指定してください")
-                  if self.short_window >= self.long_window:
-                      raise ValueError("short_window は long_window より小さくしてください")
-                  if self.range_threshold_pct < 0:
-                      raise ValueError("range_threshold_pct は0以上で指定してください")
+                      required_columns = {"date", "close"}
+                      missing = required_columns.difference(df.columns)
+                      if missing:
+                          raise ValueError(
+                              "レジーム判定に必要な列がありません: "
+                              + ", ".join(sorted(missing))
+                          )
 
-                  self.active_regimes = active_regimes
+                      data = df.copy().sort_values("date").reset_index(drop=True)
+                      data["sma_short"] = data["close"].rolling(
+                          window=self.short_window,
+                          min_periods=self.short_window,
+                      ).mean()
+                      data["sma_long"] = data["close"].rolling(
+                          window=self.long_window,
+                          min_periods=self.long_window,
+                      ).mean()
 
-              def detect(self, df: pd.DataFrame) -> pd.Series:
-                  """日付をindex、レジームを値とするSeriesを返す。"""
-                  if df.empty:
-                      return pd.Series(dtype="object", name="market_regime")
-                  if "close" not in df.columns:
-                      raise ValueError("レジーム判定にはcloseカラムが必要です")
+                      results = []
+                      for _, row in data.iterrows():
+                          close = row["close"]
+                          sma_short = row["sma_short"]
+                          sma_long = row["sma_long"]
+                          date = str(row["date"])[:10]
 
-                  if "time_key" in df.columns:
-                      raw_dates = df["time_key"]
-                  elif "date" in df.columns:
-                      raw_dates = df["date"]
-                  elif isinstance(df.index, pd.DatetimeIndex):
-                      raw_dates = pd.Series(df.index, index=df.index)
-                  else:
-                      raise ValueError(
-                          "レジーム判定にはtime_key/dateカラムまたはDatetimeIndexが必要です"
-                      )
+                          if (
+                              pd.isna(close)
+                              or pd.isna(sma_short)
+                              or pd.isna(sma_long)
+                          ):
+                              results.append(
+                                  {
+                                      "date": date,
+                                      "regime": "unknown",
+                                      "sma50": None,
+                                      "sma200": None,
+                                  }
+                              )
+                              continue
 
-                  frame = pd.DataFrame(
-                      {
-                          "date": pd.to_datetime(raw_dates, errors="coerce"),
-                          "close": pd.to_numeric(df["close"], errors="coerce"),
-                      }
-                  )
-                  frame = (
-                      frame.dropna(subset=["date", "close"])
-                      .sort_values("date")
-                      .drop_duplicates(subset=["date"], keep="last")
-                      .set_index("date")
-                  )
-                  if frame.empty:
-                      return pd.Series(dtype="object", name="market_regime")
+                          if close > sma_long and sma_short > sma_long:
+                              regime = "bull"
+                          elif close < sma_long and sma_short < sma_long:
+                              regime = "bear"
+                          else:
+                              regime = "range"
 
-                  short_sma = frame["close"].rolling(
-                      self.short_window,
-                      min_periods=self.short_window,
-                  ).mean()
-                  long_sma = frame["close"].rolling(
-                      self.long_window,
-                      min_periods=self.long_window,
-                  ).mean()
-                  margin = long_sma * (self.range_threshold_pct / 100.0)
-                  valid = short_sma.notna() & long_sma.notna()
+                          results.append(
+                              {
+                                  "date": date,
+                                  "regime": regime,
+                                  "sma50": round(float(sma_short), 2),
+                                  "sma200": round(float(sma_long), 2),
+                              }
+                          )
 
-                  regimes = pd.Series(
-                      pd.NA,
-                      index=frame.index,
-                      dtype="object",
-                      name="market_regime",
-                  )
-                  regimes.loc[valid & (short_sma > long_sma + margin)] = "bull"
-                  regimes.loc[valid & (short_sma < long_sma - margin)] = "bear"
-                  regimes.loc[valid & regimes.isna()] = "range"
-                  return regimes
+                      return results
 
-              def regime_on(self, date: str, regimes: pd.Series) -> Optional[str]:
-                  """指定日の直前取引日に確定したレジームを返す。"""
-                  if regimes.empty:
+                  def regime_on(
+                      self,
+                      date: str,
+                      regimes: list[dict],
+                  ) -> Optional[str]:
+                      """指定日の1営業日前のレジームを返し、先読みを防止する。"""
+                      for index, result in enumerate(regimes):
+                          if result["date"] != date:
+                              continue
+                          if index == 0:
+                              return None
+                          return str(regimes[index - 1]["regime"])
                       return None
 
-                  target = pd.Timestamp(date)
-                  history = regimes.copy()
-                  history.index = pd.to_datetime(history.index, errors="coerce")
-                  history = history[~history.index.isna()]
-                  history = history[history.index < target].dropna()
-                  if history.empty:
-                      return None
-
-                  regime = str(history.iloc[-1]).lower()
-                  return regime if regime in self.VALID_REGIMES else None
-
-              def is_overlay_active(self, regime: Optional[str]) -> bool:
-                  """設定無効時は従来動作、有効時は指定レジームのみ許可する。"""
-                  if not self.enabled:
-                      return True
-                  return regime is not None and regime.lower() in self.active_regimes
-          ''',
+                  def is_overlay_active(self, regime: Optional[str]) -> bool:
+                      """設定上オーバーレイを適用すべきレジームか判定する。"""
+                      if not self.enabled or regime is None:
+                          return False
+                      return regime in self.active_regimes
+              `''').replace("`", ""),
               encoding="utf-8",
           )
 
           replace_once(
               "src/backtest_runner.py",
               "from .ranking import sort_items_by_score\n",
-              "from .ranking import sort_items_by_score\nfrom .regime_detector import RegimeDetector\n",
+              "from .ranking import sort_items_by_score\n"
+              "from .regime_detector import RegimeDetector\n",
           )
+
           replace_once(
               "src/backtest_runner.py",
-              '''        self.split_adjustments = SplitAdjustmentService(self.db_path)
-              self.run_id: Optional[int] = None
-          ''',
-              '''        self.split_adjustments = SplitAdjustmentService(self.db_path)
-              self.regime_detector = RegimeDetector(config)
-              self.run_id: Optional[int] = None
-          ''',
+              block('''\
+              `    def _idle_cash_benchmark_code(self) -> Optional[str]:
+                      cfg = self.config.get("backtest.idle_cash_allocation", {})
+                      if cfg.get("enabled", False):
+                          return cfg.get("benchmark_code", self._benchmark_code())
+                      return None
+
+                  def _conn(self):
+              `''').replace("`", ""),
+              block('''\
+              `    def _idle_cash_benchmark_code(self) -> Optional[str]:
+                      cfg = self.config.get("backtest.idle_cash_allocation", {})
+                      if cfg.get("enabled", False):
+                          return cfg.get("benchmark_code", self._benchmark_code())
+                      return None
+
+                  def _ensure_market_regime_column(self) -> None:
+                      """既存DBのequity curveへmarket_regime列を追加する。"""
+                      with self._conn() as conn:
+                          columns = {
+                              row[1]
+                              for row in conn.execute(
+                                  "PRAGMA table_info(backtest_equity_curve)"
+                              ).fetchall()
+                          }
+                          if "market_regime" not in columns:
+                              conn.execute(
+                                  "ALTER TABLE backtest_equity_curve "
+                                  "ADD COLUMN market_regime TEXT"
+                              )
+
+                  def _conn(self):
+              `''').replace("`", ""),
           )
+
           replace_once(
               "src/backtest_runner.py",
-              '''        self.min_trade_price = universe_cfg.get("min_trade_price", 500)
-              self.max_trade_price = universe_cfg.get("max_trade_price", 20000)
+              block('''\
+              `        self.strategy_name = strategy_name
+                      self.cash = self.initial_cash
+                      self.reserved_cash = 0.0  # pending BUY予約額（signal日で増加、fill日で解放）
+                      run_id = self.create_run(strategy_name, start_date, end_date)
+              `''').replace("`", ""),
+              block('''\
+              `        self.strategy_name = strategy_name
+                      self.cash = self.initial_cash
+                      self.reserved_cash = 0.0  # pending BUY予約額（signal日で増加、fill日で解放）
+                      self._ensure_market_regime_column()
+                      run_id = self.create_run(strategy_name, start_date, end_date)
+              `''').replace("`", ""),
+          )
 
-              def _benchmark_code(self) -> str:
-          ''',
-              '''        self.min_trade_price = universe_cfg.get("min_trade_price", 500)
-              self.max_trade_price = universe_cfg.get("max_trade_price", 20000)
-              self._ensure_equity_curve_market_regime_column()
-
-              def _ensure_equity_curve_market_regime_column(self) -> None:
-                  """既存DBのequity curveへmarket_regime列を追加する。"""
-                  with self._conn() as conn:
-                      table = conn.execute(
-                          "SELECT 1 FROM sqlite_master "
-                          "WHERE type='table' AND name='backtest_equity_curve'"
-                      ).fetchone()
-                      if table is None:
-                          return
-                      columns = {
-                          row[1]
-                          for row in conn.execute(
-                              "PRAGMA table_info(backtest_equity_curve)"
-                          ).fetchall()
-                      }
-                      if "market_regime" not in columns:
-                          conn.execute(
-                              "ALTER TABLE backtest_equity_curve "
-                              "ADD COLUMN market_regime TEXT"
+          replace_once(
+              "src/backtest_runner.py",
+              block('''\
+              `        # Idle cash allocation tracking
+                      idle_code = self._idle_cash_benchmark_code()
+                      idle_bench_prev = None
+              `''').replace("`", ""),
+              block('''\
+              `        # Idle cash allocation tracking
+                      idle_code = self._idle_cash_benchmark_code()
+                      idle_bench_prev = None
+                      regime_detector = RegimeDetector(self.config)
+                      regimes: list[dict] = []
+                      if idle_code and regime_detector.enabled:
+                          history_limit = max(
+                              250,
+                              len(days) + regime_detector.long_window + 1,
                           )
-
-              def _benchmark_code(self) -> str:
-          ''',
+                          regime_df = self._bars_up_to(
+                              regime_detector.signal_code,
+                              end_date,
+                              limit=history_limit,
+                          )
+                          if not regime_df.empty:
+                              regime_df = regime_df.rename(
+                                  columns={"time_key": "date"}
+                              )
+                              regimes = regime_detector.detect(
+                                  regime_df[["date", "close"]]
+                              )
+                          if not regimes:
+                              logger.warning(
+                                  "regime signal data missing: code=%s; "
+                                  "idle cash overlay stays inactive",
+                                  regime_detector.signal_code,
+                              )
+              `''').replace("`", ""),
           )
+
           replace_once(
               "src/backtest_runner.py",
-              '''        # Idle cash allocation tracking
-              idle_code = self._idle_cash_benchmark_code()
-              idle_bench_prev = None
-
-              # Trailing stop tracking: code -> highest close seen
-          ''',
-              '''        # Idle cash allocation tracking
-              idle_code = self._idle_cash_benchmark_code()
-              idle_bench_prev = None
-              market_regimes = pd.Series(dtype="object", name="market_regime")
-              if idle_code and self.regime_detector.enabled:
-                  regime_history_limit = max(
-                      250,
-                      len(days) + self.regime_detector.long_window + 1,
-                  )
-                  regime_bars = self._bars_up_to(
-                      idle_code,
-                      end_date,
-                      limit=regime_history_limit,
-                  )
-                  market_regimes = self.regime_detector.detect(regime_bars)
-
-              # Trailing stop tracking: code -> highest close seen
-          ''',
+              block('''\
+              `            # ── Phase 4: idle cash allocation ──
+                          if idle_code:
+                              bm_today = self._benchmark_value(idle_code, day)
+                              if bm_today is not None and idle_bench_prev is not None:
+                                  daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
+                                  investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
+                                  self.cash += investable_idle_cash * daily_bm_ret
+                              idle_bench_prev = bm_today
+              `''').replace("`", ""),
+              block('''\
+              `            # ── Phase 4: idle cash allocation ──
+                          market_regime = (
+                              regime_detector.regime_on(day, regimes)
+                              if regimes
+                              else None
+                          )
+                          if idle_code:
+                              bm_today = self._benchmark_value(idle_code, day)
+                              overlay_active = (
+                                  not regime_detector.enabled
+                                  or regime_detector.is_overlay_active(market_regime)
+                              )
+                              if (
+                                  overlay_active
+                                  and bm_today is not None
+                                  and idle_bench_prev is not None
+                                  and idle_bench_prev != 0
+                              ):
+                                  daily_bm_ret = (
+                                      (bm_today - idle_bench_prev)
+                                      / idle_bench_prev
+                                  )
+                                  investable_idle_cash = max(
+                                      0.0,
+                                      self.cash - self.reserved_cash,
+                                  )
+                                  self.cash += (
+                                      investable_idle_cash * daily_bm_ret
+                                  )
+                              idle_bench_prev = bm_today
+              `''').replace("`", ""),
           )
+
           replace_once(
               "src/backtest_runner.py",
-              '''            if (i + 1) % 20 == 0:
-                  logger.info("  [%d/%d] %s ...", i + 1, total_days, day)
-
-              candidates = trade_candidates
-          ''',
-              '''            if (i + 1) % 20 == 0:
-                  logger.info("  [%d/%d] %s ...", i + 1, total_days, day)
-
-              market_regime = (
-                  self.regime_detector.regime_on(day, market_regimes)
-                  if self.regime_detector.enabled
-                  else None
-              )
-              overlay_active = self.regime_detector.is_overlay_active(market_regime)
-
-              candidates = trade_candidates
-          ''',
-          )
-          replace_once(
-              "src/backtest_runner.py",
-              '''            if idle_code:
-                  bm_today = self._benchmark_value(idle_code, day)
-                  if bm_today is not None and idle_bench_prev is not None:
-                      daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                      investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
-                      self.cash += investable_idle_cash * daily_bm_ret
-                  idle_bench_prev = bm_today
-          ''',
-              '''            if idle_code:
-                  bm_today = self._benchmark_value(idle_code, day)
-                  if (
-                      bm_today is not None
-                      and idle_bench_prev is not None
-                      and overlay_active
-                  ):
-                      daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
-                      investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
-                      self.cash += investable_idle_cash * daily_bm_ret
-                  idle_bench_prev = bm_today
-          ''',
-          )
-          replace_once(
-              "src/backtest_runner.py",
-              '''                    "INSERT OR REPLACE INTO backtest_equity_curve (run_id, strategy_name, date, cash, position_value, total_equity, benchmark_2559_value, benchmark_1306_value, drawdown_pct) VALUES (?,?,?,?,?,?,?,?,?)",
-                      (self.run_id, strategy_name, day, self.cash, pos_value, total_equity, bm_2559, bm_1306, drawdown),
-          ''',
-              '''                    "INSERT OR REPLACE INTO backtest_equity_curve (run_id, strategy_name, date, cash, position_value, total_equity, benchmark_2559_value, benchmark_1306_value, drawdown_pct, market_regime) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (
-                          self.run_id,
-                          strategy_name,
-                          day,
-                          self.cash,
-                          pos_value,
-                          total_equity,
-                          bm_2559,
-                          bm_1306,
-                          drawdown,
-                          market_regime,
-                      ),
-          ''',
+              block('''\
+              `                conn.execute(
+                                  "INSERT OR REPLACE INTO backtest_equity_curve (run_id, strategy_name, date, cash, position_value, total_equity, benchmark_2559_value, benchmark_1306_value, drawdown_pct) VALUES (?,?,?,?,?,?,?,?,?)",
+                                  (self.run_id, strategy_name, day, self.cash, pos_value, total_equity, bm_2559, bm_1306, drawdown),
+                              )
+              `''').replace("`", ""),
+              block('''\
+              `                conn.execute(
+                                  "INSERT OR REPLACE INTO backtest_equity_curve "
+                                  "(run_id, strategy_name, date, cash, position_value, "
+                                  "total_equity, benchmark_2559_value, "
+                                  "benchmark_1306_value, drawdown_pct, market_regime) "
+                                  "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                  (
+                                      self.run_id,
+                                      strategy_name,
+                                      day,
+                                      self.cash,
+                                      pos_value,
+                                      total_equity,
+                                      bm_2559,
+                                      bm_1306,
+                                      drawdown,
+                                      market_regime,
+                                  ),
+                              )
+              `''').replace("`", ""),
           )
 
           replace_once(
               "src/models.py",
-              '''    benchmark_1306_value REAL,
-              drawdown_pct REAL,
-              UNIQUE(run_id, strategy_name, date)
-          ''',
-              '''    benchmark_1306_value REAL,
-              drawdown_pct REAL,
-              market_regime TEXT,
-              UNIQUE(run_id, strategy_name, date)
-          ''',
+              block('''\
+              `    benchmark_1306_value REAL,
+                  drawdown_pct REAL,
+                  UNIQUE(run_id, strategy_name, date)
+              `''').replace("`", ""),
+              block('''\
+              `    benchmark_1306_value REAL,
+                  drawdown_pct REAL,
+                  market_regime TEXT,
+                  UNIQUE(run_id, strategy_name, date)
+              `''').replace("`", ""),
           )
 
           replace_once(
               "src/data_store.py",
-              '''        add_missing("signals", {
-                  "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
-              })
+              block('''\
+              `        add_missing("signals", {
+                          "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
+                      })
 
-              def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
-          ''',
-              '''        add_missing("signals", {
-                  "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
-              })
-              add_missing("backtest_equity_curve", {
-                  "market_regime": "TEXT",
-              })
+                  def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
+              `''').replace("`", ""),
+              block('''\
+              `        add_missing("signals", {
+                          "strategy_name": "TEXT NOT NULL DEFAULT 'momentum'",
+                      })
+                      add_missing("backtest_equity_curve", {
+                          "market_regime": "TEXT",
+                      })
 
-              def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
-          ''',
+                  def _migrate_signals_unique_key(self, conn: sqlite3.Connection) -> None:
+              `''').replace("`", ""),
           )
 
           Path("tests/test_regime_detector.py").write_text(
-              '''"""相場レジーム検出器の回帰テスト。"""
+              block('''\
+              `"""
+              相場レジーム検出器の回帰テスト。
 
-          from pathlib import Path
+              ファイルパス: tests/test_regime_detector.py
+              何をするか: bull/bear/range判定、1日遅延、設定による有効化を検証する
+              なぜ存在するか: 先読みや後方互換性の回帰を防ぐため
+              関連ファイル: src/regime_detector.py, src/backtest_runner.py
+              """
 
-          import pandas as pd
-          import pytest
-          import yaml
+              from pathlib import Path
 
-          from src.config import Config
-          from src.regime_detector import RegimeDetector
+              import pandas as pd
+              import pytest
+              import yaml
+
+              from src.config import Config
+              from src.regime_detector import RegimeDetector
 
 
-          def _config(tmp_path: Path, regime: dict) -> Config:
-              config_path = tmp_path / "config.yaml"
-              config_path.write_text(
-                  yaml.safe_dump(
-                      {
-                          "database": {"path": str(tmp_path / "test.db")},
-                          "backtest": {
-                              "idle_cash_allocation": {
-                                  "enabled": True,
-                                  "benchmark_code": "JP.1306",
-                                  "regime": regime,
+              def _config(tmp_path: Path, regime: dict | None = None) -> Config:
+                  config_path = tmp_path / "config.yaml"
+                  config_path.write_text(
+                      yaml.safe_dump(
+                          {
+                              "backtest": {
+                                  "idle_cash_allocation": {
+                                      "regime": regime or {},
+                                  }
                               }
                           },
-                      },
-                      sort_keys=False,
-                  ),
-                  encoding="utf-8",
-              )
-              return Config(str(config_path))
-
-
-          def test_detect_classifies_bull_bear_and_range(tmp_path: Path) -> None:
-              detector = RegimeDetector(
-                  _config(
-                      tmp_path,
-                      {
-                          "enabled": True,
-                          "short_window": 2,
-                          "long_window": 3,
-                          "range_threshold_pct": 0,
-                          "active_regimes": ["bull"],
-                      },
+                          allow_unicode=True,
+                          sort_keys=False,
+                      ),
+                      encoding="utf-8",
                   )
-              )
-              dates = pd.date_range("2026-01-01", periods=6, freq="D")
-              bars = pd.DataFrame(
-                  {
-                      "time_key": dates[::-1],
-                      "close": [8, 8, 12, 10, 10, 10],
-                  }
-              )
-
-              regimes = detector.detect(bars)
-
-              assert pd.isna(regimes.loc[pd.Timestamp("2026-01-02")])
-              assert regimes.loc[pd.Timestamp("2026-01-03")] == "range"
-              assert regimes.loc[pd.Timestamp("2026-01-04")] == "bull"
-              assert regimes.loc[pd.Timestamp("2026-01-05")] == "range"
-              assert regimes.loc[pd.Timestamp("2026-01-06")] == "bear"
+                  return Config(str(config_path))
 
 
-          def test_regime_on_uses_previous_trading_day(tmp_path: Path) -> None:
-              detector = RegimeDetector(
-                  _config(
-                      tmp_path,
+              def _prices() -> pd.DataFrame:
+                  return pd.DataFrame(
                       {
-                          "enabled": True,
-                          "short_window": 2,
-                          "long_window": 3,
-                          "range_threshold_pct": 0,
-                          "active_regimes": ["bull"],
-                      },
+                          "date": pd.date_range(
+                              "2026-01-01",
+                              periods=6,
+                              freq="D",
+                          ),
+                          "close": [10.0, 11.0, 12.0, 8.0, 10.0, 13.0],
+                      }
                   )
-              )
-              regimes = pd.Series(
-                  ["range", "bull", "bear"],
-                  index=pd.to_datetime(["2026-01-03", "2026-01-04", "2026-01-06"]),
-                  dtype="object",
-              )
-
-              assert detector.regime_on("2026-01-03", regimes) is None
-              assert detector.regime_on("2026-01-04", regimes) == "range"
-              assert detector.regime_on("2026-01-05", regimes) == "bull"
-              assert detector.regime_on("2026-01-07", regimes) == "bear"
 
 
-          def test_overlay_activation_and_disabled_compatibility(tmp_path: Path) -> None:
-              enabled = RegimeDetector(
-                  _config(
-                      tmp_path,
-                      {
-                          "enabled": True,
-                          "active_regimes": ["bull", "range"],
-                      },
-                  )
-              )
-              assert enabled.is_overlay_active("bull")
-              assert enabled.is_overlay_active("range")
-              assert not enabled.is_overlay_active("bear")
-              assert not enabled.is_overlay_active(None)
-
-              disabled = RegimeDetector(
-                  _config(tmp_path, {"enabled": False})
-              )
-              assert disabled.is_overlay_active("bear")
-              assert disabled.is_overlay_active(None)
-
-
-          def test_invalid_window_configuration_is_rejected(tmp_path: Path) -> None:
-              with pytest.raises(ValueError, match="short_window"):
-                  RegimeDetector(
+              def test_detects_unknown_bull_bear_and_range(
+                  tmp_path: Path,
+              ) -> None:
+                  detector = RegimeDetector(
                       _config(
                           tmp_path,
                           {
                               "enabled": True,
-                              "short_window": 200,
-                              "long_window": 50,
+                              "short_window": 2,
+                              "long_window": 3,
                           },
                       )
                   )
-          ''',
+
+                  regimes = detector.detect(_prices())
+
+                  assert [item["regime"] for item in regimes] == [
+                      "unknown",
+                      "unknown",
+                      "bull",
+                      "bear",
+                      "range",
+                      "bull",
+                  ]
+                  assert regimes[2]["sma50"] == 11.5
+                  assert regimes[2]["sma200"] == 11.0
+
+
+              def test_regime_on_uses_previous_day_to_prevent_lookahead(
+                  tmp_path: Path,
+              ) -> None:
+                  detector = RegimeDetector(
+                      _config(
+                          tmp_path,
+                          {
+                              "enabled": True,
+                              "short_window": 2,
+                              "long_window": 3,
+                          },
+                      )
+                  )
+                  regimes = detector.detect(_prices())
+
+                  assert detector.regime_on("2026-01-01", regimes) is None
+                  assert detector.regime_on("2026-01-04", regimes) == "bull"
+                  assert detector.regime_on("2026-01-05", regimes) == "bear"
+                  assert detector.regime_on("2026-01-07", regimes) is None
+
+
+              def test_overlay_activation_respects_configuration(
+                  tmp_path: Path,
+              ) -> None:
+                  disabled = RegimeDetector(_config(tmp_path))
+                  assert disabled.is_overlay_active("bull") is False
+
+                  enabled = RegimeDetector(
+                      _config(
+                          tmp_path,
+                          {
+                              "enabled": True,
+                              "active_regimes": ["bull", "range"],
+                          },
+                      )
+                  )
+                  assert enabled.is_overlay_active("bull") is True
+                  assert enabled.is_overlay_active("range") is True
+                  assert enabled.is_overlay_active("bear") is False
+                  assert enabled.is_overlay_active(None) is False
+
+
+              def test_detect_rejects_missing_required_columns(
+                  tmp_path: Path,
+              ) -> None:
+                  detector = RegimeDetector(_config(tmp_path))
+
+                  with pytest.raises(ValueError, match="close"):
+                      detector.detect(
+                          pd.DataFrame({"date": ["2026-01-01"]})
+                      )
+
+
+              def test_rejects_non_positive_windows(tmp_path: Path) -> None:
+                  with pytest.raises(ValueError, match="正の整数"):
+                      RegimeDetector(
+                          _config(
+                              tmp_path,
+                              {
+                                  "short_window": 0,
+                                  "long_window": 200,
+                              },
+                          )
+                      )
+              `''').replace("`", ""),
               encoding="utf-8",
           )
 
           Path(".github/workflows/apply-regime-overlay.yml").unlink()
           PY
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Validate implementation
-        run: |
-          python -m pytest tests/test_regime_detector.py -q
-          python -m pytest tests/ -m "not slow" -q
-          ruff check src/ tests/ run_daily_cycle.py
-          pyright
-          git diff --check
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config.yaml config.example.yaml src/backtest_runner.py src/regime_detector.py src/models.py src/data_store.py tests/test_regime_detector.py .github/workflows/apply-regime-overlay.yml
-          git commit -m "feat: add regime-aware idle cash overlay"
-          git push origin HEAD:master
