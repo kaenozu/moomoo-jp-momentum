@@ -159,7 +159,7 @@ backtest:
     enabled: true         # 未投資資金をベンチマークETFに自動配分
     benchmark_code: "JP.1306"   # 配分先ベンチマーク
     regime:
-      enabled: false      # falseなら従来どおり常時ETFリターンを適用
+      enabled: false  # デフォルト無効（後方互換）
       signal_code: "JP.1306"
       short_window: 50
       long_window: 200

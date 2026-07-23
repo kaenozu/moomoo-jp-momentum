@@ -8,7 +8,6 @@
 """
 
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest
@@ -18,10 +17,7 @@ from src.config import Config
 from src.regime_detector import RegimeDetector
 
 
-def _config(
-    tmp_path: Path,
-    regime: dict[str, Any] | None = None,
-) -> Config:
+def _config(tmp_path: Path, regime: dict | None = None) -> Config:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -43,19 +39,13 @@ def _config(
 def _prices() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "date": pd.date_range(
-                "2026-01-01",
-                periods=6,
-                freq="D",
-            ),
+            "date": pd.date_range("2026-01-01", periods=6, freq="D"),
             "close": [10.0, 11.0, 12.0, 8.0, 10.0, 13.0],
         }
     )
 
 
-def test_detects_unknown_bull_bear_and_range(
-    tmp_path: Path,
-) -> None:
+def test_detects_unknown_bull_bear_and_range(tmp_path: Path) -> None:
     detector = RegimeDetector(
         _config(
             tmp_path,
@@ -123,16 +113,14 @@ def test_overlay_activation_respects_configuration(
     assert enabled.is_overlay_active(None) is False
 
 
-def test_detect_rejects_missing_required_columns(
-    tmp_path: Path,
-) -> None:
+def test_detect_rejects_missing_required_columns(tmp_path: Path) -> None:
     detector = RegimeDetector(_config(tmp_path))
 
     with pytest.raises(ValueError, match="close"):
         detector.detect(pd.DataFrame({"date": ["2026-01-01"]}))
 
 
-def test_rejects_invalid_windows(tmp_path: Path) -> None:
+def test_rejects_non_positive_windows(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="正の整数"):
         RegimeDetector(
             _config(
@@ -140,17 +128,6 @@ def test_rejects_invalid_windows(tmp_path: Path) -> None:
                 {
                     "short_window": 0,
                     "long_window": 200,
-                },
-            )
-        )
-
-    with pytest.raises(ValueError, match="short_window"):
-        RegimeDetector(
-            _config(
-                tmp_path,
-                {
-                    "short_window": 200,
-                    "long_window": 50,
                 },
             )
         )

@@ -17,13 +17,14 @@ import sqlite3
 from dataclasses import dataclass
 
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Optional, Protocol, cast
 
 import pandas as pd
 
 from .config import Config
 from .indicators import StockIndicators, add_cross_sectional_stats, calculate_indicators
 from .ranking import sort_items_by_score
+from .regime_detector import RegimeDetector
 from .scoring import ScoreBreakdown, Scorer
 from .split_adjustment import SplitAdjustmentService
 from .strategies import StrategyRegistry, StrategyResult
@@ -125,6 +126,30 @@ class BacktestRunner:
             return cfg.get("benchmark_code", self._benchmark_code())
         return None
 
+    def _ensure_market_regime_column(self) -> None:
+        """既存DBのequity curveへmarket_regime列を追加する。"""
+        with self._conn() as conn:
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='backtest_equity_curve'"
+            ).fetchone()
+            if table_exists is None:
+                raise RuntimeError(
+                    "backtest_equity_curve テーブルが初期化されていません"
+                )
+
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(backtest_equity_curve)"
+                ).fetchall()
+            }
+            if "market_regime" not in columns:
+                conn.execute(
+                    "ALTER TABLE backtest_equity_curve "
+                    "ADD COLUMN market_regime TEXT"
+                )
+
     def _conn(self):
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -191,6 +216,7 @@ class BacktestRunner:
         self.strategy_name = strategy_name
         self.cash = self.initial_cash
         self.reserved_cash = 0.0  # pending BUY予約額（signal日で増加、fill日で解放）
+        self._ensure_market_regime_column()
         run_id = self.create_run(strategy_name, start_date, end_date)
 
         strategy = StrategyRegistry.get(strategy_name, self.config)
@@ -231,6 +257,31 @@ class BacktestRunner:
         # Idle cash allocation tracking
         idle_code = self._idle_cash_benchmark_code()
         idle_bench_prev = None
+        regime_detector = RegimeDetector(self.config)
+        regimes: list[dict] = []
+        if idle_code and regime_detector.enabled:
+            history_limit = max(
+                250,
+                len(days) + regime_detector.long_window + 1,
+            )
+            regime_df = self._bars_up_to(
+                regime_detector.signal_code,
+                end_date,
+                limit=history_limit,
+            )
+            if not regime_df.empty:
+                regime_df = regime_df.rename(columns={"time_key": "date"})
+                regime_input = cast(
+                    pd.DataFrame,
+                    regime_df.loc[:, ["date", "close"]].copy(),
+                )
+                regimes = regime_detector.detect(regime_input)
+            if not regimes:
+                logger.warning(
+                    "regime signal data missing: code=%s; "
+                    "idle cash overlay stays inactive",
+                    regime_detector.signal_code,
+                )
 
         # Trailing stop tracking: code -> highest close seen
         trailing_highs: dict[str, float] = {}
@@ -417,9 +468,23 @@ class BacktestRunner:
                 orders_created += 1
 
             # ── Phase 4: idle cash allocation ──
+            market_regime = (
+                regime_detector.regime_on(day, regimes)
+                if regimes
+                else None
+            )
             if idle_code:
                 bm_today = self._benchmark_value(idle_code, day)
-                if bm_today is not None and idle_bench_prev is not None:
+                overlay_active = (
+                    not regime_detector.enabled
+                    or regime_detector.is_overlay_active(market_regime)
+                )
+                if (
+                    overlay_active
+                    and bm_today is not None
+                    and idle_bench_prev is not None
+                    and idle_bench_prev != 0
+                ):
                     daily_bm_ret = (bm_today - idle_bench_prev) / idle_bench_prev
                     investable_idle_cash = max(0.0, self.cash - self.reserved_cash)
                     self.cash += investable_idle_cash * daily_bm_ret
@@ -445,8 +510,23 @@ class BacktestRunner:
 
             with self._conn() as conn:
                 conn.execute(
-                    "INSERT OR REPLACE INTO backtest_equity_curve (run_id, strategy_name, date, cash, position_value, total_equity, benchmark_2559_value, benchmark_1306_value, drawdown_pct) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (self.run_id, strategy_name, day, self.cash, pos_value, total_equity, bm_2559, bm_1306, drawdown),
+                    "INSERT OR REPLACE INTO backtest_equity_curve "
+                    "(run_id, strategy_name, date, cash, position_value, "
+                    "total_equity, benchmark_2559_value, benchmark_1306_value, "
+                    "drawdown_pct, market_regime) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        self.run_id,
+                        strategy_name,
+                        day,
+                        self.cash,
+                        pos_value,
+                        total_equity,
+                        bm_2559,
+                        bm_1306,
+                        drawdown,
+                        market_regime,
+                    ),
                 )
 
         # ── 最終結果を保存 ──
