@@ -44,7 +44,17 @@ jobs:
         run: ruff check src/ tests/ run_daily_cycle.py
 
       - name: Run Pyright
-        run: pyright
+        run: |
+          set -o pipefail
+          pyright 2>&1 | tee pyright-output.txt
+
+      - name: Upload Pyright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regime-overlay-pyright
+          path: pyright-output.txt
+          if-no-files-found: error
 
       - name: Compile and inspect diff
         run: |
