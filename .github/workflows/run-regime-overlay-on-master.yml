@@ -1,0 +1,81 @@
+name: apply regime overlay after master update
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  implement-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Extract and run implementation script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/apply-regime-overlay.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "          PY\n\n      - name: Format changed Python files"
+          if start_marker not in workflow or end_marker not in workflow:
+              raise RuntimeError('implementation script markers not found')
+          script = workflow.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in script.splitlines()
+          )
+          Path('/tmp/apply_regime_overlay.py').write_text(script + '\n', encoding='utf-8')
+          PY
+          python /tmp/apply_regime_overlay.py
+
+      - name: Format changed Python files
+        run: |
+          ruff format \
+            src/regime_detector.py \
+            src/backtest_runner.py \
+            src/models.py \
+            src/data_store.py \
+            tests/test_regime_detector.py
+
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
+
+      - name: Run ruff
+        run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
+
+      - name: Run pyright
+        run: pyright
+
+      - name: Compile source
+        run: python -m compileall -q src
+
+      - name: Commit validated implementation
+        run: |
+          rm .github/workflows/apply-regime-overlay.yml
+          rm .github/workflows/run-regime-overlay-on-pr.yml
+          rm .github/workflows/run-regime-overlay-on-master.yml
+          rm .github/regime-overlay-trigger.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config.yaml config.example.yaml src/backtest_runner.py src/data_store.py src/models.py src/regime_detector.py tests/test_regime_detector.py
+          git add -u .github/workflows .github/regime-overlay-trigger.txt
+          git commit -m "feat: add regime-aware idle cash overlay"
+          git push origin HEAD:master
