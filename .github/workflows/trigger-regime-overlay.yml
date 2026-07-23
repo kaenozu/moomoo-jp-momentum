@@ -26,33 +26,13 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Apply embedded implementation
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import textwrap
-
-          workflow_path = Path(".github/workflows/apply-regime-overlay.yml")
-          lines = workflow_path.read_text(encoding="utf-8").splitlines()
-          start = next(
-              index
-              for index, line in enumerate(lines)
-              if line.strip() == "python - <<'PY'"
-          )
-          end = next(
-              index
-              for index in range(start + 1, len(lines))
-              if lines[index].strip() == "PY"
-          )
-          code = textwrap.dedent("\n".join(lines[start + 1:end]))
-          exec(compile(code, str(workflow_path), "exec"))
-          Path(".github/workflows/trigger-regime-overlay.yml").unlink()
-          PY
-
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+
+      - name: Apply implementation
+        run: python .github/apply_regime_overlay.py
 
       - name: Validate implementation
         run: |
@@ -60,12 +40,13 @@ jobs:
           python -m pytest tests/ -m "not slow" -q
           ruff check src/ tests/ run_daily_cycle.py
           pyright
+          python -m compileall -q src
           git diff --check
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config.yaml config.example.yaml src/backtest_runner.py src/regime_detector.py src/models.py src/data_store.py tests/test_regime_detector.py .github/workflows/apply-regime-overlay.yml .github/workflows/trigger-regime-overlay.yml
+          git add -A
           git commit -m "feat: add regime-aware idle cash overlay"
           git push origin HEAD:master
