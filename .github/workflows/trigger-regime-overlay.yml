@@ -34,12 +34,20 @@ jobs:
       - name: Apply implementation
         run: python .github/apply_regime_overlay.py
 
-      - name: Validate implementation
+      - name: Test regime detector
+        run: python -m pytest tests/test_regime_detector.py -q
+
+      - name: Run fast tests
+        run: python -m pytest tests/ -m "not slow" -q
+
+      - name: Run Ruff
+        run: ruff check src/ tests/ run_daily_cycle.py
+
+      - name: Run Pyright
+        run: pyright
+
+      - name: Compile and inspect diff
         run: |
-          python -m pytest tests/test_regime_detector.py -q
-          python -m pytest tests/ -m "not slow" -q
-          ruff check src/ tests/ run_daily_cycle.py
-          pyright
           python -m compileall -q src
           git diff --check
 
