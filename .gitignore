@@ -31,3 +31,9 @@ Thumbs.db
 
 # ログ
 *.log
+
+# 一時ファイル
+nul
+
+# DBバックアップ
+*.db.before-*
