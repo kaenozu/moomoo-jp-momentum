@@ -158,6 +158,14 @@ backtest:
   idle_cash_allocation:
     enabled: true
     benchmark_code: "JP.1306"
+    # SMA短期/長期で相場レジームを判定し、指定レジームだけETFへ配分する
+    # enabled=false は後方互換モード（従来どおり常時配分）
+    regime:
+      enabled: false
+      short_window: 50
+      long_window: 200
+      range_threshold_pct: 1.0
+      active_regimes: ["bull"]
 
 # アプリ内仮想ペーパートレード設定
 # moomoo APIには注文を送信しない。SQLite上の仮想売買のみ。
