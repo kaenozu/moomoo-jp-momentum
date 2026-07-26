@@ -1,13 +1,16 @@
 # Moomoo 開発用依存関係
 # pip install -r requirements-dev.txt
 
+# CI compatibility baseline
+pandas==2.2.3
+
 # テスト
 pytest>=9.0.0
 pytest-mock>=3.14.0
 
 # コード品質
-ruff>=0.11.0
-pyright>=1.1.400
+ruff>=0.11.0,<0.16.0
+pyright==1.1.400
 
 # 型チェック補完
 types-pyyaml>=6.0.0

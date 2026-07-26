@@ -17,7 +17,7 @@ quota管理:
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 import pandas as pd
 import yfinance as yf
@@ -148,7 +148,12 @@ class QuoteService:
                 high_price = float(row["high"])
                 low_price = float(row["low"])
                 close_price = float(row["close"])
-                volume = int(row["volume"]) if pd.notna(row["volume"]) else 0
+                volume_value = cast(Any, row["volume"])
+                volume = (
+                    0
+                    if cast(bool, pd.isna(volume_value))
+                    else int(volume_value)
+                )
             except (TypeError, ValueError, OverflowError):
                 skipped += 1
                 continue

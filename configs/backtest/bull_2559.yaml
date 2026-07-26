@@ -1,0 +1,202 @@
+# Moomoo 日本株モメンタム検証ツール 設定ファイル
+# 日本株運用向け（JP.1306 を第一ベンチマーク、JP.2559 を参考）
+# 実運用時はこのファイルを config.yaml にコピーして使用する
+
+# OpenD接続設定
+opend:
+  host: "127.0.0.1"
+  port: 11111
+  timeout: 10
+
+# マーケットデータ設定
+market_data:
+  require_paid_quote_card: false
+  use_order_book: false
+  use_tick: false
+  use_realtime_push: false
+
+# 相場データ設定
+quote:
+  market: "JP"
+  data_types:
+    - "SNAPSHOT"
+    - "K_DAY"
+
+# 取引時間設定（日本株式市場、JST）
+# MVPの制限: 祝日・休場日には完全対応しません。土日のみの簡易判定です。
+trading_hours:
+  enabled: true
+  morning:
+    open: "09:00"
+    close: "11:30"
+  afternoon:
+    open: "12:30"
+    close: "15:30"
+  skip_weekends: true
+
+# 銘柄リスト設定
+watchlist:
+  symbols_file: "data/symbols.json"
+  max_symbols: 366
+
+# シグナル判定設定
+signals:
+  ma_periods:
+    short: 5
+    medium: 25
+  volume_ratio_threshold: 1.5
+  turnover_threshold_yen: 1.0   # 売買代金（億円単位）
+  relative_strength:
+    benchmark_code: "JP.1306"
+    period_days: 20
+  volume:
+    hard_gate: false
+    min_ratio: 1.5
+    use_percentile: true
+    percentile_threshold: 60
+    market_low_volume_threshold: 0.8
+
+# スクリーニング設定
+screening:
+  min_turnover: 100000000     # 1億円（日本株の流動性基準）
+  min_volume_ratio: 1.2
+  max_distance_from_high_20d: 5.0
+  risk_daily_return_threshold: 8.0
+  risk_return_5d_threshold: 15.0
+  risk_volume_ratio_threshold: 5.0
+  min_history_days: 25
+  downgrade_extreme_volume_ratio: true
+  max_return_5d: 10.0         # 5日リターン上限（過熱・追いかけ買い防止）
+
+# スコアリング設定
+scoring:
+  enable_risk_penalty: true
+  score_threshold_candidate: 60
+  score_threshold_watch: 50
+  weights:
+    trend: 30
+    volume: 20
+    relative_strength: 25
+    liquidity: 15
+    high_20d: 10
+    risk_warning: -30
+
+# ベンチマーク設定
+benchmark:
+  primary:
+    code: "JP.1306"
+    name: "NEXT FUNDS TOPIX連動型上場投信"
+  secondary:
+    - code: "JP.2559"
+      name: "MAXIS全世界株式（オール・カントリー）上場投信"
+
+# データベース設定
+database:
+  path: "data/moomoo.db"
+
+# ユニバース設定（価格フィルター）
+universe:
+  min_trade_price: 500        # 最小株価500円（ミニ株・単元未満株対応）
+  max_trade_price: 20000      # 最大株価2万円（高値株を除外）
+
+# 出力設定
+output:
+  csv: true
+  html: true
+  sqlite: true
+
+report:
+  output_dir: "reports"
+
+# アプリ設定
+app:
+  title: "Moomoo JP Strategy Monitor"
+  timezone: "Asia/Tokyo"
+  default_benchmark: "JP.1306"
+
+# アラート設定
+alerts:
+  enabled: false
+  console: true
+  file: true
+  webhook:
+    enabled: false
+    url: ""
+  score_threshold: 90
+  notify_new_candidates: true
+  notify_sell_watch: true
+  notify_stale_data: true
+
+# スケジューラ設定
+scheduler:
+  enabled: false
+  timezone: "Asia/Tokyo"
+  jobs:
+    connection_check:
+      enabled: true
+      cron: "30 8 * * 1-5"   # 平日 8:30 JST
+    daily_update:
+      enabled: true
+      cron: "30 15 * * 1-5"  # 平日 15:30 JST（市場閉場後）
+    screen_candidates:
+      enabled: true
+      cron: "35 15 * * 1-5"
+    performance_report:
+      enabled: true
+      cron: "45 15 * * 1-5"
+    send_alerts:
+      enabled: true
+      cron: "50 15 * * 1-5"
+    weekly_report:
+      enabled: true
+      cron: "30 15 * * 5"
+
+# バックテスト設定
+backtest:
+  stop_loss_pct: 8.0     # ストップロス幅（%）
+  max_positions: 20       # 最大同時保有ポジション数（日本株は単価が低いため20程度）
+  idle_cash_allocation:
+    enabled: true         # 未投資資金をベンチマークETFに自動配分
+    benchmark_code: "JP.2559"   # 配分先ベンチマーク
+    regime:
+      enabled: true
+      signal_code: "JP.2559"
+      short_window: 50
+      long_window: 200
+      active_regimes: ["bull"]
+
+# 仮想トレード設定（ペーパートレードエンジン）
+# SQLiteベースの仮想取引で、moomoo APIは使用しない
+virtual_trade:
+  enabled: true
+  initial_cash: 100000     # 初期資金10万円
+  max_total_positions: 5  # 最大同時保有5銘柄
+  max_position_amount: 20000  # 1銘柄あたり2万円（少額運用）
+  max_position_per_symbol: 1
+  market_fill_mode: "next_day_open"
+  slippage_bps: 10
+  commission: 0
+  reserve_buffer_pct: 2.0  # pending BUY予約の安全マージン（%）
+  default_benchmark: "JP.1306"
+
+# ペーパートレード設定（moomoo API SIMULATE）
+# 現在は使用せず、virtual_trade（SQLiteベース）を利用
+paper_trade:
+  enabled: false
+  jp_api_simulate_supported: false
+  allow_market_order: false
+  max_order_quantity: 10
+  max_order_amount: 50000
+  note: "moomoo JP市場ではAPI SIMULATE注文が未確認"
+
+# 日次サイクル設定
+daily_cycle:
+  markets:
+    - JP
+  fetch_mode: latest
+  latest_bar_count: 120
+
+strategies:
+  etf_rotation:
+    codes: ["JP.2559", "JP.1306", "JP.1320", "JP.2558", "JP.2563"]
+
