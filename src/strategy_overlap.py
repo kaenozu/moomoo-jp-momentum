@@ -134,7 +134,10 @@ def _event_keys(entries: pd.DataFrame) -> set[tuple[str, str]]:
         name=None,
     )
     return {
-        (str(code), pd.Timestamp(filled_at).strftime("%Y-%m-%d"))
+        (
+            str(code),
+            cast(pd.Timestamp, pd.Timestamp(filled_at)).strftime("%Y-%m-%d"),
+        )
         for code, filled_at in rows
     }
 
@@ -280,8 +283,8 @@ def calculate_strategy_overlap(
     union_symbols = codes_a | codes_b
     common_entries = entry_keys_a & entry_keys_b
     union_entries = entry_keys_a | entry_keys_b
-    common_start = pd.Timestamp(common_dates[0])
-    common_end = pd.Timestamp(common_dates[-1])
+    common_start = cast(pd.Timestamp, common_dates.min())
+    common_end = cast(pd.Timestamp, common_dates.max())
 
     summary = pd.DataFrame(
         [
