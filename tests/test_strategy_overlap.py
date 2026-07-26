@@ -52,8 +52,12 @@ def test_calculate_strategy_overlap_reports_entries_holdings_and_returns() -> No
     assert summary.avg_holdings_jaccard_pct == pytest.approx(
         (1 + 1 / 3 + 1 / 3) / 3 * 100
     )
+    assert summary.avg_holdings_overlap_coefficient_pct == pytest.approx(
+        (1 + 1 / 2 + 1 / 2) / 3 * 100
+    )
     assert summary.exact_entry_overlap_count == 1
     assert summary.symbol_overlap_count == 1
+    assert len(result.symbol_rows) == 3
     assert len(result.entry_rows) == 3
 
 
@@ -89,6 +93,42 @@ def test_entry_overlap_excludes_buys_before_common_period() -> None:
     assert result.summary.strategy_a_buy_entries == 0
     assert result.summary.symbol_jaccard_pct is None
     assert result.daily_rows[0]["strategy_a_holdings"] == 1
+
+
+def test_calculate_strategy_overlap_rejects_negative_inventory() -> None:
+    with pytest.raises(ValueError, match="negative reconstructed holdings"):
+        calculate_strategy_overlap(
+            [EquityPoint("2026-01-01", 100), EquityPoint("2026-01-02", 101)],
+            [EquityPoint("2026-01-01", 100), EquityPoint("2026-01-02", 101)],
+            [FillEvent("2026-01-01", "JP.1111", "SELL", 1, "2026-01-01")],
+            [],
+        )
+
+
+@pytest.mark.parametrize(
+    ("event", "message"),
+    [
+        (
+            FillEvent("2026-01-01", "JP.1111", "HOLD", 1, "2026-01-01"),
+            "unsupported side",
+        ),
+        (
+            FillEvent("2026-01-01", "JP.1111", "BUY", 0, "2026-01-01"),
+            "quantity must be positive",
+        ),
+    ],
+)
+def test_calculate_strategy_overlap_validates_fills(
+    event: FillEvent,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        calculate_strategy_overlap(
+            [EquityPoint("2026-01-01", 100), EquityPoint("2026-01-02", 101)],
+            [EquityPoint("2026-01-01", 100), EquityPoint("2026-01-02", 101)],
+            [event],
+            [],
+        )
 
 
 def test_calculate_strategy_overlap_rejects_non_overlapping_curves() -> None:
