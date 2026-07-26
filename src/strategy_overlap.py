@@ -38,7 +38,9 @@ class StrategyOverlapSummary:
     daily_return_correlation: float | None
     same_direction_days_pct: float
     negative_day_jaccard_pct: float | None
+    active_holdings_comparison_days: int
     avg_holdings_jaccard_pct: float | None
+    avg_holdings_overlap_coefficient_pct: float | None
     exact_entry_jaccard_pct: float | None
     code_month_entry_jaccard_pct: float | None
     symbol_jaccard_pct: float | None
@@ -55,6 +57,7 @@ class StrategyOverlapSummary:
 class StrategyOverlapResult:
     summary: StrategyOverlapSummary
     daily_rows: list[dict[str, Any]]
+    symbol_rows: list[dict[str, Any]]
     entry_rows: list[dict[str, Any]]
 
 
@@ -133,6 +136,26 @@ def _jaccard(set_a: set[Any], set_b: set[Any]) -> float | None:
     return len(set_a & set_b) / len(union)
 
 
+def _prepare_fill_events(events: list[FillEvent], label: str) -> list[FillEvent]:
+    prepared: list[FillEvent] = []
+    for event in events:
+        side = event.side.upper()
+        if side not in {"BUY", "SELL"}:
+            raise ValueError(f"{label} fills contain unsupported side: {event.side}")
+        if event.quantity <= 0:
+            raise ValueError(f"{label} fill quantity must be positive")
+        prepared.append(
+            FillEvent(
+                date=event.date,
+                code=event.code,
+                side=side,
+                quantity=event.quantity,
+                signal_date=event.signal_date,
+            )
+        )
+    return sorted(prepared, key=lambda event: event.date)
+
+
 def _apply_events(
     positions: dict[str, int],
     events: list[FillEvent],
@@ -146,6 +169,10 @@ def _apply_events(
             positions[event.code] = current + event.quantity
         elif event.side == "SELL":
             remaining = current - event.quantity
+            if remaining < 0:
+                raise ValueError(
+                    f"negative reconstructed holdings: {event.code} on {event.date}"
+                )
             if remaining > 0:
                 positions[event.code] = remaining
             else:
@@ -168,14 +195,15 @@ def calculate_strategy_overlap(
     )
     overlap_end_date = common_dates[-1]
 
-    ordered_fills_a = sorted(fills_a, key=lambda event: (event.date, event.code))
-    ordered_fills_b = sorted(fills_b, key=lambda event: (event.date, event.code))
+    ordered_fills_a = _prepare_fill_events(fills_a, "A")
+    ordered_fills_b = _prepare_fill_events(fills_b, "B")
     positions_a: dict[str, int] = {}
     positions_b: dict[str, int] = {}
     index_a = 0
     index_b = 0
     daily_rows: list[dict[str, Any]] = []
     holdings_jaccards: list[float] = []
+    holdings_overlap_coefficients: list[float] = []
 
     combined: list[float] = []
     for date, return_a, return_b in zip(
@@ -191,6 +219,13 @@ def calculate_strategy_overlap(
         holdings_jaccard = _jaccard(held_a, held_b)
         if holdings_jaccard is not None:
             holdings_jaccards.append(holdings_jaccard)
+        holdings_overlap_coefficient = (
+            len(held_a & held_b) / min(len(held_a), len(held_b))
+            if held_a and held_b
+            else None
+        )
+        if holdings_overlap_coefficient is not None:
+            holdings_overlap_coefficients.append(holdings_overlap_coefficient)
 
         combined_return = (return_a + return_b) / 2.0
         combined.append(combined_return)
@@ -207,6 +242,11 @@ def calculate_strategy_overlap(
                 "holdings_jaccard_pct": (
                     holdings_jaccard * 100.0
                     if holdings_jaccard is not None
+                    else None
+                ),
+                "holdings_overlap_coefficient_pct": (
+                    holdings_overlap_coefficient * 100.0
+                    if holdings_overlap_coefficient is not None
                     else None
                 ),
             }
@@ -230,6 +270,29 @@ def calculate_strategy_overlap(
     code_month_b = {(event.code, event.signal_date[:7]) for event in buy_b}
     symbols_a = {event.code for event in buy_a}
     symbols_b = {event.code for event in buy_b}
+
+    symbol_rows = []
+    for code in sorted(symbols_a | symbols_b):
+        code_entries_a = [event for event in buy_a if event.code == code]
+        code_entries_b = [event for event in buy_b if event.code == code]
+        symbol_rows.append(
+            {
+                "code": code,
+                "in_strategy_a": code in symbols_a,
+                "in_strategy_b": code in symbols_b,
+                "common_symbol": code in symbols_a & symbols_b,
+                "buy_count_a": len(code_entries_a),
+                "buy_count_b": len(code_entries_b),
+                "first_signal_date_a": min(
+                    (event.signal_date for event in code_entries_a),
+                    default=None,
+                ),
+                "first_signal_date_b": min(
+                    (event.signal_date for event in code_entries_b),
+                    default=None,
+                ),
+            }
+        )
 
     entry_rows = [
         {
@@ -271,9 +334,17 @@ def calculate_strategy_overlap(
         negative_day_jaccard_pct=(
             negative_jaccard * 100.0 if negative_jaccard is not None else None
         ),
+        active_holdings_comparison_days=len(holdings_jaccards),
         avg_holdings_jaccard_pct=(
             sum(holdings_jaccards) / len(holdings_jaccards) * 100.0
             if holdings_jaccards
+            else None
+        ),
+        avg_holdings_overlap_coefficient_pct=(
+            sum(holdings_overlap_coefficients)
+            / len(holdings_overlap_coefficients)
+            * 100.0
+            if holdings_overlap_coefficients
             else None
         ),
         exact_entry_jaccard_pct=(
@@ -297,6 +368,7 @@ def calculate_strategy_overlap(
     return StrategyOverlapResult(
         summary=summary,
         daily_rows=daily_rows,
+        symbol_rows=symbol_rows,
         entry_rows=entry_rows,
     )
 
