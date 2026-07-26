@@ -14,7 +14,13 @@
 
 ## 実行方法
 
-各戦略の最新バックテストrunを比較する。
+既定では各戦略の最新 `momentum` / `quality_low_risk` runを比較する。
+
+```bash
+python scripts/strategy_overlap_analysis.py
+```
+
+戦略名を明示する場合:
 
 ```bash
 python scripts/strategy_overlap_analysis.py \
@@ -39,6 +45,7 @@ python scripts/strategy_overlap_analysis.py \
 
 - `summary_run_<A>_vs_<B>.csv`
 - `daily_overlap_run_<A>_vs_<B>.csv`
+- `symbol_overlap_run_<A>_vs_<B>.csv`
 - `entry_overlap_run_<A>_vs_<B>.csv`
 
 ### サマリー指標
@@ -52,6 +59,7 @@ python scripts/strategy_overlap_analysis.py \
 | `code_month_entry_jaccard_pct` | 同一銘柄・同一シグナル月のBUY集合のJaccard係数 |
 | `symbol_jaccard_pct` | 比較期間内にBUYした銘柄集合のJaccard係数 |
 | `avg_holdings_jaccard_pct` | 少なくとも一方が保有していた日の保有銘柄Jaccard平均 |
+| `avg_holdings_overlap_coefficient_pct` | 両方が保有していた日に、小さい側の保有集合の何割が共通か |
 | `combined_50_50_return_pct` | 各共通観測日で50/50へ戻す仮想ポートフォリオの複利リターン |
 | `combined_50_50_max_drawdown_pct` | 上記50/50ポートフォリオの最大ドローダウン |
 
@@ -61,6 +69,7 @@ python scripts/strategy_overlap_analysis.py \
 - エントリー重複は共通比較期間内に約定したBUYだけを対象にする。保有重複の再構築には比較開始前の約定も反映する。
 - 50/50結果は日次リバランスの仮想値であり、手数料・税金・追加スリッページは含まない。
 - Jaccard係数は両集合が空の場合に未定義となるため、CSVでは空欄になる。
+- 未対応side、0以下の数量、SELL超過による負の復元在庫はデータ不整合として停止する。
 
 ## 判断の目安
 
