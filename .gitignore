@@ -15,6 +15,7 @@ build/
 
 # 設定ファイル
 config.yaml
+config.paper-*.yaml
 
 # レポート
 reports/
