@@ -35,21 +35,62 @@ jobs:
       - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
 
-      - name: Test skip-fetch with test config
-        id: skip_fetch
-        continue-on-error: true
-        run: python run_daily_cycle.py --date 2026-07-10 --skip-fetch --config tests/fixtures/config.test.yaml > /tmp/skip-fetch.log 2>&1
+      - name: Test skip-fetch with isolated seeded data
+        run: |
+          TMP_DIR=$(mktemp -d)
+          TARGET_DATE=$(date -u +%F)
+          TMP_CONFIG="$TMP_DIR/config.test.yaml"
+          python - "$TMP_CONFIG" "$TMP_DIR/moomoo.db" "$GITHUB_WORKSPACE/data/symbols.json" <<'PY'
+          import sys
+          from pathlib import Path
 
-      - name: Upload skip-fetch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: skip-fetch-diagnostics
-          path: /tmp/skip-fetch.log
+          import yaml
 
-      - name: Fail on skip-fetch error
-        if: steps.skip_fetch.outcome == 'failure'
-        run: exit 1
+          config = yaml.safe_load(
+              Path("tests/fixtures/config.test.yaml").read_text(encoding="utf-8")
+          )
+          config["database"]["path"] = sys.argv[2]
+          config["watchlist"]["symbols_file"] = sys.argv[3]
+          config["report"]["output_dir"] = str(Path(sys.argv[1]).parent / "reports")
+          config["alerts"]["file"] = False
+          Path(sys.argv[1]).write_text(
+              yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+              encoding="utf-8",
+          )
+          PY
+          PYTHONPATH="$GITHUB_WORKSPACE" python - "$TMP_CONFIG" "$TARGET_DATE" <<'PY'
+          import sys
+
+          from src.config import load_config
+          from src.data_store import DataStore
+          from src.models import DailyBar
+
+          config = load_config(sys.argv[1])
+          store = DataStore(config)
+          store.sync_symbols_from_json()
+          store.save_daily_bar(
+              DailyBar(
+                  code="JP.1306",
+                  date=sys.argv[2],
+                  open=100.0,
+                  high=101.0,
+                  low=99.0,
+                  close=100.5,
+                  volume=1000,
+                  turnover=100500.0,
+                  source="fixture",
+                  turnover_source="estimated",
+              )
+          )
+          PY
+          (
+            cd "$TMP_DIR"
+            PYTHONPATH="$GITHUB_WORKSPACE" python "$GITHUB_WORKSPACE/run_daily_cycle.py" \
+              --date "$TARGET_DATE" \
+              --skip-fetch \
+              --config "$TMP_CONFIG"
+          )
+          rm -rf "$TMP_DIR"
 
       - name: Verify no artifacts were created
         run: |
