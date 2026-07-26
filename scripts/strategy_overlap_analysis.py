@@ -28,32 +28,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", default="data/moomoo.db")
     parser.add_argument("--run-a-id", type=int)
     parser.add_argument("--run-b-id", type=int)
-    parser.add_argument("--strategy-a")
-    parser.add_argument("--strategy-b")
+    parser.add_argument("--strategy-a", default="momentum")
+    parser.add_argument("--strategy-b", default="quality_low_risk")
     parser.add_argument("--output-dir", default="reports/strategy-overlap")
     return parser
 
 
 def _resolve_pair(args: argparse.Namespace) -> tuple[BacktestRun, BacktestRun]:
-    by_id = args.run_a_id is not None or args.run_b_id is not None
-    by_strategy = args.strategy_a is not None or args.strategy_b is not None
-    if by_id and by_strategy:
-        raise ValueError("run ID指定とstrategy指定は併用できません")
-    if by_id:
+    if args.run_a_id is not None or args.run_b_id is not None:
         if args.run_a_id is None or args.run_b_id is None:
             raise ValueError("--run-a-id と --run-b-id を両方指定してください")
-        return (
+        pair = (
             resolve_backtest_run(args.db, run_id=args.run_a_id),
             resolve_backtest_run(args.db, run_id=args.run_b_id),
         )
-    if by_strategy:
-        if args.strategy_a is None or args.strategy_b is None:
-            raise ValueError("--strategy-a と --strategy-b を両方指定してください")
-        return (
+    else:
+        pair = (
             resolve_backtest_run(args.db, strategy_name=args.strategy_a),
             resolve_backtest_run(args.db, strategy_name=args.strategy_b),
         )
-    raise ValueError("run IDまたはstrategyのペアを指定してください")
+    if pair[0].run_id == pair[1].run_id:
+        raise ValueError("同一run同士は比較できません")
+    return pair
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -100,6 +96,7 @@ def main() -> int:
     stem = f"run_{run_a.run_id}_vs_{run_b.run_id}"
     _write_csv(output_dir / f"summary_{stem}.csv", [summary])
     _write_csv(output_dir / f"daily_overlap_{stem}.csv", result.daily_rows)
+    _write_csv(output_dir / f"symbol_overlap_{stem}.csv", result.symbol_rows)
     _write_csv(output_dir / f"entry_overlap_{stem}.csv", result.entry_rows)
 
     print(
@@ -117,7 +114,9 @@ def main() -> int:
         "exact_entry_jaccard_pct="
         f"{_format(result.summary.exact_entry_jaccard_pct)} "
         "avg_holdings_jaccard_pct="
-        f"{_format(result.summary.avg_holdings_jaccard_pct)}"
+        f"{_format(result.summary.avg_holdings_jaccard_pct)} "
+        "avg_overlap_coefficient_pct="
+        f"{_format(result.summary.avg_holdings_overlap_coefficient_pct)}"
     )
     print(
         "return_pct: "
