@@ -16,6 +16,21 @@ import pandas as pd
 
 _FILL_COLUMNS = {"code", "side", "quantity", "filled_at"}
 _EQUITY_COLUMNS = {"date", "total_equity"}
+_ENTRY_COLUMNS = pd.Index(
+    ["code", "entry_date", "entered_a", "entered_b", "exact_overlap"]
+)
+_SYMBOL_COLUMNS = pd.Index(
+    [
+        "code",
+        "traded_a",
+        "traded_b",
+        "common_symbol",
+        "buy_count_a",
+        "buy_count_b",
+        "first_entry_a",
+        "first_entry_b",
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -110,16 +125,17 @@ def _holding_matrix(
         .reindex(dates, method="ffill")
         .fillna(0.0)
     )
-    return holdings.reindex(columns=codes, fill_value=0.0)
+    return holdings.reindex(columns=pd.Index(codes), fill_value=0.0)
 
 
 def _event_keys(entries: pd.DataFrame) -> set[tuple[str, str]]:
+    rows = entries.loc[:, ["code", "filled_at"]].itertuples(
+        index=False,
+        name=None,
+    )
     return {
-        (
-            str(row.code),
-            cast(pd.Timestamp, row.filled_at).strftime("%Y-%m-%d"),
-        )
-        for row in entries.itertuples(index=False)
+        (str(code), pd.Timestamp(filled_at).strftime("%Y-%m-%d"))
+        for code, filled_at in rows
     }
 
 
@@ -211,16 +227,7 @@ def calculate_strategy_overlap(
         }
         for code, date in all_entry_keys
     ]
-    entries = pd.DataFrame(
-        entry_rows,
-        columns=[
-            "code",
-            "entry_date",
-            "entered_a",
-            "entered_b",
-            "exact_overlap",
-        ],
-    )
+    entries = pd.DataFrame.from_records(entry_rows, columns=_ENTRY_COLUMNS)
 
     codes_a = set(cast(pd.Series, entries_a["code"]))
     codes_b = set(cast(pd.Series, entries_b["code"]))
@@ -249,19 +256,7 @@ def calculate_strategy_overlap(
                 ),
             }
         )
-    symbols = pd.DataFrame(
-        symbol_rows,
-        columns=[
-            "code",
-            "traded_a",
-            "traded_b",
-            "common_symbol",
-            "buy_count_a",
-            "buy_count_b",
-            "first_entry_a",
-            "first_entry_b",
-        ],
-    )
+    symbols = pd.DataFrame.from_records(symbol_rows, columns=_SYMBOL_COLUMNS)
 
     indexed_a = prepared_equity_a.set_index("date")["total_equity"].pct_change()
     indexed_b = prepared_equity_b.set_index("date")["total_equity"].pct_change()
@@ -285,12 +280,14 @@ def calculate_strategy_overlap(
     union_symbols = codes_a | codes_b
     common_entries = entry_keys_a & entry_keys_b
     union_entries = entry_keys_a | entry_keys_b
+    common_start = pd.Timestamp(common_dates[0])
+    common_end = pd.Timestamp(common_dates[-1])
 
     summary = pd.DataFrame(
         [
             {
-                "common_start": common_dates.min().strftime("%Y-%m-%d"),
-                "common_end": common_dates.max().strftime("%Y-%m-%d"),
+                "common_start": common_start.strftime("%Y-%m-%d"),
+                "common_end": common_end.strftime("%Y-%m-%d"),
                 "common_days": len(common_dates),
                 "active_comparison_days": int(
                     (daily["union_positions"] > 0).sum()
