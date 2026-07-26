@@ -7,12 +7,13 @@ yfinance側で調整する。分割イベント自体は corporate_actions に�
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -61,6 +62,13 @@ def _exclusive_end(end_date: str) -> str:
     return (end + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def _row_scalar(row: pd.Series, column: str, default: Any = None) -> Any:
+    """pandas行から単一セルを取得し、Series型の曖昧性を境界で解消する。"""
+    if column not in row.index:
+        return default
+    return cast(Any, row.at[column])
+
+
 def _normalize_history(data: pd.DataFrame) -> YFinanceFetchResult:
     if data.empty:
         return YFinanceFetchResult(pd.DataFrame(), ())
@@ -96,33 +104,33 @@ def _normalize_history(data: pd.DataFrame) -> YFinanceFetchResult:
     for _, row in normalized.iterrows():
         try:
             prices = tuple(
-                float(row[column]) for column in ("open", "high", "low", "close")
+                float(_row_scalar(row, column))
+                for column in ("open", "high", "low", "close")
             )
         except (TypeError, ValueError, OverflowError):
             continue
-        if any(not pd.notna(price) or price <= 0 for price in prices):
+        if any(not math.isfinite(price) or price <= 0 for price in prices):
             continue
 
         try:
-            volume = int(row["volume"]) if pd.notna(row["volume"]) else 0
+            volume = int(_row_scalar(row, "volume"))
         except (TypeError, ValueError, OverflowError):
             volume = 0
-        split_ratio = row.get("stock_splits", 0)
         try:
-            normalized_split_ratio = float(split_ratio)
+            normalized_split_ratio = float(_row_scalar(row, "stock_splits", 0))
         except (TypeError, ValueError, OverflowError):
             normalized_split_ratio = 0.0
-        if pd.notna(normalized_split_ratio) and normalized_split_ratio > 0:
+        if math.isfinite(normalized_split_ratio) and normalized_split_ratio > 0:
             splits.append(
                 DetectedSplit(
-                    effective_date=str(row["time_key"]),
+                    effective_date=str(_row_scalar(row, "time_key")),
                     ratio=normalized_split_ratio,
                 )
             )
 
         accepted_rows.append(
             {
-                "time_key": str(row["time_key"]),
+                "time_key": str(_row_scalar(row, "time_key")),
                 "open": prices[0],
                 "high": prices[1],
                 "low": prices[2],
@@ -240,13 +248,13 @@ def upsert_yfinance_bars(
         normalized_rows.append(
             (
                 code,
-                str(row["time_key"])[:10],
-                float(row["open"]),
-                float(row["high"]),
-                float(row["low"]),
-                float(row["close"]),
-                int(row["volume"]),
-                float(row["turnover"]),
+                str(_row_scalar(row, "time_key"))[:10],
+                float(_row_scalar(row, "open")),
+                float(_row_scalar(row, "high")),
+                float(_row_scalar(row, "low")),
+                float(_row_scalar(row, "close")),
+                int(_row_scalar(row, "volume")),
+                float(_row_scalar(row, "turnover")),
                 "yfinance",
                 "estimated",
             )
