@@ -15,6 +15,7 @@ import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
@@ -92,7 +93,8 @@ def _prepare_equity_curve(equity_curve: pd.DataFrame) -> pd.DataFrame:
     for column in numeric_columns:
         frame[column] = pd.to_numeric(frame[column], errors="raise")
 
-    if frame[["cash", "total_equity", "benchmark_value"]].isna().any().any():
+    required_values = frame[["cash", "total_equity", "benchmark_value"]]
+    if bool(required_values.isna().to_numpy().any()):
         raise ValueError("cash, total_equity, benchmark_valueに欠損があります")
     if (frame["total_equity"] <= 0).any():
         raise ValueError("total_equityは正の値である必要があります")
@@ -156,8 +158,10 @@ def calculate_monthly_attribution(
 
     monthly_rows: list[dict[str, float | int | str]] = []
     for month, group in frame.groupby("month", sort=True):
-        strategy_return = _compound(group["strategy_return"])
-        benchmark_return = _compound(group["benchmark_return"])
+        strategy_returns = cast(pd.Series, group["strategy_return"])
+        benchmark_returns = cast(pd.Series, group["benchmark_return"])
+        strategy_return = _compound(strategy_returns)
+        benchmark_return = _compound(benchmark_returns)
         active_return = strategy_return - benchmark_return
         period_k = _carino_coefficient(strategy_return, benchmark_return)
 
@@ -169,7 +173,7 @@ def calculate_monthly_attribution(
         )
         reconciliation_error = active_return - cash_drag - residual_effect
 
-        drawdown = group["drawdown_pct"].dropna()
+        drawdown = cast(pd.Series, group["drawdown_pct"]).dropna()
         max_drawdown = (
             float(drawdown.max()) if not drawdown.empty else float("nan")
         )
@@ -297,7 +301,7 @@ def load_backtest_equity_curve(
         ORDER BY date
     """
     with sqlite3.connect(str(db_path)) as conn:
-        frame = pd.read_sql_query(query, conn, params=(run_id,))
+        frame = pd.read_sql_query(query, conn, params=[run_id])
 
     if frame.empty:
         raise ValueError(f"equity curveが見つかりません: run_id={run_id}")
