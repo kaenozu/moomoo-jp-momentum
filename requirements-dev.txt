@@ -6,7 +6,9 @@ pytest>=9.0.0
 pytest-mock>=3.14.0
 
 # コード品質
-ruff>=0.11.0
+# Ruff 0.16 expanded the default rule set; keep the established lint contract
+# until the repository-wide migration is handled in a dedicated change.
+ruff>=0.11.0,<0.16.0
 pyright>=1.1.400
 
 # 型チェック補完
