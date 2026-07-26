@@ -7,7 +7,6 @@ yfinance supplement for missing daily_bars
 - Does NOT overwrite existing moomoo data
 """
 import sqlite3
-import sys
 import time
 import warnings
 from datetime import datetime, timedelta
@@ -195,7 +194,7 @@ def main():
     print(f"  New rows inserted: {inserted}")
 
     if error_codes:
-        print(f"\n  Error codes:")
+        print("\n  Error codes:")
         for c, n, reason in error_codes[:20]:
             print(f"    {c} ({n}): {reason}")
         if len(error_codes) > 20:
@@ -205,7 +204,7 @@ def main():
     total_codes = db.execute("SELECT COUNT(DISTINCT code) FROM daily_bars").fetchone()[0]
     total_rows = db.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
     source_counts = db.execute("SELECT source, COUNT(*) as c FROM daily_bars GROUP BY source").fetchall()
-    print(f"\n  daily_bars after supplement:")
+    print("\n  daily_bars after supplement:")
     print(f"    unique codes: {total_codes}")
     print(f"    total rows: {total_rows}")
     for r in source_counts:

@@ -11,7 +11,6 @@ import sqlite3
 import sys
 import time
 import warnings
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -165,7 +164,6 @@ def main():
     codes = codes_from_db(db)
     print(f"[OK] US symbols: {len(codes)}")
 
-    latest = max((get_latest_date(db, c[0]) or "2000-01-01") for c in codes[:10])  # sample
     row = db.execute("SELECT MAX(date) FROM daily_bars WHERE code LIKE 'US.SPY'").fetchone()
     print(f"[OK] US.SPY latest date: {row[0] if row else 'N/A'}")
 
