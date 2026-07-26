@@ -16,11 +16,17 @@ from src.strategy_overlap import (
 
 
 def _fills(rows: list[tuple[str, str, int, str]]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=["code", "side", "quantity", "filled_at"])
+    return pd.DataFrame(
+        rows,
+        columns=pd.Index(["code", "side", "quantity", "filled_at"]),
+    )
 
 
 def _equity(values: list[tuple[str, float]]) -> pd.DataFrame:
-    return pd.DataFrame(values, columns=["date", "total_equity"])
+    return pd.DataFrame(
+        values,
+        columns=pd.Index(["date", "total_equity"]),
+    )
 
 
 def test_quantifies_daily_holdings_symbol_and_entry_overlap() -> None:
