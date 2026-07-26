@@ -2,7 +2,7 @@
 # pip install -r requirements-dev.txt
 
 # CI compatibility baseline
-pandas>=2.0.0,<3.0
+pandas==2.2.3
 
 # テスト
 pytest>=9.0.0
