@@ -456,30 +456,78 @@ class VirtualTradeManager:
             logger.error("LIMIT_SIMには指値価格が必要です")
             return None
 
-        with self._get_connection() as conn:
-            if side == "BUY":
-                ok, reason = self._validate_buy_order(conn, strategy_name, code, quantity, order_type, limit_price, submitted_at)
-            else:
-                ok, reason = self._validate_sell_order(conn, strategy_name, code, quantity)
-            if not ok:
-                logger.warning("仮想注文拒否: %s %s - %s", code, side, reason)
-                return None
+        try:
+            with self._get_connection() as conn:
+                # Validation and insertion must observe one serialized snapshot.
+                # A deferred transaction would allow two processes to validate
+                # the same cash/position state before inserting different symbols.
+                conn.execute("BEGIN IMMEDIATE")
+                if side == "BUY":
+                    ok, reason = self._validate_buy_order(
+                        conn,
+                        strategy_name,
+                        code,
+                        quantity,
+                        order_type,
+                        limit_price,
+                        submitted_at,
+                    )
+                else:
+                    ok, reason = self._validate_sell_order(
+                        conn,
+                        strategy_name,
+                        code,
+                        quantity,
+                    )
+                if not ok:
+                    logger.warning("仮想注文拒否: %s %s - %s", code, side, reason)
+                    return None
 
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            submit_value = submitted_at or now
-            if len(submit_value) == 10:
-                submit_value = f"{submit_value} 15:30:00"
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                submit_value = submitted_at or now
+                if len(submit_value) == 10:
+                    submit_value = f"{submit_value} 15:30:00"
 
-            cursor = conn.execute(
-                """
-                INSERT INTO virtual_orders
-                (strategy_name, code, side, quantity, order_type, limit_price,
-                 status, signal_id, exit_reason, submitted_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
-                """,
-                (strategy_name, code, side, quantity, order_type, limit_price, signal_id, exit_reason, submit_value, now, now),
+                cursor = conn.execute(
+                    """
+                    INSERT INTO virtual_orders
+                    (strategy_name, code, side, quantity, order_type, limit_price,
+                     status, signal_id, exit_reason, submitted_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        strategy_name,
+                        code,
+                        side,
+                        quantity,
+                        order_type,
+                        limit_price,
+                        signal_id,
+                        exit_reason,
+                        submit_value,
+                        now,
+                        now,
+                    ),
+                )
+                order_id = cursor.lastrowid
+        except sqlite3.IntegrityError as error:
+            logger.warning(
+                "仮想注文拒否: %s %s - DB制約競合: %s",
+                code,
+                side,
+                error,
             )
-            order_id = cursor.lastrowid
+            return None
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error).lower():
+                raise
+            logger.warning(
+                "仮想注文拒否: %s %s - DBロックを取得できません: %s",
+                code,
+                side,
+                error,
+            )
+            return None
 
         logger.info("仮想注文作成: %s %s %s %s株", order_id, code, side, quantity)
         return VirtualOrder(
