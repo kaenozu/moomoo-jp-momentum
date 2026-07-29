@@ -4,7 +4,9 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import cast
 
+from src.config import Config
 from src.models import CREATE_TABLES_SQL
 from src.virtual_trade import VirtualTradeManager
 
@@ -37,6 +39,22 @@ class _Config:
 
     def get(self, key: str, default=None):
         return self._values.get(key, default)
+
+
+def _config(
+    database_path: Path,
+    *,
+    initial_cash: float,
+    max_total_positions: int,
+) -> Config:
+    return cast(
+        Config,
+        _Config(
+            database_path,
+            initial_cash=initial_cash,
+            max_total_positions=max_total_positions,
+        ),
+    )
 
 
 def _prepare_database(path: Path, *, initial_cash: float) -> None:
@@ -95,7 +113,11 @@ def test_concurrent_buys_cannot_over_reserve_cash(tmp_path: Path) -> None:
     database_path = tmp_path / "cash.db"
     _prepare_database(database_path, initial_cash=1000)
     manager = VirtualTradeManager(
-        _Config(database_path, initial_cash=1000, max_total_positions=20)
+        _config(
+            database_path,
+            initial_cash=1000,
+            max_total_positions=20,
+        )
     )
 
     results = _submit_concurrently(manager)
@@ -109,7 +131,11 @@ def test_concurrent_buys_cannot_exceed_position_slots(tmp_path: Path) -> None:
     database_path = tmp_path / "positions.db"
     _prepare_database(database_path, initial_cash=100000)
     manager = VirtualTradeManager(
-        _Config(database_path, initial_cash=100000, max_total_positions=1)
+        _config(
+            database_path,
+            initial_cash=100000,
+            max_total_positions=1,
+        )
     )
 
     results = _submit_concurrently(manager)
@@ -122,7 +148,11 @@ def test_lock_timeout_is_a_safe_order_rejection(tmp_path: Path) -> None:
     database_path = tmp_path / "locked.db"
     _prepare_database(database_path, initial_cash=100000)
     manager = VirtualTradeManager(
-        _Config(database_path, initial_cash=100000, max_total_positions=20)
+        _config(
+            database_path,
+            initial_cash=100000,
+            max_total_positions=20,
+        )
     )
 
     def fast_connection() -> sqlite3.Connection:
