@@ -16,6 +16,11 @@ build/
 # 設定ファイル
 config.yaml
 config.paper-*.yaml
+config.us_grid.yaml
+config.us_grid.test.yaml
+
+# US grid cached market data (reproducible via --fetch-data)
+data/us_grid/
 
 # レポート
 reports/

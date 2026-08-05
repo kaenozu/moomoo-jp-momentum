@@ -1,0 +1,101 @@
+# US grid strategy research configuration.
+#
+# SAFETY: this feature is disabled by default. SIMULATE orders are also
+# disabled by default. REAL orders are never placed.
+#
+# IMPORTANT: numbers below are research inputs. The moomoo JP basic course
+# commission (0.132% of notional, tax incl., capped at 22 USD) is the default
+# cost model; spread/slippage assumptions are configurable.
+
+us_grid:
+  enabled: false          # master switch; must be true to run anything
+  mode: backtest          # backtest | virtual | paper
+  strategy_name: us_fixed_grid_v1
+  market: US              # US only; anything else fails validation
+
+  # Research universe: liquid non-leveraged US ETFs (seed candidates).
+  # Price/level affordability for the 100k JPY scenario is assessed by the
+  # backtest reports; expensive ETFs may be kept as benchmarks only.
+  symbols:
+    - US.SPY
+    - US.QQQ
+    - US.IWM
+    - US.DIA
+    - US.SPLG
+    - US.SCHB
+    - US.SCHD
+    - US.XLF
+    - US.XLE
+    - US.XLK
+    - US.XLP
+    - US.XLU
+    - US.EEM
+    - US.TLT
+    - US.GLD
+    - US.SLV
+
+  capital_jpy: 100000
+  currency: JPY
+
+  grid:
+    center_mode: initial_close
+    spacing_mode: fixed_pct   # fixed_pct | atr_pct
+    spacing_pct: 1.5
+    atr_period: 14
+    atr_multiplier: 1.0
+    min_spacing_pct: 0.75
+    max_spacing_pct: 4.0
+    buy_levels: 3
+    sell_levels: 3
+    quantity_per_level: 1
+
+    # core + grid comparison: 0 = pure grid
+    core_allocation_pct: 0
+
+  regime_filter:
+    enabled: false
+    sma_long_period: 200
+    sma_mid_period: 50
+    adx_period: 14
+    adx_trend_threshold: 25.0
+    volatility_percentile_low: 20
+    volatility_percentile_high: 80
+
+  recenter:
+    frequency_days: 5
+    max_per_day: 1
+    min_distance_atr: 2.0
+
+  risk:
+    allow_short: false
+    allow_margin: false
+    allow_leveraged_etf: false
+    allow_inverse_etf: false
+    max_symbols: 3
+    max_symbol_allocation_pct: 25
+    max_total_deployed_pct: 80
+    minimum_cash_reserve_pct: 20
+    max_inventory_levels_per_symbol: 4
+    max_open_orders_per_symbol: 8
+    max_open_orders_total: 20
+    max_orders_per_day: 30
+    daily_loss_limit_pct: 3
+    strategy_drawdown_limit_pct: 12
+    portfolio_drawdown_limit_pct: 15
+    gap_stop_pct: 5
+    stale_quote_seconds: 30
+    max_reconcile_age_seconds: 60
+    cooldown_days: 3
+
+  costs:
+    # moomoo JP basic course, 2026-08 (https://www.moomoo.com/jp/support/topic7_184)
+    commission_mode: percentage
+    commission_rate: 0.00132       # 0.132% (tax incl.)
+    minimum_commission_usd: 0.01
+    maximum_commission_usd: 22.0
+    spread_bps: 5
+    slippage_bps: 5
+    sell_regulatory_fee_enabled: true
+    fx_cost_bps: 0                 # FX handled separately (fx_path)
+
+  data_dir: data/us_grid
