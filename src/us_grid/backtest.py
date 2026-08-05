@@ -169,6 +169,8 @@ class GridBacktester:
         self.orders_rejected = 0
         self.cash_shortage_count = 0
         self.inventory_days: list[int] = []
+        self._reserved_by_code: dict[str, float] = {}
+        self._core_positions: dict[str, int] = {}
 
     # ── helpers ──
 
@@ -208,7 +210,9 @@ class GridBacktester:
             return None
 
         notional = desired.limit_price * desired.quantity
-        if notional > state.available_cash_usd() + 1e-9:
+        # Cash check must include cash already reserved by resting BUY orders.
+        already_reserved = self._reserved_by_code.get(desired.code, 0.0)
+        if notional > state.cash_usd - already_reserved + 1e-9:
             self.cash_shortage_count += 1
             self.orders_rejected += 1
             return None
@@ -262,6 +266,12 @@ class GridBacktester:
     ) -> ApprovedOrder | None:
         held = state.positions.get(desired.code, 0)
         if held < desired.quantity:
+            self.orders_rejected += 1
+            return None
+        # Grid SELL may not consume the core position.
+        core_qty = self._core_positions.get(desired.code, 0)
+        sellable = held - core_qty
+        if sellable < desired.quantity:
             self.orders_rejected += 1
             return None
         key = f"grid:{desired.code}:{desired.side}:{desired.grid_level_index}:{self._generation(desired)}"
@@ -553,21 +563,34 @@ class GridBacktester:
             if order.side == "BUY":
                 decision = resting_buy_fill(order.limit_price, order.quantity, bar)
                 if decision.filled:
-                    # check cash at fill time
+                    # check cash at fill time (reservation was already
+                    # deducted from available cash at approval time)
                     notional = decision.price * order.quantity
                     from .costs import commission_usd
 
                     fee = commission_usd(self.grid.costs, notional, order.quantity)
-                    if notional + fee > state.available_cash_usd() + 1e-9:
+                    if notional + fee > state.cash_usd + 1e-9:
                         self.cash_shortage_count += 1
                         self.orders_cancelled += 1
                         order.active = False
+                        self._release_reservation(order)
                         continue
+                    self._release_reservation(order)
                     self._execute_fill(order, decision, state)
             else:
                 decision = resting_sell_fill(order.limit_price, order.quantity, bar)
                 if decision.filled:
                     self._execute_fill(order, decision, state)
+
+    def _release_reservation(self, order: _OrderState) -> None:
+        """Free the cash reserved for a resting BUY order."""
+        if order.side != "BUY":
+            return
+        current = self._reserved_by_code.get(order.code, 0.0)
+        reserved = order.limit_price * order.quantity
+        self._reserved_by_code[order.code] = max(0.0, current - reserved)
+        if self._reserved_by_code[order.code] <= 1e-9:
+            self._reserved_by_code.pop(order.code, None)
 
     def _execute_fill(
         self,
@@ -576,9 +599,12 @@ class GridBacktester:
         state: CashPosition,
     ) -> None:
         from .costs import commission_usd, sell_regulatory_fee_usd
+        from .fills import apply_cost_adjustment
 
         grid = self.grid
-        price = decision.price
+        # Apply spread + slippage to the limit-touch price: BUY pays up,
+        # SELL receives less.
+        price = apply_cost_adjustment(decision, order.side, grid)
         code = order.code
         qty = order.quantity
         notional = price * qty
@@ -720,14 +746,17 @@ class GridBacktester:
                 elif regime == Regime.TREND_UP:
                     buy_allowed = False
 
-            # SELL levels: arm only if inventory exists; never naked.
+            # SELL levels: arm only if inventory exists; never naked, never
+            # consuming the core position.
             held = state.positions.get(code, 0)
+            core_qty = self._core_positions.get(code, 0)
+            sellable = held - core_qty
             for level in instance.levels:
                 if level.side != "SELL" or level.status != GridLevelStatus.ACTIVE:
                     continue
                 if level.last_order_id is not None:
                     continue
-                if held < level.quantity:
+                if sellable < level.quantity:
                     # Not enough inventory: cancel the armed SELL.
                     level.status = GridLevelStatus.INACTIVE
                     continue
@@ -754,6 +783,13 @@ class GridBacktester:
                     continue
                 if not buy_allowed:
                     continue
+                # Inventory level cap (no infinite averaging down).
+                inventory_levels = state.positions.get(code, 0) // max(
+                    grid.quantity_per_level, 1
+                )
+                if inventory_levels >= grid.risk.max_inventory_levels_per_symbol:
+                    self.orders_rejected += 1
+                    continue
                 desired = DesiredOrder(
                     code=code,
                     side="BUY",
@@ -778,6 +814,9 @@ class GridBacktester:
             current = prices.get(code)
             if current is None:
                 continue
+            inventory_levels = state.positions.get(code, 0) // max(
+                grid.quantity_per_level, 1
+            )
             recenter_count = 0
             if should_recenter(
                 instance,
@@ -787,6 +826,7 @@ class GridBacktester:
                 instance.last_recenter_at,
                 day,
                 recenter_count,
+                inventory_levels,
             ):
                 # Determine ATR for distance check.
                 from .indicators import atr as _atr
@@ -806,6 +846,7 @@ class GridBacktester:
                     instance.last_recenter_at,
                     day,
                     recenter_count,
+                    inventory_levels,
                 ):
                     # Only recenter if there are no unfilled BUY orders below.
                     if not any(
@@ -829,6 +870,13 @@ class GridBacktester:
         )
         self.orders.append(order)
         self.orders_created += 1
+        # Reserve cash for resting BUY orders so multiple same-day approvals
+        # cannot over-reserve.
+        if approved.side == "BUY":
+            self._reserved_by_code[approved.code] = (
+                self._reserved_by_code.get(approved.code, 0.0)
+                + approved.limit_price * approved.quantity
+            )
         # Link the level to the order id.
         instance = self.instances.get(approved.code)
         if instance is not None:
@@ -867,6 +915,7 @@ class GridBacktester:
             if price * qty + fee > state.available_cash_usd() + 1e-9:
                 continue
             state.buy(grid, code, qty, price, self._fx_rate(start_day), start_day)
+            self._core_positions[code] = self._core_positions.get(code, 0) + qty
             self.trades.append(
                 TradeRecord(
                     date=start_day,
@@ -880,7 +929,7 @@ class GridBacktester:
             )
 
     def _core_qty(self, code: str, state: CashPosition) -> int:
-        return state.positions.get(code, 0)
+        return self._core_positions.get(code, 0)
 
     def _filled_level_count(self) -> int:
         return sum(

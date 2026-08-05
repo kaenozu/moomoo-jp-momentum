@@ -168,13 +168,14 @@ def should_recenter(
     last_recenter_date: str | None,
     today: str,
     recenter_count_today: int,
+    inventory_levels: int = 0,
 ) -> bool:
     """Rules to avoid hiding losses with aggressive recentering.
 
     Recentering is only allowed when:
     - it is a new week (or the configured frequency in days has passed),
     - there is no unfilled BUY order below (handled by caller),
-    - inventory is below a threshold,
+    - inventory is below a threshold (``inventory_levels``),
     - price has drifted at least ``min_distance_atr`` ATRs from center,
     - at most once per day.
     """
@@ -199,8 +200,7 @@ def should_recenter(
         return False
     # Do not recenter while holding inventory at/above the level count
     # threshold (no infinite averaging down).
-    held = sum(1 for lv in instance.levels if lv.status == GridLevelStatus.FILLED)
-    if held >= grid.risk.max_inventory_levels_per_symbol:
+    if inventory_levels >= grid.risk.max_inventory_levels_per_symbol:
         return False
     return True
 

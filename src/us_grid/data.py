@@ -146,9 +146,7 @@ def _fetch_symbol(
     # The index column name varies (Date/Datetime); normalise explicitly.
     df.columns = [str(c) for c in df.columns]
     df["date"] = pd.to_datetime(df.iloc[:, 0]).dt.strftime("%Y-%m-%d")
-    out = df[
-        ["date", "Open", "High", "Low", "Close", "Volume"]
-    ].rename(  # type: ignore[call-overload]
+    out = df[["date", "Open", "High", "Low", "Close", "Volume"]].rename(  # type: ignore[call-overload]
         columns={
             "Open": "open",
             "High": "high",
@@ -179,8 +177,12 @@ def _fetch_fx(start_date: str, end_date: str, cache_path: Path) -> list[dict]:
     df.columns = [str(c) for c in df.columns]
     df["date"] = pd.to_datetime(df.iloc[:, 0]).dt.strftime("%Y-%m-%d")
     df = df.rename(columns={"Close": "rate"})  # type: ignore[call-overload]
-    rows = df[["date", "rate"]].dropna().to_dict(  # type: ignore[call-overload]
-        orient="records"
+    rows = (
+        df[["date", "rate"]]
+        .dropna()
+        .to_dict(  # type: ignore[call-overload]
+            orient="records"
+        )
     )
     pd.DataFrame(rows).to_csv(cache_path, index=False)
     return rows
@@ -225,9 +227,18 @@ def _fetch_actions(
                             "per_share": amount,
                         }
                     )
-    except Exception:
-        # Corporate action data is best-effort; the backtest warns on gaps.
-        pass
+    except Exception as exc:  # pragma: no cover - network boundary
+        # Corporate action data is best-effort. Prices are QFQ-adjusted by the
+        # fetcher, so a missing actions frame means dividends/splits are NOT
+        # credited while the price history IS adjusted — surface this so
+        # results are not silently overstated.
+        import warnings
+
+        warnings.warn(
+            f"corporate action fetch failed for {ticker}: {exc}; "
+            "dividends/splits for this symbol will not be credited",
+            stacklevel=2,
+        )
     return splits, dividends
 
 
