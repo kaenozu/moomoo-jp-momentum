@@ -159,7 +159,9 @@ def test_recenter_rebuilds_levels() -> None:
     grid = _grid()
     instance = build_grid_levels(grid, "US.SPY", 100.0, 1.5)
     recenter_instance(instance, grid, new_center=110.0, today="2026-01-15")
-    assert instance.center_price is not None and abs(instance.center_price - 110.0) < 1e-9
+    assert (
+        instance.center_price is not None and abs(instance.center_price - 110.0) < 1e-9
+    )
     assert instance.last_recenter_at == "2026-01-15"
     buys = [lv for lv in instance.levels if lv.side == "BUY"]
     # spacing_pct=1.5 means 1.5%: step = 110 * 0.015 = 1.65; min buy = 110 - 1.65*3
