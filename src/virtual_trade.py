@@ -16,6 +16,44 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
+# SQLite extended result codes (stable across Python 3.11+).
+_SQLITE_BUSY_CODE = 5
+_SQLITE_LOCKED_CODE = 6
+
+
+def is_expected_duplicate_conflict(error: sqlite3.IntegrityError) -> bool:
+    """既知の重複注文制約違反だけを「通常の注文拒否」として分類する。
+
+    現在のスキーマで期待される唯一の制約は、未約定注文の一意インデックス
+    ``idx_virtual_orders_pending`` 違反である。それ以外の ``IntegrityError``
+    （CHECK / NOT NULL / trigger / schema不整合）は予期しないDB障害として
+    握りつぶさず、呼び出し元へ再raiseする。
+    """
+    message = str(error)
+    marker = "virtual_orders.strategy_name, virtual_orders.code, virtual_orders.side"
+    if marker in message:
+        return True
+    # 古いSQLite/バージョンで一意インデックス名が本文に現れる場合の互換fallback。
+    # 新しいSQLiteではSQLが本文に含まれるため、通常は到達しない。
+    if "idx_virtual_orders_pending" in message:
+        return True
+    return False
+
+
+def is_sqlite_busy_or_locked(error: sqlite3.OperationalError) -> bool:
+    """``SQLITE_BUSY`` / ``SQLITE_LOCKED`` をSQLite error code/nameで判定する。
+
+    error code属性が存在しない実行環境向けに、旧来の ``"locked"`` 文字列
+    マッチを狭いfallbackとしてのみ維持する。
+    """
+    code = getattr(error, "sqlite_errorcode", None)
+    if code is not None:
+        return int(code) in (_SQLITE_BUSY_CODE, _SQLITE_LOCKED_CODE)
+    name = getattr(error, "sqlite_errorname", None)
+    if name is not None:
+        return str(name) in ("SQLITE_BUSY", "SQLITE_LOCKED")
+    return "locked" in str(error).lower()
+
 
 @dataclass
 class VirtualOrder:
@@ -511,18 +549,36 @@ class VirtualTradeManager:
                 )
                 order_id = cursor.lastrowid
         except sqlite3.IntegrityError as error:
+            if not is_expected_duplicate_conflict(error):
+                logger.error(
+                    "仮想注文で予期しないDB制約違反: symbol=%s side=%s sqlite_code=%s sqlite_name=%s - %s",
+                    code,
+                    side,
+                    getattr(error, "sqlite_errorcode", None),
+                    getattr(error, "sqlite_errorname", None),
+                    error,
+                )
+                raise
             logger.warning(
-                "仮想注文拒否: %s %s - DB制約競合: %s",
+                "仮想注文拒否（期待される重複注文制約）: %s %s - DB制約競合: %s",
                 code,
                 side,
                 error,
             )
             return None
         except sqlite3.OperationalError as error:
-            if "locked" not in str(error).lower():
+            if not is_sqlite_busy_or_locked(error):
+                logger.error(
+                    "仮想注文で予期しないDB操作エラー: symbol=%s side=%s sqlite_code=%s sqlite_name=%s - %s",
+                    code,
+                    side,
+                    getattr(error, "sqlite_errorcode", None),
+                    getattr(error, "sqlite_errorname", None),
+                    error,
+                )
                 raise
             logger.warning(
-                "仮想注文拒否: %s %s - DBロックを取得できません: %s",
+                "仮想注文拒否（SQLite lock/busy）: %s %s - DBロックを取得できません: %s",
                 code,
                 side,
                 error,
