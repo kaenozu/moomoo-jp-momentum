@@ -19,6 +19,8 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
+WEBHOOK_MAX_ATTEMPTS = 2
+
 
 @dataclass
 class Alert:
@@ -128,15 +130,28 @@ class AlertManager:
                     "注意: これは売買指示ではありません。"
                 )
             }
-            response = requests.post(
-                self.webhook_url,
-                json=payload,
-                timeout=10,
-            )
-            response.raise_for_status()
-            logger.info("Webhook送信完了: %s", alert.code)
+            for attempt in range(1, WEBHOOK_MAX_ATTEMPTS + 1):
+                try:
+                    response = requests.post(
+                        self.webhook_url,
+                        json=payload,
+                        timeout=10,
+                    )
+                    response.raise_for_status()
+                    logger.info("Webhook送信完了: %s", alert.code)
+                    return
+                except Exception as e:
+                    if attempt < WEBHOOK_MAX_ATTEMPTS:
+                        logger.warning(
+                            "Webhook送信を再試行します (%d/%d): %s",
+                            attempt,
+                            WEBHOOK_MAX_ATTEMPTS,
+                            alert.code,
+                        )
+                    else:
+                        logger.error("Webhook送信エラー: %s", e)
         except Exception as e:
-            logger.error("Webhook送信エラー: %s", e)
+            logger.error("Webhook送信準備エラー: %s", e)
 
     def send_alert(self, alert: Alert) -> bool:
         """アラートを送信する（重複防止付き）"""
