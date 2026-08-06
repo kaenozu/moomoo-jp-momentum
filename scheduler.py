@@ -152,9 +152,20 @@ def acquire_lock() -> bool:
 
 
 def release_lock() -> None:
-    """ロックを解放する"""
-    if _lock_file.exists():
+    """自プロセスが所有するロックだけを解放する。"""
+    try:
+        owner_pid = _lock_file.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return
+
+    if owner_pid != str(os.getpid()):
+        logger.warning("別プロセス所有のscheduler lockを保持します: pid=%s", owner_pid)
+        return
+
+    try:
         _lock_file.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _run_script(args: list[str], timeout: int, name: str) -> None:
