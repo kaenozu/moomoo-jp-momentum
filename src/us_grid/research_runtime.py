@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 from .accounting import CashPosition
 from .config import CostModel, GridConfig, UsGridConfigError
 from .fills import Bar
@@ -11,6 +13,8 @@ from .research_safety import (
     ResearchGridBacktester,
     buy_and_hold_with_dividends,
 )
+
+T = TypeVar("T")
 
 
 def canonical_round_trip_bps(cost: CostModel) -> float:
@@ -25,7 +29,7 @@ def canonical_round_trip_bps(cost: CostModel) -> float:
     return 2 * commission_bps + execution_bps + regulatory_bps
 
 
-def _research_universe[T](
+def _research_universe(
     configured_symbols: list[str],
     values_by_code: dict[str, T],
     *,
