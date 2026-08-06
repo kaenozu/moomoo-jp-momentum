@@ -106,6 +106,32 @@ def test_is_sqlite_locked_by_error_code() -> None:
     assert is_sqlite_busy_or_locked(error)
 
 
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [(517, "SQLITE_BUSY_SNAPSHOT"), (262, "SQLITE_LOCKED_SHAREDCACHE")],
+)
+def test_sqlite_extended_codes_are_classified_by_primary_code(
+    code: int, name: str
+) -> None:
+    assert is_sqlite_busy_or_locked(_operational_error("opaque", code, name))
+
+
+def test_sqlite_code_takes_precedence_over_unrelated_name() -> None:
+    assert not is_sqlite_busy_or_locked(_operational_error("opaque", 1, "SQLITE_BUSY"))
+
+
+def test_unrelated_extended_code_is_not_classified() -> None:
+    assert not is_sqlite_busy_or_locked(
+        _operational_error("opaque", 769, "SQLITE_ERROR")
+    )
+
+
+def test_extended_busy_name_is_classified_without_code() -> None:
+    assert is_sqlite_busy_or_locked(
+        _operational_error("opaque", None, "SQLITE_BUSY_SNAPSHOT")
+    )
+
+
 def test_is_sqlite_busy_fallback_to_name_only() -> None:
     error = _operational_error("database is locked", None, "SQLITE_BUSY")
     assert is_sqlite_busy_or_locked(error)
@@ -256,6 +282,25 @@ def test_unrelated_operational_error_is_reraisied(tmp_path: Path) -> None:
         manager.place_order(
             "default", "JP.1111", "BUY", 1, "MARKET_SIM", submitted_at="2026-07-02"
         )
+
+
+def test_unexpected_operational_error_log_excludes_raw_message(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database_path = tmp_path / "op-log.db"
+    _prepare_database(database_path)
+    with sqlite3.connect(database_path) as conn:
+        conn.execute("DROP TABLE virtual_positions")
+        conn.execute("DROP TABLE virtual_orders")
+        conn.execute("DROP TABLE virtual_equity_curve")
+    manager = VirtualTradeManager(_config(database_path))
+    caplog.set_level("ERROR")
+    with pytest.raises(sqlite3.OperationalError):
+        manager.place_order(
+            "default", "JP.1111", "BUY", 1, "MARKET_SIM", submitted_at="2026-07-02"
+        )
+    assert "no such table: virtual_orders" not in caplog.text
+    assert "OperationalError" in caplog.text
 
 
 def test_sqlite_busy_is_safe_rejection_without_row(tmp_path: Path) -> None:

@@ -48,10 +48,13 @@ def is_sqlite_busy_or_locked(error: sqlite3.OperationalError) -> bool:
     """
     code = getattr(error, "sqlite_errorcode", None)
     if code is not None:
-        return int(code) in (_SQLITE_BUSY_CODE, _SQLITE_LOCKED_CODE)
+        return (int(code) & 0xFF) in (_SQLITE_BUSY_CODE, _SQLITE_LOCKED_CODE)
     name = getattr(error, "sqlite_errorname", None)
     if name is not None:
-        return str(name) in ("SQLITE_BUSY", "SQLITE_LOCKED")
+        normalized_name = str(name)
+        return normalized_name in ("SQLITE_BUSY", "SQLITE_LOCKED") or normalized_name.startswith(
+            ("SQLITE_BUSY_", "SQLITE_LOCKED_")
+        )
     return "locked" in str(error).lower()
 
 
@@ -551,37 +554,35 @@ class VirtualTradeManager:
         except sqlite3.IntegrityError as error:
             if not is_expected_duplicate_conflict(error):
                 logger.error(
-                    "仮想注文で予期しないDB制約違反: symbol=%s side=%s sqlite_code=%s sqlite_name=%s - %s",
+                    "仮想注文で予期しないDB制約違反: symbol=%s side=%s sqlite_code=%s sqlite_name=%s exception_type=%s",
                     code,
                     side,
                     getattr(error, "sqlite_errorcode", None),
                     getattr(error, "sqlite_errorname", None),
-                    error,
+                    type(error).__name__,
                 )
                 raise
             logger.warning(
-                "仮想注文拒否（期待される重複注文制約）: %s %s - DB制約競合: %s",
+                "仮想注文拒否（期待される重複注文制約）: %s %s - DB制約競合",
                 code,
                 side,
-                error,
             )
             return None
         except sqlite3.OperationalError as error:
             if not is_sqlite_busy_or_locked(error):
                 logger.error(
-                    "仮想注文で予期しないDB操作エラー: symbol=%s side=%s sqlite_code=%s sqlite_name=%s - %s",
+                    "仮想注文で予期しないDB操作エラー: symbol=%s side=%s sqlite_code=%s sqlite_name=%s exception_type=%s",
                     code,
                     side,
                     getattr(error, "sqlite_errorcode", None),
                     getattr(error, "sqlite_errorname", None),
-                    error,
+                    type(error).__name__,
                 )
                 raise
             logger.warning(
-                "仮想注文拒否（SQLite lock/busy）: %s %s - DBロックを取得できません: %s",
+                "仮想注文拒否（SQLite lock/busy）: %s %s - DBロックを取得できません",
                 code,
                 side,
-                error,
             )
             return None
 
