@@ -34,22 +34,81 @@ logger = logging.getLogger(__name__)
 _lock_file = Path("data/scheduler.lock")
 
 
+def _pid_is_running(pid: int) -> bool:
+    """PIDが実行中か確認する（Windowsのsignal 0には依存しない）。"""
+    if pid <= 0:
+        return False
+
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        process_query_limited_information = 0x1000
+        error_invalid_parameter = 87
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        ]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            pid,
+        )
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        # Access-denied等の不明な失敗は、二重起動防止のため実行中扱いにする。
+        return ctypes.get_last_error() != error_invalid_parameter
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    except SystemError:
+        # PID確認不能時は安全側に倒し、既存schedulerを上書きしない。
+        return True
+
+
 def acquire_lock() -> bool:
     """ロックを取得する"""
     _lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-    if _lock_file.exists():
-        try:
-            with open(_lock_file, "r", encoding="utf-8") as f:
-                pid = int(f.read().strip())
-            os.kill(pid, 0)
-            return False
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            pass
+    try:
+        with open(_lock_file, "x", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True
+    except FileExistsError:
+        pass
 
-    with open(_lock_file, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
-    return True
+    try:
+        pid = int(_lock_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pid = None
+
+    if pid is not None and _pid_is_running(pid):
+        return False
+
+    try:
+        _lock_file.unlink()
+    except FileNotFoundError:
+        pass
+
+    try:
+        with open(_lock_file, "x", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        return True
+    except FileExistsError:
+        return False
 
 
 def release_lock() -> None:
