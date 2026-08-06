@@ -4,6 +4,7 @@ import sys
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -12,6 +13,7 @@ from src.config import Config
 from src.data_store import DataStore
 from src.models import DailyBar
 from src.market_calendar import JST
+from src.quote_service import QuoteService
 
 
 CONFIG_PATH = Path(__file__).parent / "fixtures" / "config.test.yaml"
@@ -85,3 +87,15 @@ def test_daily_update_closed_day_returns_before_data_store_or_opend(
     )
 
     assert daily_update.main() == 0
+
+
+def test_direct_daily_fetch_is_a_closed_day_noop_before_quote_or_database_access() -> None:
+    result = daily_update.fetch_and_save_daily_klines(
+        cast(QuoteService, object()),
+        cast(DataStore, object()),
+        ["JP.0001"],
+        force=True,
+        reference_datetime=datetime(2026, 8, 11, 18, 0, tzinfo=JST),
+    )
+
+    assert result == {}

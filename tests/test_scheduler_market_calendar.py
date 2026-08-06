@@ -8,6 +8,42 @@ import scheduler
 from src.market_calendar import UnsupportedCalendarYear
 
 
+SCHEDULER_JOBS = (
+    "job_connection_check",
+    "job_daily_update",
+    "job_screen_candidates",
+    "job_performance_report",
+    "job_send_alerts",
+    "job_weekly_report",
+)
+
+
+@pytest.mark.parametrize("job_name", SCHEDULER_JOBS)
+def test_all_scheduler_jobs_are_closed_day_noops(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    job_name: str,
+) -> None:
+    monkeypatch.setattr(scheduler, "_current_jst_date", lambda: "2026-08-11")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("closed-day scheduler job must not start a child or service")
+
+    monkeypatch.setattr(scheduler, "_run_script", forbidden)
+    monkeypatch.setattr(scheduler, "load_config", forbidden)
+
+    with caplog.at_level(logging.INFO):
+        result = getattr(scheduler, job_name)()
+
+    assert result == {
+        "calendar_checked": True,
+        "is_trading_day": False,
+        "cycle_skipped": True,
+        "skip_reason": "jpx_market_closed",
+    }
+    assert "JPX休場日のため" in caplog.text
+
+
 def test_daily_update_job_logs_closed_day_and_does_not_start_child_process(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -50,10 +86,12 @@ def test_daily_update_job_runs_on_the_next_trading_day(
     assert calls == [(["daily_update.py", "--force"], 600, "日次更新")]
 
 
+@pytest.mark.parametrize("job_name", SCHEDULER_JOBS)
 def test_scheduler_does_not_convert_calendar_errors_to_noop(
     monkeypatch: pytest.MonkeyPatch,
+    job_name: str,
 ) -> None:
     monkeypatch.setattr(scheduler, "_current_jst_date", lambda: "2028-01-04")
 
     with pytest.raises(UnsupportedCalendarYear):
-        scheduler.job_daily_update()
+        getattr(scheduler, job_name)()

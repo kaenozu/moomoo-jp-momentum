@@ -95,6 +95,7 @@ def fetch_and_save_daily_klines(
     start: str | None = DEFAULT_START,
     batch_size: int = 80,
     quota_aware: bool = True,
+    reference_datetime: datetime | None = None,
 ) -> dict[str, pd.DataFrame]:
     """日足を取得・保存する（バッチ処理＋リトライ対応）。
 
@@ -103,7 +104,22 @@ def fetch_and_save_daily_klines(
       latest  -> get_cur_kline + subscribe/unsubscribe
       auto    -> 100銘柄超でhistory、以下でlatest
     """
-    reference_now = datetime.now(JST)
+    if reference_datetime is None:
+        reference_now = datetime.now(JST)
+    elif reference_datetime.tzinfo is None:
+        reference_now = reference_datetime.replace(tzinfo=JST)
+    else:
+        reference_now = reference_datetime.astimezone(JST)
+
+    market_day = check_jpx_market_day(reference_now)
+    _log_market_day_status(market_day)
+    if not market_day.is_trading_day:
+        logger.info(
+            "JPX休場日のため日足取得・保存をno-opで終了します: %s",
+            market_day.target_date.isoformat(),
+        )
+        return {}
+
     today = reference_now.strftime("%Y-%m-%d")
     effective_mode = mode
     if effective_mode == "auto":

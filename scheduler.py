@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 _lock_file = Path("data/scheduler.lock")
 CycleResultValue = bool | str
+SchedulerJobResult = dict[str, CycleResultValue] | None
 
 
 def _current_jst_date() -> str:
@@ -51,6 +52,26 @@ def _log_market_day_status(status: JPXMarketDayStatus) -> None:
     for key, value in status.as_result().items():
         rendered = str(value).lower() if isinstance(value, bool) else value
         logger.info("%s = %s", key, rendered)
+
+
+def _closed_market_day_noop(job_name: str) -> dict[str, CycleResultValue] | None:
+    """Return the auditable no-op result when JPX is closed.
+
+    Every scheduler job uses this guard before importing or starting an
+    external service. This keeps a holiday from reaching OpenD, SQLite,
+    reports, signals, or alerts through a secondary scheduled job.
+    """
+    market_day = check_jpx_market_day(_current_jst_date())
+    _log_market_day_status(market_day)
+    if market_day.is_trading_day:
+        return None
+
+    logger.info(
+        "JPX休場日のため%sをno-opで終了します: %s",
+        job_name,
+        market_day.target_date.isoformat(),
+    )
+    return market_day.as_result()
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -154,9 +175,13 @@ def _run_script(args: list[str], timeout: int, name: str) -> None:
         logger.error("%sエラー: %s", name, e)
 
 
-def job_connection_check() -> None:
+def job_connection_check() -> SchedulerJobResult:
     """接続確認ジョブ"""
     logger.info("接続確認ジョブを実行します")
+    closed_day_result = _closed_market_day_noop("接続確認ジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
+
     try:
         from src.connection import OpenDConnection
 
@@ -169,46 +194,62 @@ def job_connection_check() -> None:
                 logger.error("接続失敗: %s", status.message)
     except Exception as e:
         logger.error("接続確認エラー: %s", e)
+    return None
 
 
-def job_daily_update() -> dict[str, CycleResultValue] | None:
+def job_daily_update() -> SchedulerJobResult:
     """日次更新ジョブ。JPX休場日は子プロセスを起動せずno-opにする。"""
     logger.info("日次更新ジョブを実行します")
-    market_day = check_jpx_market_day(_current_jst_date())
-    _log_market_day_status(market_day)
-    if not market_day.is_trading_day:
-        logger.info(
-            "JPX休場日のため日次更新ジョブをno-opで終了します: %s",
-            market_day.target_date.isoformat(),
-        )
-        return market_day.as_result()
+    closed_day_result = _closed_market_day_noop("日次更新ジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
 
     _run_script(["daily_update.py", "--force"], timeout=600, name="日次更新")
     return None
 
 
-def job_screen_candidates() -> None:
+def job_screen_candidates() -> SchedulerJobResult:
     """候補抽出ジョブ"""
     logger.info("候補抽出ジョブを実行します")
+    closed_day_result = _closed_market_day_noop("候補抽出ジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
+
     _run_script(["screen_candidates.py", "--csv", "--html", "--save"], timeout=300, name="候補抽出")
+    return None
 
 
-def job_performance_report() -> None:
+def job_performance_report() -> SchedulerJobResult:
     """パフォーマンスレポートジョブ"""
     logger.info("パフォーマンスレポートジョブを実行します")
+    closed_day_result = _closed_market_day_noop("パフォーマンスレポートジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
+
     _run_script(["performance_report.py", "--csv", "--html"], timeout=300, name="パフォーマンスレポート")
+    return None
 
 
-def job_send_alerts() -> None:
+def job_send_alerts() -> SchedulerJobResult:
     """アラート送信ジョブ"""
     logger.info("アラート送信ジョブを実行します")
+    closed_day_result = _closed_market_day_noop("アラート送信ジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
+
     _run_script(["send_alerts.py"], timeout=120, name="アラート送信")
+    return None
 
 
-def job_weekly_report() -> None:
+def job_weekly_report() -> SchedulerJobResult:
     """週次レポートジョブ"""
     logger.info("週次レポートジョブを実行します")
+    closed_day_result = _closed_market_day_noop("週次レポートジョブ")
+    if closed_day_result is not None:
+        return closed_day_result
+
     _run_script(["strategy_compare.py", "--csv", "--html"], timeout=600, name="週次レポート")
+    return None
 
 
 def parse_cron(cron_str: str) -> dict:
