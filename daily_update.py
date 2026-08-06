@@ -15,7 +15,7 @@ import logging
 import sqlite3
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,6 +26,12 @@ from src.config import load_config
 from src.connection import OpenDConnection
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe, add_relative_strength
+from src.market_calendar import (
+    JST,
+    JPXMarketDayStatus,
+    check_jpx_market_day,
+    latest_expected_trading_day,
+)
 from src.quote_service import QuoteService, BATCH_SLEEP_SECONDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -35,24 +41,48 @@ DEFAULT_NUM_DAYS = 120
 DEFAULT_START = "2025-01-01"
 
 
+def _log_market_day_status(status: JPXMarketDayStatus) -> None:
+    """Write stable calendar evidence for direct and scheduler launches."""
+    for key, value in status.as_result().items():
+        rendered = str(value).lower() if isinstance(value, bool) else value
+        logger.info("%s = %s", key, rendered)
+
+
 def get_latest_bar_date(data_store: DataStore, code: str) -> str | None:
     with sqlite3.connect(data_store.db_path) as conn:
         result = conn.execute("SELECT MAX(date) FROM daily_bars WHERE code = ?", (code,)).fetchone()
         return result[0] if result and result[0] else None
 
 
-def should_skip_fetch(data_store: DataStore, code: str, today: str) -> bool:
+def should_skip_fetch(
+    data_store: DataStore,
+    code: str,
+    today: str,
+    reference_datetime: datetime | None = None,
+) -> bool:
+    """Return whether the latest stored bar covers the expected JPX session."""
     latest_date = get_latest_bar_date(data_store, code)
     if latest_date is None:
         return False
-    if latest_date >= today:
-        return True
-    today_dt = datetime.strptime(today, "%Y-%m-%d")
-    if today_dt.weekday() == 5:
-        return latest_date >= (today_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-    if today_dt.weekday() == 6:
-        return latest_date >= (today_dt - timedelta(days=2)).strftime("%Y-%m-%d")
-    return False
+    if reference_datetime is None:
+        reference_datetime = datetime.strptime(today, "%Y-%m-%d").replace(
+            hour=23,
+            minute=59,
+            second=59,
+            tzinfo=JST,
+        )
+    normalized_reference = (
+        reference_datetime.replace(tzinfo=JST)
+        if reference_datetime.tzinfo is None
+        else reference_datetime.astimezone(JST)
+    )
+    if normalized_reference.strftime("%Y-%m-%d") != today:
+        raise ValueError(
+            "todayとreference_datetimeの日付が一致しません: "
+            f"today={today}, reference={normalized_reference.isoformat()}"
+        )
+    expected_date = latest_expected_trading_day(normalized_reference).isoformat()
+    return latest_date >= expected_date
 
 
 def fetch_and_save_daily_klines(
@@ -73,7 +103,8 @@ def fetch_and_save_daily_klines(
       latest  -> get_cur_kline + subscribe/unsubscribe
       auto    -> 100銘柄超でhistory、以下でlatest
     """
-    today = datetime.now().strftime("%Y-%m-%d")
+    reference_now = datetime.now(JST)
+    today = reference_now.strftime("%Y-%m-%d")
     effective_mode = mode
     if effective_mode == "auto":
         effective_mode = "history" if len(codes) > 100 else "latest"
@@ -84,7 +115,12 @@ def fetch_and_save_daily_klines(
     skip_codes: list[str] = []
     fetch_codes: list[str] = []
     for code in codes:
-        if not force and should_skip_fetch(data_store, code, today):
+        if not force and should_skip_fetch(
+            data_store,
+            code,
+            today,
+            reference_datetime=reference_now,
+        ):
             skip_codes.append(code)
         else:
             fetch_codes.append(code)
@@ -230,6 +266,15 @@ def main() -> int:
     except FileNotFoundError as e:
         print(f"[ERROR] {e}")
         return 1
+
+    market_day = check_jpx_market_day(datetime.now(JST))
+    _log_market_day_status(market_day)
+    if not market_day.is_trading_day:
+        print(
+            "[NO-OP] JPX休場日のため日次更新をスキップします: "
+            f"{market_day.target_date.isoformat()}"
+        )
+        return 0
 
     data_store = DataStore(config)
     print(f"[OK] データベース: {config.database_path}")

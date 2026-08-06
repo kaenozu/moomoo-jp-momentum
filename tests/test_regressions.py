@@ -183,6 +183,10 @@ def test_dry_run_is_read_only(monkeypatch, tmp_path):
     )
 
     assert results == {
+        "calendar_checked": True,
+        "is_trading_day": True,
+        "cycle_skipped": False,
+        "skip_reason": "",
         "connection_attempted": False,
         "database_write_attempted": False,
         "virtual_trade_enabled": True,

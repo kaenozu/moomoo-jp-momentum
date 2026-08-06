@@ -18,11 +18,17 @@ import os
 import signal
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import load_config
+from src.market_calendar import (
+    JST,
+    JPXMarketDayStatus,
+    check_jpx_market_day,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +38,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _lock_file = Path("data/scheduler.lock")
+CycleResultValue = bool | str
+
+
+def _current_jst_date() -> str:
+    """Return the scheduler's target date using the explicit JST boundary."""
+    return datetime.now(JST).date().isoformat()
+
+
+def _log_market_day_status(status: JPXMarketDayStatus) -> None:
+    """Write the Issue #26 acceptance fields in a stable format."""
+    for key, value in status.as_result().items():
+        rendered = str(value).lower() if isinstance(value, bool) else value
+        logger.info("%s = %s", key, rendered)
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -152,10 +171,20 @@ def job_connection_check() -> None:
         logger.error("接続確認エラー: %s", e)
 
 
-def job_daily_update() -> None:
-    """日次更新ジョブ"""
+def job_daily_update() -> dict[str, CycleResultValue] | None:
+    """日次更新ジョブ。JPX休場日は子プロセスを起動せずno-opにする。"""
     logger.info("日次更新ジョブを実行します")
+    market_day = check_jpx_market_day(_current_jst_date())
+    _log_market_day_status(market_day)
+    if not market_day.is_trading_day:
+        logger.info(
+            "JPX休場日のため日次更新ジョブをno-opで終了します: %s",
+            market_day.target_date.isoformat(),
+        )
+        return market_day.as_result()
+
     _run_script(["daily_update.py", "--force"], timeout=600, name="日次更新")
+    return None
 
 
 def job_screen_candidates() -> None:
