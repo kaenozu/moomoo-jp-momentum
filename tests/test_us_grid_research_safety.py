@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.us_grid.accounting import CashPosition
 from src.us_grid.backtest import GridBacktester
 from src.us_grid.benchmark import buy_and_hold
 from src.us_grid.config import CostModel, GridConfig, RiskLimits
