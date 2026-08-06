@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from .accounting import CashPosition
 from .config import CostModel, GridConfig
 from .fills import Bar
+from .model import ApprovedOrder, DesiredOrder, Regime
 from .research_context import current_corporate_actions
 from .research_safety import (
     ResearchGridBacktester,
@@ -32,6 +34,38 @@ class CanonicalGridBacktester(ResearchGridBacktester):
     ) -> None:
         super().__init__(grid, data, fx)
         self._corporate_actions = current_corporate_actions()
+
+    def _approve_buy(
+        self,
+        desired: DesiredOrder,
+        state: CashPosition,
+        prices: dict[str, float],
+        regime: Regime,
+        day: str,
+        bars_by_code: dict[str, list[Bar]],
+    ) -> ApprovedOrder | None:
+        active_symbols = {
+            code for code, quantity in state.positions.items() if quantity > 0
+        }
+        active_symbols.update(
+            code
+            for code, reserved in self._reserved_by_code.items()
+            if reserved > 1e-9
+        )
+        if (
+            desired.code not in active_symbols
+            and len(active_symbols) >= self.grid.risk.max_symbols
+        ):
+            self.orders_rejected += 1
+            return None
+        return super()._approve_buy(
+            desired,
+            state,
+            prices,
+            regime,
+            day,
+            bars_by_code,
+        )
 
 
 def canonical_buy_and_hold(
