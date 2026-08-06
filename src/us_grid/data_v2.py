@@ -83,15 +83,8 @@ def _fetch_symbol(
     frame = frame.reset_index()
     frame.columns = [str(column) for column in frame.columns]
     frame["date"] = pd.to_datetime(frame.iloc[:, 0]).dt.strftime("%Y-%m-%d")
-    output = frame[["date", "Open", "High", "Low", "Close", "Volume"]].rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-    )
+    output = frame[["date", "Open", "High", "Low", "Close", "Volume"]].copy()
+    output.columns = ["date", "open", "high", "low", "close", "volume"]
     output["price_basis"] = PRICE_BASIS
     output.to_csv(cache_path, index=False)
     return output.drop(columns=["price_basis"]).to_dict(orient="records")
