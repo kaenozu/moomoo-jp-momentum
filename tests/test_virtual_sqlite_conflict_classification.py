@@ -152,6 +152,14 @@ def test_unrelated_locked_word_is_not_classified() -> None:
     assert not is_sqlite_busy_or_locked(error)
 
 
+@pytest.mark.parametrize(
+    "message",
+    ["database table is locked: symbols", "database schema is locked: main"],
+)
+def test_busy_fallback_accepts_sqlite_lock_prefixes(message: str) -> None:
+    assert is_sqlite_busy_or_locked(sqlite3.OperationalError(message))
+
+
 def test_duplicate_conflict_classified_by_sql() -> None:
     error = sqlite3.IntegrityError(
         "UNIQUE constraint failed: "
