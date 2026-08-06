@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -66,7 +66,8 @@ def _read_price_cache(path: Path) -> list[dict]:
     missing = required - set(frame.columns)
     if missing:
         raise UsDataPolicyError(f"US-grid cache is missing columns {sorted(missing)}: {path}")
-    return _records(frame.drop(columns=["price_basis"]))
+    clean = cast(pd.DataFrame, frame.drop(columns=["price_basis"]))
+    return _records(clean)
 
 
 def _fetch_symbol(
@@ -96,7 +97,8 @@ def _fetch_symbol(
     output.columns = ["date", "open", "high", "low", "close", "volume"]
     output["price_basis"] = PRICE_BASIS
     output.to_csv(cache_path, index=False)
-    return _records(output.drop(columns=["price_basis"]))
+    clean_output = cast(pd.DataFrame, output.drop(columns=["price_basis"]))
+    return _records(clean_output)
 
 
 def load_or_fetch(
