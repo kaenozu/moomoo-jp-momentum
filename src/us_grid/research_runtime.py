@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .accounting import CashPosition
-from .config import CostModel, GridConfig
+from .config import CostModel, GridConfig, UsGridConfigError
 from .fills import Bar
 from .model import ApprovedOrder, DesiredOrder, Regime
 from .research_context import current_corporate_actions
@@ -25,6 +25,20 @@ def canonical_round_trip_bps(cost: CostModel) -> float:
     return 2 * commission_bps + execution_bps + regulatory_bps
 
 
+def _research_universe[T](
+    configured_symbols: list[str],
+    values_by_code: dict[str, T],
+    *,
+    label: str,
+) -> dict[str, T]:
+    missing = [code for code in configured_symbols if code not in values_by_code]
+    if missing:
+        raise UsGridConfigError(
+            f"{label} is missing configured symbols: {', '.join(missing)}"
+        )
+    return {code: values_by_code[code] for code in configured_symbols}
+
+
 class CanonicalGridBacktester(ResearchGridBacktester):
     def __init__(
         self,
@@ -32,8 +46,16 @@ class CanonicalGridBacktester(ResearchGridBacktester):
         data: dict[str, list[dict]],
         fx: list[dict] | None = None,
     ) -> None:
-        super().__init__(grid, data, fx)
-        self._corporate_actions = current_corporate_actions()
+        aligned_data = _research_universe(
+            grid.symbols,
+            data,
+            label="market data",
+        )
+        super().__init__(grid, aligned_data, fx)
+        actions = current_corporate_actions()
+        self._corporate_actions = {
+            code: actions.get(code, []) for code in grid.symbols
+        }
         self._has_run = False
 
     def run(self, start_date: str, end_date: str, seed: int = 0):
@@ -87,12 +109,19 @@ def canonical_buy_and_hold(
     end_date: str,
     calendar: list[str],
 ):
+    aligned_bars = _research_universe(
+        grid.symbols,
+        bars_by_code,
+        label="benchmark data",
+    )
+    actions = current_corporate_actions()
+    aligned_actions = {code: actions.get(code, []) for code in grid.symbols}
     return buy_and_hold_with_dividends(
         grid,
-        bars_by_code,
+        aligned_bars,
         fx_rate_series,
         start_date,
         end_date,
         calendar,
-        corporate_actions=current_corporate_actions(),
+        corporate_actions=aligned_actions,
     )
