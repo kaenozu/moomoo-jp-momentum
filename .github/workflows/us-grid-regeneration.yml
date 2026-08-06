@@ -5,11 +5,17 @@ on:
   pull_request:
     paths:
       - .github/workflows/us-grid-regeneration.yml
+      - src/us_grid/**
+      - scripts/run_us_grid_*.py
+      - config.us_grid.example.yaml
   push:
     branches:
       - agent/us-adaptive-grid-research
     paths:
       - .github/workflows/us-grid-regeneration.yml
+      - src/us_grid/**
+      - scripts/run_us_grid_*.py
+      - config.us_grid.example.yaml
 
 permissions:
   contents: read
