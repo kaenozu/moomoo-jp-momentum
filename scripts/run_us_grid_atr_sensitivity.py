@@ -1,7 +1,8 @@
 """
 ATR parameter sensitivity: run adaptive grid over a fixed grid of ATR
-parameters and report the neighbourhood stability (overfitting check).
+parameters and report neighbourhood stability (overfitting check).
 
+Each train and OOS evaluation uses a fresh stateful backtester instance.
 Parameter selection is on train+validation only; the test window is held out.
 """
 
@@ -21,7 +22,10 @@ from src.us_grid.data import load_or_fetch
 
 
 def _grid(
-    atr_period: int, atr_multiplier: float, min_spacing: float, max_spacing: float
+    atr_period: int,
+    atr_multiplier: float,
+    min_spacing: float,
+    max_spacing: float,
 ) -> GridConfig:
     return GridConfig(
         enabled=True,
@@ -69,9 +73,14 @@ def main() -> int:
         for atr_multiplier in (0.5, 0.75, 1.0, 1.25, 1.5):
             for min_spacing in (0.75, 1.0, 1.5):
                 grid = _grid(atr_period, atr_multiplier, min_spacing, 4.0)
-                bt = GridBacktester(grid, data.bars, data.fx)
-                train_result = bt.run(train_start, train_end)
-                test_result = bt.run(test_start, test_end)
+                train_result = GridBacktester(grid, data.bars, data.fx).run(
+                    train_start,
+                    train_end,
+                )
+                test_result = GridBacktester(grid, data.bars, data.fx).run(
+                    test_start,
+                    test_end,
+                )
                 rows_out.append(
                     {
                         "atr_period": atr_period,
@@ -88,27 +97,38 @@ def main() -> int:
 
     out = Path("reports/us_grid_atr_sensitivity.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows_out[0].keys()))
+    with open(out, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows_out[0].keys()))
         writer.writeheader()
         writer.writerows(rows_out)
 
     print(f"wrote {out} ({len(rows_out)} combos)")
-    # Print the top/bottom by OOS return.
-    by_oos = sorted(rows_out, key=lambda r: r["oos_return_jpy_pct"], reverse=True)
+    by_oos = sorted(
+        rows_out,
+        key=lambda row: row["oos_return_jpy_pct"],
+        reverse=True,
+    )
     print("Top 5 by OOS return:")
-    for r in by_oos[:5]:
+    for row in by_oos[:5]:
         print(
-            f"  period={r['atr_period']} mult={r['atr_multiplier']} min={r['min_spacing']} "
-            f"train={r['train_return_jpy_pct']:7.2f}% oos={r['oos_return_jpy_pct']:7.2f}% "
-            f"oosDD={r['oos_dd_pct']:5.2f}% oosSharpe={r['oos_sharpe']:5.2f}"
+            f"  period={row['atr_period']} mult={row['atr_multiplier']} "
+            f"min={row['min_spacing']} "
+            f"train={row['train_return_jpy_pct']:7.2f}% "
+            f"oos={row['oos_return_jpy_pct']:7.2f}% "
+            f"oosDD={row['oos_dd_pct']:5.2f}% "
+            f"oosSharpe={row['oos_sharpe']:5.2f} "
+            f"roundTrips={row['round_trips']}"
         )
     print("Bottom 5 by OOS return:")
-    for r in by_oos[-5:]:
+    for row in by_oos[-5:]:
         print(
-            f"  period={r['atr_period']} mult={r['atr_multiplier']} min={r['min_spacing']} "
-            f"train={r['train_return_jpy_pct']:7.2f}% oos={r['oos_return_jpy_pct']:7.2f}% "
-            f"oosDD={r['oos_dd_pct']:5.2f}% oosSharpe={r['oos_sharpe']:5.2f}"
+            f"  period={row['atr_period']} mult={row['atr_multiplier']} "
+            f"min={row['min_spacing']} "
+            f"train={row['train_return_jpy_pct']:7.2f}% "
+            f"oos={row['oos_return_jpy_pct']:7.2f}% "
+            f"oosDD={row['oos_dd_pct']:5.2f}% "
+            f"oosSharpe={row['oos_sharpe']:5.2f} "
+            f"roundTrips={row['round_trips']}"
         )
     return 0
 
