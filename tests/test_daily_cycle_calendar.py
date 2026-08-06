@@ -16,8 +16,15 @@ def test_closed_day_returns_auditable_noop_before_external_or_db_services(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("closed-day cycle must not initialize this service")
 
-    monkeypatch.setattr(run_daily_cycle, "OpenDConnection", forbidden)
-    monkeypatch.setattr(run_daily_cycle, "DataStore", forbidden)
+    for service_name in (
+        "OpenDConnection",
+        "DataStore",
+        "QuoteService",
+        "Screener",
+        "VirtualTradeManager",
+        "AlertManager",
+    ):
+        monkeypatch.setattr(run_daily_cycle, service_name, forbidden)
 
     result = run_daily_cycle.run_cycle(
         "2026-08-11",

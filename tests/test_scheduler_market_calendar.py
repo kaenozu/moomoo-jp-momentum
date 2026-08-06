@@ -5,7 +5,7 @@ import logging
 import pytest
 
 import scheduler
-from src.market_calendar import UnsupportedCalendarYear
+from src.market_calendar import CalendarConfigurationError, UnsupportedCalendarYear
 
 
 SCHEDULER_JOBS = (
@@ -94,4 +94,18 @@ def test_scheduler_does_not_convert_calendar_errors_to_noop(
     monkeypatch.setattr(scheduler, "_current_jst_date", lambda: "2028-01-04")
 
     with pytest.raises(UnsupportedCalendarYear):
+        getattr(scheduler, job_name)()
+
+
+@pytest.mark.parametrize("job_name", SCHEDULER_JOBS)
+def test_scheduler_does_not_convert_calendar_configuration_errors_to_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    job_name: str,
+) -> None:
+    def broken_calendar(_value: object) -> object:
+        raise CalendarConfigurationError("test calendar configuration failure")
+
+    monkeypatch.setattr(scheduler, "check_jpx_market_day", broken_calendar)
+
+    with pytest.raises(CalendarConfigurationError, match="test calendar configuration failure"):
         getattr(scheduler, job_name)()
