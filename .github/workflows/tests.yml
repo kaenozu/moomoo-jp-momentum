@@ -8,6 +8,27 @@ permissions:
   contents: read
 
 jobs:
+  dependency-lock-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11.15"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            constraints/py311.txt
+
+      - name: Install and verify locked dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pip==26.1.2
+          python -m pip install --constraint constraints/py311.txt --requirement requirements.txt --requirement requirements-dev.txt
+          python -m pip check
+          python scripts/verify_locked_requirements.py
+          python -m compileall -q src scripts tests
+
   test:
     runs-on: ubuntu-24.04
     steps:
