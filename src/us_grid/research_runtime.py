@@ -34,6 +34,17 @@ class CanonicalGridBacktester(ResearchGridBacktester):
     ) -> None:
         super().__init__(grid, data, fx)
         self._corporate_actions = current_corporate_actions()
+        self._has_run = False
+
+    def run(self, start_date: str, end_date: str, seed: int = 0):
+        """Run exactly once; stateful engines must not cross evaluation windows."""
+        if self._has_run:
+            raise RuntimeError(
+                "GridBacktester instances are single-use; create a fresh instance "
+                "for every train, validation, test, and sensitivity window"
+            )
+        self._has_run = True
+        return super().run(start_date, end_date, seed=seed)
 
     def _approve_buy(
         self,
