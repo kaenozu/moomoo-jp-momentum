@@ -162,6 +162,23 @@ def test_duplicate_conflict_classified_by_index_name() -> None:
     assert is_expected_duplicate_conflict(error)
 
 
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [(1811, "SQLITE_CONSTRAINT_TRIGGER"), (1555, "SQLITE_CONSTRAINT_PRIMARYKEY")],
+)
+def test_duplicate_looking_trigger_or_primary_key_error_is_not_classified(
+    code: int, name: str
+) -> None:
+    error = sqlite3.IntegrityError(
+        "UNIQUE constraint failed: "
+        "virtual_orders.strategy_name, virtual_orders.code, virtual_orders.side"
+    )
+    setattr(error, "sqlite_errorcode", code)
+    setattr(error, "sqlite_errorname", name)
+
+    assert not is_expected_duplicate_conflict(error)
+
+
 def test_check_violation_not_classified() -> None:
     error = sqlite3.IntegrityError("CHECK constraint failed: quantity > 0")
     assert not is_expected_duplicate_conflict(error)
@@ -228,6 +245,33 @@ def test_unexpected_check_violation_is_reraisied(tmp_path: Path) -> None:
         manager.place_order(
             "default", "JP.1111", "BUY", 1, "MARKET_SIM", submitted_at="2026-07-02"
         )
+
+
+def test_trigger_constraint_with_duplicate_message_is_reraised(tmp_path: Path) -> None:
+    database_path = tmp_path / "trigger.db"
+    _prepare_database(database_path)
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TRIGGER reject_with_duplicate_message
+            BEFORE INSERT ON virtual_orders
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'UNIQUE constraint failed: virtual_orders.strategy_name, virtual_orders.code, virtual_orders.side'
+                );
+            END
+            """
+        )
+    manager = VirtualTradeManager(_config(database_path))
+
+    with pytest.raises(sqlite3.IntegrityError) as raised:
+        manager.place_order(
+            "default", "JP.1111", "BUY", 1, "MARKET_SIM", submitted_at="2026-07-02"
+        )
+
+    assert getattr(raised.value, "sqlite_errorname", None) == "SQLITE_CONSTRAINT_TRIGGER"
+    assert _pending_count(database_path) == 0
 
 
 def test_unexpected_not_null_violation_is_reraisied(tmp_path: Path) -> None:

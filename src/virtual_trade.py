@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # SQLite extended result codes (stable across Python 3.11+).
 _SQLITE_BUSY_CODE = 5
 _SQLITE_LOCKED_CODE = 6
+_SQLITE_CONSTRAINT_UNIQUE_CODE = 2067
 
 
 def is_expected_duplicate_conflict(error: sqlite3.IntegrityError) -> bool:
@@ -29,6 +30,18 @@ def is_expected_duplicate_conflict(error: sqlite3.IntegrityError) -> bool:
     （CHECK / NOT NULL / trigger / schema不整合）は予期しないDB障害として
     握りつぶさず、呼び出し元へ再raiseする。
     """
+    code = getattr(error, "sqlite_errorcode", None)
+    if code is not None:
+        try:
+            if int(code) != _SQLITE_CONSTRAINT_UNIQUE_CODE:
+                return False
+        except (TypeError, ValueError):
+            return False
+    else:
+        name = getattr(error, "sqlite_errorname", None)
+        if name is not None and str(name) != "SQLITE_CONSTRAINT_UNIQUE":
+            return False
+
     message = str(error)
     marker = "virtual_orders.strategy_name, virtual_orders.code, virtual_orders.side"
     if marker in message:
