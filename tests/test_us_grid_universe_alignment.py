@@ -5,6 +5,7 @@ import pytest
 from src.us_grid.backtest import GridBacktester
 from src.us_grid.benchmark import buy_and_hold
 from src.us_grid.config import CostModel, GridConfig, RiskLimits, UsGridConfigError
+from src.us_grid.data import UsDataBundle, attach_corporate_actions
 from src.us_grid.fills import bar_from_dict
 
 
@@ -73,6 +74,7 @@ def test_strategy_ignores_data_outside_configured_universe() -> None:
 
 def test_benchmark_uses_same_configured_universe() -> None:
     grid = _grid()
+    attach_corporate_actions(UsDataBundle(bars={"US.SPY": _bars()}))
     bars = {
         "US.SPY": [bar_from_dict(row) for row in _bars()],
         "US.QQQ": [bar_from_dict(row) for row in _bars(1000.0)],
