@@ -116,6 +116,7 @@ def validate_us_grid_config(grid: GridConfig) -> None:
         raise UsGridConfigError("recenter frequency and max_per_day must be positive")
 
     positive_limits = {
+        "max_symbols": grid.risk.max_symbols,
         "max_open_orders_per_symbol": grid.risk.max_open_orders_per_symbol,
         "max_open_orders_total": grid.risk.max_open_orders_total,
         "max_orders_per_day": grid.risk.max_orders_per_day,
@@ -127,10 +128,6 @@ def validate_us_grid_config(grid: GridConfig) -> None:
     if grid.risk.max_open_orders_per_symbol > grid.risk.max_open_orders_total:
         raise UsGridConfigError(
             "max_open_orders_per_symbol cannot exceed max_open_orders_total"
-        )
-    if len(grid.symbols) > grid.risk.max_symbols:
-        raise UsGridConfigError(
-            f"symbol count {len(grid.symbols)} exceeds max_symbols {grid.risk.max_symbols}"
         )
 
     if grid.costs.commission_mode not in {"percentage", "per_share"}:
