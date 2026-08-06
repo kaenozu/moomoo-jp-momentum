@@ -68,7 +68,10 @@ def is_sqlite_busy_or_locked(error: sqlite3.OperationalError) -> bool:
         return normalized_name in ("SQLITE_BUSY", "SQLITE_LOCKED") or normalized_name.startswith(
             ("SQLITE_BUSY_", "SQLITE_LOCKED_")
         )
-    return "locked" in str(error).lower()
+    message = str(error).strip().lower()
+    return message == "database is locked" or message.startswith(
+        ("database table is locked", "database schema is locked")
+    )
 
 
 @dataclass

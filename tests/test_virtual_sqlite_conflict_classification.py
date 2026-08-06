@@ -147,6 +147,11 @@ def test_busy_fallback_string_match_when_no_attributes() -> None:
     assert is_sqlite_busy_or_locked(error)
 
 
+def test_unrelated_locked_word_is_not_classified() -> None:
+    error = sqlite3.OperationalError("database is not locked")
+    assert not is_sqlite_busy_or_locked(error)
+
+
 def test_duplicate_conflict_classified_by_sql() -> None:
     error = sqlite3.IntegrityError(
         "UNIQUE constraint failed: "
