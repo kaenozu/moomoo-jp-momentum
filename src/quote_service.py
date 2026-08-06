@@ -144,10 +144,14 @@ class QuoteService:
         skipped = 0
         for _, row in normalized.iterrows():
             try:
-                open_price = float(row["open"])
-                high_price = float(row["high"])
-                low_price = float(row["low"])
-                close_price = float(row["close"])
+                # ``iterrows`` is typed as returning a broad pandas scalar union
+                # on Windows, although these columns are normalized to numeric
+                # values above.  Keep the runtime conversion while making that
+                # invariant explicit to Pyright across supported platforms.
+                open_price = float(cast(Any, row["open"]))
+                high_price = float(cast(Any, row["high"]))
+                low_price = float(cast(Any, row["low"]))
+                close_price = float(cast(Any, row["close"]))
                 volume_value = cast(Any, row["volume"])
                 volume = (
                     0
