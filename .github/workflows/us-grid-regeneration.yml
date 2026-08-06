@@ -2,6 +2,9 @@ name: US grid research regeneration
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/us-grid-regeneration.yml
   push:
     branches:
       - agent/us-adaptive-grid-research
@@ -114,6 +117,7 @@ jobs:
           import hashlib
           import json
           from pathlib import Path
+          import subprocess
 
           import pandas as pd
 
@@ -149,7 +153,7 @@ jobs:
               "production_authority": False,
               "real_order_authorized": False,
               "simulate_order_authorized": False,
-              "source_commit": __import__("subprocess").check_output(
+              "source_commit": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], text=True
               ).strip(),
               "lock_source_commit": "62dd4b09219bf391364d9bd55976e4d18de75afc",
