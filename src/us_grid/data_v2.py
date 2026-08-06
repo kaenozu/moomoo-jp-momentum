@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -22,6 +23,14 @@ PRICE_BASIS = "YAHOO_SPLIT_ADJUSTED_OHLC_CASH_DIVIDENDS_V2"
 
 class UsDataPolicyError(ValueError):
     """Raised when cached data does not satisfy the canonical price policy."""
+
+
+def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    columns = [str(column) for column in frame.columns]
+    return [
+        {column: value for column, value in zip(columns, row, strict=True)}
+        for row in frame.itertuples(index=False, name=None)
+    ]
 
 
 def _hash_data(bundle: UsDataBundle) -> str:
@@ -57,7 +66,7 @@ def _read_price_cache(path: Path) -> list[dict]:
     missing = required - set(frame.columns)
     if missing:
         raise UsDataPolicyError(f"US-grid cache is missing columns {sorted(missing)}: {path}")
-    return frame.drop(columns=["price_basis"]).to_dict(orient="records")
+    return _records(frame.drop(columns=["price_basis"]))
 
 
 def _fetch_symbol(
@@ -87,7 +96,7 @@ def _fetch_symbol(
     output.columns = ["date", "open", "high", "low", "close", "volume"]
     output["price_basis"] = PRICE_BASIS
     output.to_csv(cache_path, index=False)
-    return output.drop(columns=["price_basis"]).to_dict(orient="records")
+    return _records(output.drop(columns=["price_basis"]))
 
 
 def load_or_fetch(
@@ -127,7 +136,7 @@ def load_or_fetch(
     fx_cache = directory / "USDJPY.csv"
     if fx_cache.exists() and fx_cache.stat().st_size > 0:
         frame = pd.read_csv(fx_cache)
-        bundle.fx = frame.to_dict(orient="records")
+        bundle.fx = _records(frame)
         bundle.sources.append("cache:USDJPY")
     elif fetch:
         bundle.fx = _legacy._fetch_fx(
