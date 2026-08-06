@@ -102,11 +102,12 @@ def test_unimplemented_fx_cost_is_rejected() -> None:
         load_us_grid_config(config)
 
 
-def test_symbol_count_must_fit_risk_limit() -> None:
+def test_research_universe_can_exceed_active_symbol_limit() -> None:
     config = _mapping()
     config["us_grid"]["symbols"] = ["US.SPY", "US.QQQ"]
-    with pytest.raises(UsGridConfigError, match="exceeds max_symbols"):
-        load_us_grid_config(config)
+    grid = load_us_grid_config(config)
+    assert grid.symbols == ["US.SPY", "US.QQQ"]
+    assert grid.risk.max_symbols == 1
 
 
 def test_valid_mapping_loads() -> None:
