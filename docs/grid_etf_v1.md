@@ -22,6 +22,15 @@ SQLite上の日足を読み取って試す場合は、DBを書き換えずに次
 python grid_etf_backtest.py --code JP.1306 --from 2026-01-01 --to 2026-06-30
 ```
 
+既存の履歴バックテスト入口から実行する場合は、次の専用分岐を使います。
+
+```bash
+python historical_backtest.py --strategy grid_etf_v1 --grid-code JP.1306 \
+  --from 2026-01-01 --to 2026-06-30 --csv
+```
+
+`--csv` を指定すると `reports/grid_etf_v1_summary_*.csv` と資産曲線CSVを出力します。
+
 再起動後も専用状態から続ける場合だけ、`--persist` を明示します。既存の `virtual_*` 表や
 momentumの状態には書き込みません。
 

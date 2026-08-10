@@ -1,7 +1,9 @@
 import sqlite3
 import sys
+from types import SimpleNamespace
 
 import grid_etf_backtest
+from historical_backtest import run_grid_backtest
 from grid_etf_backtest import load_bars
 from src.grid_etf_ledger import GridEtfStateStore
 from src.grid_etf import GridBar, GridConfig, GridEtfV1, GridOrderSide
@@ -204,3 +206,26 @@ def test_persist_cli_resumes_without_duplicate_processing(tmp_path, monkeypatch,
     assert "fills=2" in second_output
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM grid_etf_equity_curve").fetchone()[0] == 6
+
+
+def test_historical_backtest_entrypoint_runs_grid_strategy(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "historical.db"
+    bars = _bars([100, 100, 100, 95, 100, 105])
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE daily_bars (code TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL)")
+        conn.executemany(
+            "INSERT INTO daily_bars VALUES ('JP.1306', ?, ?, ?, ?, ?)",
+            [(bar.date, bar.open, bar.high, bar.low, bar.close) for bar in bars],
+        )
+        conn.commit()
+
+    config = SimpleNamespace(
+        database_path=str(db_path),
+        get=lambda key, default=None: {"grid_etf": {"atr_period": 2, "levels": 1}}.get(key, default),
+    )
+    monkeypatch.chdir(tmp_path)
+    result = run_grid_backtest(config, "JP.1306", "2026-01-01", "2026-01-06", export_csv=True)
+
+    assert result.strategy_name == "grid_etf_v1"
+    assert result.equity_curve
+    assert (tmp_path / "reports/grid_etf_v1_summary_JP_1306.csv").exists()

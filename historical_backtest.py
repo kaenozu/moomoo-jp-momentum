@@ -22,6 +22,8 @@ import sqlite3
 
 from src.config import load_config
 from src.backtest_runner import BacktestRunner
+from src.grid_etf import GridBacktestResult, GridConfig, GridEtfV1
+from grid_etf_backtest import load_bars
 from src.strategies import StrategyRegistry
 
 
@@ -336,11 +338,86 @@ def run_backtest(config, strategy_name: str, start_date: str, end_date: str) -> 
     return runner.run(strategy_name, start_date, end_date)
 
 
+def run_grid_backtest(
+    config,
+    code: str,
+    start_date: str,
+    end_date: str,
+    export_csv: bool = False,
+) -> GridBacktestResult:
+    """既存履歴CLIから独立grid_etf_v1を実行する。DBは日足の読み取りだけ行う。"""
+    grid_cfg = config.get("grid_etf", {}) or {}
+    bars = load_bars(Path(config.database_path), code, start_date, end_date)
+    if not bars:
+        raise ValueError(f"grid_etf_v1対象の日足がありません: {code} {start_date}〜{end_date}")
+    strategy = GridEtfV1(
+        GridConfig(
+            strategy_name="grid_etf_v1",
+            initial_cash=float(grid_cfg.get("initial_cash", 100_000.0)),
+            atr_period=int(grid_cfg.get("atr_period", 14)),
+            atr_multiplier=float(grid_cfg.get("atr_multiplier", 0.75)),
+            levels=int(grid_cfg.get("levels", 4)),
+            level_capital=float(grid_cfg.get("level_capital", 10_000.0)),
+            max_capital_pct=float(grid_cfg.get("max_capital_pct", 60.0)),
+            max_drawdown_pct=float(grid_cfg.get("max_drawdown_pct", 10.0)),
+            lot_size=int(grid_cfg.get("lot_size", 1)),
+        )
+    )
+    result = strategy.backtest(bars)
+    return _report_grid_result(result, code, start_date, end_date, export_csv)
+
+
+def _report_grid_result(
+    result: GridBacktestResult,
+    code: str,
+    start_date: str,
+    end_date: str,
+    export_csv: bool,
+) -> GridBacktestResult:
+    return_pct = (result.final_equity - result.initial_cash) / result.initial_cash * 100.0
+    buys = sum(1 for fill in result.fills if fill.side.value == "BUY")
+    sells = sum(1 for fill in result.fills if fill.side.value == "SELL")
+    print(f"\n  戦略: {result.strategy_name}")
+    print(f"  銘柄: {code}")
+    print(f"  期間: {start_date}〜{end_date}")
+    print(f"  日足本数: {len(result.equity_curve)}")
+    print(f"  初期資金: {result.initial_cash:,.0f}円")
+    print(f"  最終資産: {result.final_equity:,.0f}円")
+    print(f"  総リターン: {return_pct:.2f}%")
+    print(f"  最大DD: {result.max_drawdown_pct:.2f}%")
+    print(f"  約定: BUY {buys}件 / SELL {sells}件")
+    print(f"  DD停止: {'あり' if result.stopped else 'なし'}")
+    if export_csv:
+        output_dir = Path("reports")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"_{code.replace('.', '_')}"
+        pd.DataFrame(
+            [{"date": date, "total_equity": equity} for date, equity in result.equity_curve]
+        ).to_csv(output_dir / f"grid_etf_v1_equity{suffix}.csv", index=False)
+        pd.DataFrame(
+            [{
+                "strategy_name": result.strategy_name,
+                "code": code,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_cash": result.initial_cash,
+                "final_equity": result.final_equity,
+                "return_pct": return_pct,
+                "max_drawdown_pct": result.max_drawdown_pct,
+                "buy_fills": buys,
+                "sell_fills": sells,
+                "stopped": result.stopped,
+            }]
+        ).to_csv(output_dir / f"grid_etf_v1_summary{suffix}.csv", index=False)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Moomoo 履歴バックテスト")
     parser.add_argument("--from", dest="from_date", default="2026-03-01", help="開始日")
     parser.add_argument("--to", dest="to_date", default="2026-06-30", help="終了日")
     parser.add_argument("--strategy", default="momentum", help="戦略名（または all）")
+    parser.add_argument("--grid-code", default="JP.1306", help="grid_etf_v1対象ETFコード")
     parser.add_argument("--csv", action="store_true", help="CSV出力")
     parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
@@ -350,6 +427,14 @@ def main():
     except FileNotFoundError as e:
         print(f"[ERROR] {e}")
         return 1
+
+    if args.strategy == "grid_etf_v1":
+        try:
+            run_grid_backtest(config, args.grid_code, args.from_date, args.to_date, args.csv)
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            print(f"[ERROR] grid_etf_v1バックテスト失敗: {exc}")
+            return 1
+        return 0
 
     strategies = StrategyRegistry.list_names() if args.strategy == "all" else [args.strategy]
     run_ids = []
