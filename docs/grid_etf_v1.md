@@ -22,8 +22,14 @@ SQLite上の日足を読み取って試す場合は、DBを書き換えずに次
 python grid_etf_backtest.py --code JP.1306 --from 2026-01-01 --to 2026-06-30
 ```
 
+再起動後も専用状態から続ける場合だけ、`--persist` を明示します。既存の `virtual_*` 表や
+momentumの状態には書き込みません。
+
+```bash
+python grid_etf_backtest.py --code JP.1306 --from 2026-01-01 --to 2026-06-30 --persist
+```
+
 ## 運用境界
 
-これは検証用の独立エンジンであり、既存の `historical_backtest.py` や scheduler に自動接続していません。
-まず純粋なOHLCモデルと制約をテストし、次段階でSQLiteの戦略別ledgerへ接続します。
-その接続、ペーパートレード、Production、外部注文はこの変更では実施しません。
+これは検証用の独立エンジンであり、既存の `historical_backtest.py` や scheduler へ自動接続していません。
+`--persist` は専用ledgerへの再開可能な状態保存だけを行います。ペーパートレード、Production、外部注文は実施しません。

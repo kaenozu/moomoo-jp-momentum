@@ -1,6 +1,9 @@
 import sqlite3
+import sys
 
+import grid_etf_backtest
 from grid_etf_backtest import load_bars
+from src.grid_etf_ledger import GridEtfStateStore
 from src.grid_etf import GridBar, GridConfig, GridEtfV1, GridOrderSide
 
 
@@ -113,3 +116,91 @@ def test_sqlite_loader_is_read_only(tmp_path) -> None:
     assert len(bars) == 1
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0] == 1
+
+
+def test_grid_state_can_resume_from_dedicated_sqlite_store(tmp_path) -> None:
+    db_path = tmp_path / "state.db"
+    store = GridEtfStateStore(db_path)
+    config = GridConfig(atr_period=2, levels=1, initial_cash=50_000)
+    strategy = GridEtfV1(config)
+    for bar in _bars([100, 100, 100, 95]):
+        strategy.on_bar(bar)
+
+    store.save("grid_etf_v1", "JP.1306", strategy)
+    resumed = store.load("grid_etf_v1", "JP.1306", config)
+
+    assert resumed is not None
+    assert resumed.cash == strategy.cash
+    assert len(resumed.pending_orders) == len(strategy.pending_orders)
+    assert len(resumed._bars) == len(strategy._bars)
+
+
+def test_grid_state_store_isolated_by_strategy_and_code(tmp_path) -> None:
+    store = GridEtfStateStore(tmp_path / "state.db")
+    config = GridConfig(atr_period=2, levels=1, initial_cash=50_000)
+    strategy = GridEtfV1(config)
+    for bar in _bars([100, 100, 100]):
+        strategy.on_bar(bar)
+
+    store.save("grid_etf_v1", "JP.1306", strategy)
+
+    assert store.load("grid_etf_v1", "JP.1306", config) is not None
+    assert store.load("grid_etf_v1", "JP.2559", config) is None
+    assert store.load("momentum", "JP.1306", config) is None
+
+
+def test_grid_state_store_records_fills_and_rejects_duplicate_dates(tmp_path) -> None:
+    store = GridEtfStateStore(tmp_path / "state.db")
+    config = GridConfig(atr_period=2, levels=1, initial_cash=50_000)
+    bars = _bars([100, 100, 100, 95])
+    for bar in bars:
+        store.apply_bar("grid_etf_v1", "JP.1306", config, bar)
+
+    with sqlite3.connect(tmp_path / "state.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM grid_etf_equity_curve").fetchone()[0] == 4
+        assert conn.execute("SELECT COUNT(*) FROM grid_etf_fills").fetchone()[0] == 1
+
+    import pytest
+
+    with pytest.raises(ValueError, match="重複処理"):
+        store.apply_bar("grid_etf_v1", "JP.1306", config, bars[-1])
+
+
+def test_persist_cli_resumes_without_duplicate_processing(tmp_path, monkeypatch, capsys) -> None:
+    db_path = tmp_path / "cli.db"
+    bars = _bars([100, 100, 100, 95, 100, 105])
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE daily_bars (code TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL)")
+        conn.executemany(
+            "INSERT INTO daily_bars VALUES ('JP.1306', ?, ?, ?, ?, ?)",
+            [(bar.date, bar.open, bar.high, bar.low, bar.close) for bar in bars],
+        )
+        conn.commit()
+
+    argv = [
+        "grid_etf_backtest.py",
+        "--db",
+        str(db_path),
+        "--code",
+        "JP.1306",
+        "--from",
+        "2026-01-01",
+        "--to",
+        "2026-01-06",
+        "--persist",
+        "--atr-period",
+        "2",
+        "--levels",
+        "1",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    assert grid_etf_backtest.main() == 0
+    first_output = capsys.readouterr().out
+    assert "strategy=grid_etf_v1" in first_output
+
+    monkeypatch.setattr(sys, "argv", argv)
+    assert grid_etf_backtest.main() == 0
+    second_output = capsys.readouterr().out
+    assert "fills=2" in second_output
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM grid_etf_equity_curve").fetchone()[0] == 6

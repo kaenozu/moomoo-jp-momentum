@@ -8,6 +8,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
+from typing import Any
 
 
 class GridOrderSide(Enum):
@@ -232,3 +233,90 @@ class GridEtfV1:
             equity_curve=list(self._equity_curve),
             stopped=self._stopped,
         )
+
+    def snapshot(self) -> dict[str, Any]:
+        """SQLiteなどへ保存できる、戦略専用状態のスナップショットを返す。"""
+        return {
+            "cash": self.cash,
+            "pending_orders": [
+                {
+                    "side": order.side.value,
+                    "price": order.price,
+                    "quantity": order.quantity,
+                    "level": order.level,
+                    "created_index": order.created_index,
+                }
+                for order in self.pending_orders
+            ],
+            "positions": {
+                str(level): {"quantity": quantity, "price": price}
+                for level, (quantity, price) in self.positions.items()
+            },
+            "bars": [
+                {
+                    "date": bar.date,
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                }
+                for bar in self._bars
+            ],
+            "base_price": self._base_price,
+            "spacing": self._spacing,
+            "peak_equity": self._peak_equity,
+            "max_drawdown": self._max_drawdown,
+            "stopped": self._stopped,
+            "all_fills": [
+                {
+                    "date": fill.date,
+                    "side": fill.side.value,
+                    "price": fill.price,
+                    "quantity": fill.quantity,
+                    "level": fill.level,
+                }
+                for fill in self._all_fills
+            ],
+            "equity_curve": [[date, equity] for date, equity in self._equity_curve],
+        }
+
+    @classmethod
+    def from_snapshot(cls, config: GridConfig, snapshot: dict[str, Any]) -> "GridEtfV1":
+        """検証済みスナップショットから戦略状態を復元する。"""
+        strategy = cls(config)
+        strategy.cash = float(snapshot["cash"])
+        strategy.pending_orders = [
+            GridOrder(
+                side=GridOrderSide(item["side"]),
+                price=float(item["price"]),
+                quantity=int(item["quantity"]),
+                level=int(item["level"]),
+                created_index=int(item["created_index"]),
+            )
+            for item in snapshot.get("pending_orders", [])
+        ]
+        strategy.positions = {
+            int(level): (int(item["quantity"]), float(item["price"]))
+            for level, item in snapshot.get("positions", {}).items()
+        }
+        strategy._bars = [GridBar(**item) for item in snapshot.get("bars", [])]
+        strategy._base_price = snapshot.get("base_price")
+        strategy._spacing = snapshot.get("spacing")
+        strategy._peak_equity = float(snapshot.get("peak_equity", config.initial_cash))
+        strategy._max_drawdown = float(snapshot.get("max_drawdown", 0.0))
+        strategy._stopped = bool(snapshot.get("stopped", False))
+        strategy._all_fills = [
+            GridFill(
+                date=item["date"],
+                side=GridOrderSide(item["side"]),
+                price=float(item["price"]),
+                quantity=int(item["quantity"]),
+                level=int(item["level"]),
+            )
+            for item in snapshot.get("all_fills", [])
+        ]
+        strategy._equity_curve = [
+            (str(date), float(equity))
+            for date, equity in snapshot.get("equity_curve", [])
+        ]
+        return strategy
