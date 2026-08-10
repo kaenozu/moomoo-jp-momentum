@@ -1,12 +1,18 @@
 # `grid_etf_v1` 実市場データバックテスト
 
-実行日: 2026-08-10  
-戦略: `grid_etf_v1`  
-対象: `JP.1306` / Yahoo Finance ticker `1306.T`  
-期間指定: 2020-01-01〜2026-08-09  
-データ取得: `yfinance 0.2.66`、`auto_adjust=True`、`actions=True`  
-取得行数: 1,611本  
-実データ範囲: 2020-01-06〜2026-08-07  
+実行日: 2026-08-10
+
+戦略: `grid_etf_v1`
+
+対象: `JP.1306` / Yahoo Finance ticker `1306.T`
+
+期間指定: 2020-01-01〜2026-08-09
+
+データ取得: `yfinance 0.2.66`、`auto_adjust=True`、`actions=True`
+
+取得行数: 1,611本
+
+実データ範囲: 2020-01-06〜2026-08-07
 一時DB SHA-256: `1FA9860B81DD5FEB7E7E2FABCC13B11AEC3FEC32E284EB43D602FCEC9693D6E5`
 
 ## 設定
