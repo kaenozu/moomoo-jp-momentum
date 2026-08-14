@@ -4,15 +4,21 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
+
+      - name: Check commit whitespace
+        run: git show --check --format= HEAD
 
       - name: Install production dependencies
         run: pip install -r requirements.txt
@@ -27,10 +33,21 @@ jobs:
         run: python -m pytest tests/ -m "not slow" -q
 
       - name: Run ruff
-        run: ruff check --output-format=github src/ tests/ run_daily_cycle.py
+        run: ruff check --output-format=github src/ tests/ scripts/validate_source_manifest.py run_daily_cycle.py
 
       - name: Run pyright
         run: pyright
+
+      - name: Validate deterministic source manifest twice
+        run: |
+          mkdir -p /tmp/source-manifest
+          python -m scripts.validate_source_manifest \
+            --source-commit "${{ github.sha }}" \
+            --output /tmp/source-manifest/first.json
+          python -m scripts.validate_source_manifest \
+            --source-commit "${{ github.sha }}" \
+            --output /tmp/source-manifest/second.json
+          cmp /tmp/source-manifest/first.json /tmp/source-manifest/second.json
 
       - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
