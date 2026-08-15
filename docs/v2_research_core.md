@@ -49,3 +49,19 @@ Metrics / Experiment / Tournament
 3. benchmark比較とwalk-forward
 4. backtest / paper decision parity
 5. Paper forwardの再起動・欠損・二重注文・損失上限検証
+
+## 実データのread-only実行
+
+既存DBを変更せず、`daily_bars`だけを読み取ってTournamentを実行できます。
+
+```powershell
+uv run --with-requirements requirements.txt --with-requirements requirements-dev.txt `
+  python scripts/run_v2_sqlite_tournament.py `
+  --db data/moomoo.db `
+  --from 2025-01-01 `
+  --to 2026-07-31 `
+  --benchmark JP.1306 `
+  --max-positions 20
+```
+
+このコマンドはSQLiteを`mode=ro`で開きます。DBがない場合や日足が存在しない場合は、推測データで代用せず停止します。
