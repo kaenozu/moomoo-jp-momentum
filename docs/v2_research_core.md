@@ -61,7 +61,10 @@ uv run --with-requirements requirements.txt --with-requirements requirements-dev
   --from 2025-01-01 `
   --to 2026-07-31 `
   --benchmark JP.1306 `
-  --max-positions 20
+  --max-positions 20 `
+  --split-date 2025-01-01 `
+  --slippage-bps 5 `
+  --commission-bps 5
 ```
 
 このコマンドはSQLiteを`mode=ro`で開きます。DBがない場合や日足が存在しない場合は、推測データで代用せず停止します。

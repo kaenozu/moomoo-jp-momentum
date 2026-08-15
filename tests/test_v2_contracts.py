@@ -8,6 +8,7 @@ from src.momentum_v2.engine import SimulationEngine
 from src.momentum_v2.experiment import Experiment
 from src.momentum_v2.metrics import METRIC_NAMES, calculate_metrics
 from src.momentum_v2.portfolio_rules import Exposure, RiskPolicy
+from src.momentum_v2.portfolio_rules import ExecutionCostModel
 
 
 class FixedStrategy:
@@ -77,3 +78,67 @@ def test_experiment_requires_reproducibility_metadata() -> None:
         "config-sha",
     )
     assert experiment.end >= experiment.start
+
+
+def test_execution_costs_are_applied_to_buy_and_sell_fills() -> None:
+    costs = ExecutionCostModel(slippage_bps=10.0, commission_bps=5.0)
+    buy_price, buy_fee = costs.fill("BUY", 100.0, 10)
+    sell_price, sell_fee = costs.fill("SELL", 100.0, 10)
+
+    assert buy_price == pytest.approx(100.10)
+    assert sell_price == pytest.approx(99.90)
+    assert buy_fee == pytest.approx(0.5005)
+    assert sell_fee == pytest.approx(0.4995)
+
+
+def test_risk_policy_rejects_invalid_drawdown_limit() -> None:
+    with pytest.raises(ValueError, match="drawdown"):
+        RiskPolicy(max_drawdown=1.1)
+
+
+def test_drawdown_limit_stops_new_exposure_after_a_loss() -> None:
+    class RiskStrategy:
+        name = "risk"
+
+        def scores(self, snapshot: MarketSnapshot) -> dict[str, float]:
+            return {"A": 1.0}
+
+    snapshots = tuple(
+        MarketSnapshot.from_bars(
+            [CanonicalBar("A", date(2026, 1, day), open_price, high, low, close)]
+        )
+        for day, open_price, high, low, close in (
+            (1, 100.0, 101.0, 99.0, 100.0),
+            (2, 100.0, 101.0, 49.0, 50.0),
+            (3, 50.0, 51.0, 49.0, 50.0),
+        )
+    )
+    allocator = EqualWeightAllocator(
+        Exposure(1.0), RiskPolicy(max_positions=1, max_drawdown=0.2)
+    )
+    result = SimulationEngine(allocator).run(
+        snapshots, RiskStrategy(), initial_cash=1000.0
+    )
+
+    assert any(fill.side == "SELL" for fill in result.portfolio.fills)
+
+
+def test_simulation_partially_fills_buy_when_next_open_exceeds_budget() -> None:
+    class BuyStrategy:
+        name = "buy"
+
+        def scores(self, snapshot: MarketSnapshot) -> dict[str, float]:
+            return {"A": 1.0}
+
+    snapshots = (
+        MarketSnapshot.from_bars(
+            [CanonicalBar("A", date(2026, 2, 1), 100.0, 101.0, 99.0, 100.0)]
+        ),
+        MarketSnapshot.from_bars(
+            [CanonicalBar("A", date(2026, 2, 2), 200.0, 201.0, 199.0, 200.0)]
+        ),
+    )
+    result = SimulationEngine().run(snapshots, BuyStrategy(), initial_cash=1000.0)
+
+    assert result.portfolio.fills[0].quantity > 0
+    assert result.portfolio.cash >= 0

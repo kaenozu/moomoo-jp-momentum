@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from typing import Callable
 
 from .allocator import EqualWeightAllocator, ScoreWeightAllocator
 from .contracts import MarketSnapshot, Strategy
 from .engine import SimulationEngine
 from .metrics import calculate_metrics
-from .portfolio_rules import Exposure, RiskPolicy
+from .portfolio_rules import ExecutionCostModel, Exposure, RiskPolicy
 
 
 class BuyHoldStrategy:
@@ -122,10 +123,22 @@ class TournamentRow:
 
 
 @dataclass(frozen=True, slots=True)
+class OOSResult:
+    split_date: date
+    in_sample_observations: int
+    out_of_sample_observations: int
+    in_sample: tuple[TournamentRow, ...]
+    out_of_sample: tuple[TournamentRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class StrategyTournament:
     initial_cash: float = 100000.0
     max_positions: int = 10
     benchmark_code: str | None = None
+    costs: ExecutionCostModel = field(
+        default_factory=lambda: ExecutionCostModel(slippage_bps=5.0, commission_bps=5.0)
+    )
 
     def run(self, snapshots: tuple[MarketSnapshot, ...]) -> tuple[TournamentRow, ...]:
         if not snapshots:
@@ -143,15 +156,17 @@ class StrategyTournament:
         rows: list[TournamentRow] = []
         benchmark = self._benchmark_curve(snapshots)
         for strategy in strategies:
+            risk = RiskPolicy(
+                max_positions=self.max_positions,
+                max_exposure=1.0,
+                max_drawdown=0.25 if strategy.name == "benchmark_alpha" else None,
+            )
             allocator = (
                 ScoreWeightAllocator
                 if strategy.name == "benchmark_alpha"
                 else EqualWeightAllocator
-            )(
-                Exposure(1.0),
-                RiskPolicy(max_positions=self.max_positions, max_exposure=1.0),
-            )
-            result = SimulationEngine(allocator).run(
+            )(Exposure(1.0), risk)
+            result = SimulationEngine(allocator, self.costs).run(
                 snapshots, strategy, initial_cash=self.initial_cash
             )
             curve = [value for _, value in result.equity_curve]
@@ -177,6 +192,26 @@ class StrategyTournament:
             )
         return tuple(rows)
 
+    def run_oos(
+        self, snapshots: tuple[MarketSnapshot, ...], *, split_date: date
+    ) -> OOSResult:
+        ordered = tuple(sorted(snapshots, key=lambda snapshot: snapshot.date))
+        in_sample = tuple(
+            snapshot for snapshot in ordered if snapshot.date < split_date
+        )
+        out_of_sample = tuple(
+            snapshot for snapshot in ordered if snapshot.date >= split_date
+        )
+        if len(in_sample) < 2 or len(out_of_sample) < 2:
+            raise ValueError("both OOS partitions require at least two snapshots")
+        return OOSResult(
+            split_date,
+            len(in_sample),
+            len(out_of_sample),
+            self.run(in_sample),
+            self.run(out_of_sample),
+        )
+
     def _benchmark_curve(
         self, snapshots: tuple[MarketSnapshot, ...]
     ) -> list[float] | None:
@@ -196,4 +231,4 @@ class StrategyTournament:
         return [price / first * self.initial_cash for price in prices]
 
 
-__all__ = ["StrategyTournament", "TournamentRow"]
+__all__ = ["OOSResult", "StrategyTournament", "TournamentRow"]

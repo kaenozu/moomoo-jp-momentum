@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .allocator import EqualWeightAllocator
 from .contracts import MarketSnapshot, Strategy
 from .portfolio import Fill, MemoryPortfolio, OrderIntent
+from .portfolio_rules import ExecutionCostModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,8 +17,13 @@ class SimulationResult:
 class SimulationEngine:
     """Deterministic, in-memory next-day-open simulation kernel."""
 
-    def __init__(self, allocator: EqualWeightAllocator | None = None) -> None:
+    def __init__(
+        self,
+        allocator: EqualWeightAllocator | None = None,
+        costs: ExecutionCostModel | None = None,
+    ) -> None:
         self.allocator = allocator or EqualWeightAllocator()
+        self.costs = costs or ExecutionCostModel()
 
     def run(
         self,
@@ -30,6 +36,7 @@ class SimulationEngine:
             raise ValueError("simulation requires snapshots")
         portfolio = MemoryPortfolio(initial_cash)
         pending: list[OrderIntent] = []
+        peak_equity = initial_cash
         ordered = tuple(sorted(snapshots, key=lambda snapshot: snapshot.date))
         for index, snapshot in enumerate(ordered):
             bars = {bar.code: bar for bar in snapshot.bars}
@@ -37,21 +44,41 @@ class SimulationEngine:
                 bar = bars.get(order.code)
                 if bar is None:
                     continue
+                quantity = order.quantity
+                if order.side == "BUY":
+                    unit_price, unit_fee = self.costs.fill("BUY", bar.open, 1)
+                    quantity = min(
+                        quantity,
+                        int(portfolio.cash / (unit_price + unit_fee)),
+                    )
+                else:
+                    quantity = min(quantity, portfolio.position(order.code).quantity)
+                if quantity <= 0:
+                    continue
+                fill_price, fee = self.costs.fill(order.side, bar.open, quantity)
                 portfolio.apply_fill(
                     Fill(
                         order.code,
                         order.side,
-                        order.quantity,
-                        bar.open,
+                        quantity,
+                        fill_price,
                         snapshot.date.isoformat(),
+                        fee,
                     )
                 )
             pending = []
             equity = portfolio.equity(snapshot.bars)
             portfolio.equity_curve.append((snapshot.date.isoformat(), equity))
+            peak_equity = max(peak_equity, equity)
             if index == len(ordered) - 1:
                 continue
-            weights = self.allocator.weights(strategy.scores(snapshot))
+            drawdown = (peak_equity - equity) / peak_equity if peak_equity else 0.0
+            max_drawdown = self.allocator.risk.max_drawdown
+            weights = (
+                {}
+                if max_drawdown is not None and drawdown >= max_drawdown
+                else self.allocator.weights(strategy.scores(snapshot))
+            )
             pending = self._rebalance_orders(snapshot, portfolio, weights, initial_cash)
             pending.sort(key=lambda order: (order.side == "BUY", order.code))
             portfolio.orders.extend(pending)

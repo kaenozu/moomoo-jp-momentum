@@ -54,3 +54,20 @@ def test_tournament_does_not_choose_a_strategy_or_claim_validation() -> None:
 
     assert all(row.metrics["turnover"] >= 0 for row in rows)
     assert all(row.metrics["exposure"] <= 1.0 for row in rows)
+
+
+def test_tournament_can_split_in_sample_and_out_of_sample_periods() -> None:
+    tournament = StrategyTournament(max_positions=2, benchmark_code="JP.BENCH")
+    result = tournament.run_oos(make_snapshots(), split_date=date(2026, 1, 4))
+
+    assert result.split_date == date(2026, 1, 4)
+    assert result.in_sample_observations == 3
+    assert result.out_of_sample_observations == 2
+    assert [row.strategy for row in result.out_of_sample] == [
+        "buy_hold",
+        "equal_weight",
+        "momentum",
+        "volatility_adjusted_momentum",
+        "trend_momentum",
+        "benchmark_alpha",
+    ]

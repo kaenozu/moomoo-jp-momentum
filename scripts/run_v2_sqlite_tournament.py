@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.momentum_v2.adapters import SQLiteReadOnlyBarSource  # noqa: E402
+from src.momentum_v2.portfolio_rules import ExecutionCostModel  # noqa: E402
 from src.momentum_v2.tournament import StrategyTournament  # noqa: E402
 
 
@@ -32,6 +33,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--initial-cash", type=float, default=100000.0)
     parser.add_argument("--max-positions", type=int, default=20)
+    parser.add_argument("--split-date", type=date.fromisoformat)
+    parser.add_argument("--slippage-bps", type=float, default=5.0)
+    parser.add_argument("--commission-bps", type=float, default=5.0)
     return parser.parse_args()
 
 
@@ -48,12 +52,27 @@ def main() -> None:
         raise SystemExit(
             "No complete daily_bars snapshots found for the requested range."
         )
-    rows = StrategyTournament(
+    tournament = StrategyTournament(
         initial_cash=args.initial_cash,
         max_positions=args.max_positions,
         benchmark_code=args.benchmark,
-    ).run(snapshots)
-    print(f"source_db={args.db.resolve()} snapshots={len(snapshots)}")
+        costs=ExecutionCostModel(
+            slippage_bps=args.slippage_bps,
+            commission_bps=args.commission_bps,
+        ),
+    )
+    if args.split_date is None:
+        rows = tournament.run(snapshots)
+        period_label = f"snapshots={len(snapshots)}"
+    else:
+        oos = tournament.run_oos(snapshots, split_date=args.split_date)
+        rows = oos.out_of_sample
+        period_label = (
+            f"oos_split={args.split_date} "
+            f"in_sample={oos.in_sample_observations} "
+            f"oos={oos.out_of_sample_observations}"
+        )
+    print(f"source_db={args.db.resolve()} {period_label}")
     print(
         "strategy,cagr,excess_cagr,sharpe,sortino,max_drawdown,calmar,turnover,exposure"
     )

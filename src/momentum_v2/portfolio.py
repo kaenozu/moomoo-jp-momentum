@@ -26,6 +26,7 @@ class Fill:
     quantity: int
     price: float
     filled_at: str
+    fee: float = 0.0
 
 
 @dataclass(slots=True)
@@ -49,16 +50,18 @@ class MemoryPortfolio:
         current = self.position(fill.code)
         notional = fill.price * fill.quantity
         if fill.side == "BUY":
-            if notional > self.cash + 1e-9:
+            if notional + fill.fee > self.cash + 1e-9:
                 raise ValueError("buy fill exceeds available cash")
             quantity = current.quantity + fill.quantity
-            average = ((current.quantity * current.average_cost) + notional) / quantity
-            self.cash -= notional
+            average = (
+                (current.quantity * current.average_cost) + notional + fill.fee
+            ) / quantity
+            self.cash -= notional + fill.fee
             self.positions[fill.code] = Position(quantity, average)
         elif fill.side == "SELL":
             if fill.quantity > current.quantity:
                 raise ValueError("sell fill exceeds available position")
-            self.cash += notional
+            self.cash += notional - fill.fee
             quantity = current.quantity - fill.quantity
             self.positions[fill.code] = Position(
                 quantity, current.average_cost if quantity else 0.0
