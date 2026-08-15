@@ -47,6 +47,7 @@ class SimulationEngine:
                 continue
             weights = self.allocator.weights(strategy.scores(snapshot))
             pending = self._rebalance_orders(snapshot, portfolio, weights, initial_cash)
+            pending.sort(key=lambda order: (order.side == "BUY", order.code))
             portfolio.orders.extend(pending)
         return SimulationResult(portfolio, tuple(portfolio.equity_curve))
 
@@ -58,7 +59,9 @@ class SimulationEngine:
         initial_cash: float,
     ) -> list[OrderIntent]:
         prices = {bar.code: bar.close for bar in snapshot.bars}
-        target_values = {code: initial_cash * weight for code, weight in weights.items()}
+        # Keep a small deterministic cash buffer for next-day-open gaps.  This is
+        # a risk rule, not an assumption that close and next open are identical.
+        target_values = {code: initial_cash * weight * 0.90 for code, weight in weights.items()}
         codes = sorted(set(prices) | set(portfolio.positions))
         intents: list[OrderIntent] = []
         for code in codes:
