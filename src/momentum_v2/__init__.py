@@ -6,4 +6,12 @@ from .experiment import Experiment
 from .portfolio import MemoryPortfolio
 from .tournament import StrategyTournament
 
-__all__ = ["CanonicalBar", "Experiment", "MarketSnapshot", "MemoryPortfolio", "SimulationEngine", "Strategy", "StrategyTournament"]
+__all__ = [
+    "CanonicalBar",
+    "Experiment",
+    "MarketSnapshot",
+    "MemoryPortfolio",
+    "SimulationEngine",
+    "Strategy",
+    "StrategyTournament",
+]

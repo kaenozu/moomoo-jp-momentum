@@ -12,8 +12,17 @@ def make_snapshots() -> tuple[MarketSnapshot, ...]:
         snapshots.append(
             MarketSnapshot.from_bars(
                 [
-                    CanonicalBar("JP.A", date(2026, 1, day), alpha, alpha + 1, alpha - 1, alpha),
-                    CanonicalBar("JP.BENCH", date(2026, 1, day), benchmark, benchmark + 1, benchmark - 1, benchmark),
+                    CanonicalBar(
+                        "JP.A", date(2026, 1, day), alpha, alpha + 1, alpha - 1, alpha
+                    ),
+                    CanonicalBar(
+                        "JP.BENCH",
+                        date(2026, 1, day),
+                        benchmark,
+                        benchmark + 1,
+                        benchmark - 1,
+                        benchmark,
+                    ),
                 ],
                 benchmark="JP.BENCH",
             )
@@ -22,7 +31,9 @@ def make_snapshots() -> tuple[MarketSnapshot, ...]:
 
 
 def test_tournament_runs_all_requested_strategies_on_same_snapshots() -> None:
-    rows = StrategyTournament(max_positions=2, benchmark_code="JP.BENCH").run(make_snapshots())
+    rows = StrategyTournament(max_positions=2, benchmark_code="JP.BENCH").run(
+        make_snapshots()
+    )
 
     assert [row.strategy for row in rows] == [
         "buy_hold",
@@ -37,7 +48,9 @@ def test_tournament_runs_all_requested_strategies_on_same_snapshots() -> None:
 
 
 def test_tournament_does_not_choose_a_strategy_or_claim_validation() -> None:
-    rows = StrategyTournament(max_positions=2, benchmark_code="JP.BENCH").run(make_snapshots())
+    rows = StrategyTournament(max_positions=2, benchmark_code="JP.BENCH").run(
+        make_snapshots()
+    )
 
     assert all(row.metrics["turnover"] >= 0 for row in rows)
     assert all(row.metrics["exposure"] <= 1.0 for row in rows)

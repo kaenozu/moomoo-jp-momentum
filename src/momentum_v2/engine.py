@@ -38,7 +38,13 @@ class SimulationEngine:
                 if bar is None:
                     continue
                 portfolio.apply_fill(
-                    Fill(order.code, order.side, order.quantity, bar.open, snapshot.date.isoformat())
+                    Fill(
+                        order.code,
+                        order.side,
+                        order.quantity,
+                        bar.open,
+                        snapshot.date.isoformat(),
+                    )
                 )
             pending = []
             equity = portfolio.equity(snapshot.bars)
@@ -61,7 +67,9 @@ class SimulationEngine:
         prices = {bar.code: bar.close for bar in snapshot.bars}
         # Keep a small deterministic cash buffer for next-day-open gaps.  This is
         # a risk rule, not an assumption that close and next open are identical.
-        target_values = {code: initial_cash * weight * 0.90 for code, weight in weights.items()}
+        target_values = {
+            code: initial_cash * weight * 0.90 for code, weight in weights.items()
+        }
         codes = sorted(set(prices) | set(portfolio.positions))
         intents: list[OrderIntent] = []
         for code in codes:

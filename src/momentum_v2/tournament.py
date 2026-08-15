@@ -59,7 +59,14 @@ class VolatilityAdjustedMomentumStrategy(MomentumStrategy):
                 continue
             history = self.returns.setdefault(code, [])
             history.append(momentum)
-            volatility = max((sum((value - sum(history) / len(history)) ** 2 for value in history) / len(history)) ** 0.5, 1e-9)
+            volatility = max(
+                (
+                    sum((value - sum(history) / len(history)) ** 2 for value in history)
+                    / len(history)
+                )
+                ** 0.5,
+                1e-9,
+            )
             adjusted[code] = momentum / volatility
         return adjusted
 
@@ -78,7 +85,11 @@ class TrendMomentumStrategy(MomentumStrategy):
         for bar in snapshot.bars:
             history = self.history.setdefault(bar.code, [])
             history.append(bar.close)
-            if bar.code in raw and len(history) >= self.window and bar.close > sum(history[-self.window:]) / self.window:
+            if (
+                bar.code in raw
+                and len(history) >= self.window
+                and bar.close > sum(history[-self.window :]) / self.window
+            ):
                 result[bar.code] = raw[bar.code]
         return result
 
@@ -92,11 +103,16 @@ class BenchmarkAlphaStrategy:
         self.alpha_weight = alpha_weight
 
     def scores(self, snapshot: MarketSnapshot) -> dict[str, float]:
-        alpha_codes = sorted(bar.code for bar in snapshot.bars if bar.code != self.benchmark_code)
+        alpha_codes = sorted(
+            bar.code for bar in snapshot.bars if bar.code != self.benchmark_code
+        )
         if not alpha_codes:
             return {self.benchmark_code: 1.0}
         alpha_score = self.alpha_weight / len(alpha_codes)
-        return {self.benchmark_code: 1.0 - self.alpha_weight, **{code: alpha_score for code in alpha_codes}}
+        return {
+            self.benchmark_code: 1.0 - self.alpha_weight,
+            **{code: alpha_score for code in alpha_codes},
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,28 +143,50 @@ class StrategyTournament:
         rows: list[TournamentRow] = []
         benchmark = self._benchmark_curve(snapshots)
         for strategy in strategies:
-            allocator = (ScoreWeightAllocator if strategy.name == "benchmark_alpha" else EqualWeightAllocator)(
-                Exposure(1.0), RiskPolicy(max_positions=self.max_positions, max_exposure=1.0)
+            allocator = (
+                ScoreWeightAllocator
+                if strategy.name == "benchmark_alpha"
+                else EqualWeightAllocator
+            )(
+                Exposure(1.0),
+                RiskPolicy(max_positions=self.max_positions, max_exposure=1.0),
             )
             result = SimulationEngine(allocator).run(
                 snapshots, strategy, initial_cash=self.initial_cash
             )
             curve = [value for _, value in result.equity_curve]
-            turnover = sum(fill.quantity * fill.price for fill in result.portfolio.fills) / self.initial_cash
-            exposure = min(1.0, sum(fill.quantity * fill.price for fill in result.portfolio.fills) / max(1.0, self.initial_cash))
+            turnover = (
+                sum(fill.quantity * fill.price for fill in result.portfolio.fills)
+                / self.initial_cash
+            )
+            exposure = min(
+                1.0,
+                sum(fill.quantity * fill.price for fill in result.portfolio.fills)
+                / max(1.0, self.initial_cash),
+            )
             rows.append(
                 TournamentRow(
                     strategy.name,
-                    calculate_metrics(curve, benchmark_equity=benchmark, turnover=turnover, exposure=exposure),
+                    calculate_metrics(
+                        curve,
+                        benchmark_equity=benchmark,
+                        turnover=turnover,
+                        exposure=exposure,
+                    ),
                 )
             )
         return tuple(rows)
 
-    def _benchmark_curve(self, snapshots: tuple[MarketSnapshot, ...]) -> list[float] | None:
+    def _benchmark_curve(
+        self, snapshots: tuple[MarketSnapshot, ...]
+    ) -> list[float] | None:
         if self.benchmark_code is None:
             return None
         benchmark_prices = [
-            next((bar.close for bar in snapshot.bars if bar.code == self.benchmark_code), None)
+            next(
+                (bar.close for bar in snapshot.bars if bar.code == self.benchmark_code),
+                None,
+            )
             for snapshot in sorted(snapshots, key=lambda item: item.date)
         ]
         prices = [price for price in benchmark_prices if price is not None]

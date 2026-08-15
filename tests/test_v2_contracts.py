@@ -18,7 +18,14 @@ class FixedStrategy:
 
 
 def bar(code: str, day: int, open_price: float, close: float) -> CanonicalBar:
-    return CanonicalBar(code, date(2026, 1, day), open_price, max(open_price, close), min(open_price, close), close)
+    return CanonicalBar(
+        code,
+        date(2026, 1, day),
+        open_price,
+        max(open_price, close),
+        min(open_price, close),
+        close,
+    )
 
 
 def test_canonical_snapshot_is_sorted_and_rejects_mixed_dates() -> None:
@@ -29,7 +36,9 @@ def test_canonical_snapshot_is_sorted_and_rejects_mixed_dates() -> None:
 
 
 def test_allocator_is_deterministic_and_respects_exposure_and_position_limit() -> None:
-    allocator = EqualWeightAllocator(Exposure(0.6), RiskPolicy(max_positions=2, max_exposure=0.8))
+    allocator = EqualWeightAllocator(
+        Exposure(0.6), RiskPolicy(max_positions=2, max_exposure=0.8)
+    )
     assert allocator.weights({"B": 2.0, "A": 2.0, "C": 1.0}) == {"A": 0.3, "B": 0.3}
 
 
@@ -45,7 +54,13 @@ def test_simulation_fills_next_day_open_without_external_io() -> None:
 
 
 def test_metrics_include_risk_and_benchmark_dimensions() -> None:
-    metrics = calculate_metrics([100.0, 101.0, 99.0, 102.0], benchmark_equity=[100.0, 100.5, 99.5, 101.0], turnover=0.2, exposure=0.5, periods_per_year=3)
+    metrics = calculate_metrics(
+        [100.0, 101.0, 99.0, 102.0],
+        benchmark_equity=[100.0, 100.5, 99.5, 101.0],
+        turnover=0.2,
+        exposure=0.5,
+        periods_per_year=3,
+    )
     assert tuple(metrics) == METRIC_NAMES
     assert metrics["excess_cagr"] > 0
     assert metrics["max_drawdown"] > 0

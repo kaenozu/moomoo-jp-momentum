@@ -60,11 +60,16 @@ class MemoryPortfolio:
                 raise ValueError("sell fill exceeds available position")
             self.cash += notional
             quantity = current.quantity - fill.quantity
-            self.positions[fill.code] = Position(quantity, current.average_cost if quantity else 0.0)
+            self.positions[fill.code] = Position(
+                quantity, current.average_cost if quantity else 0.0
+            )
         else:
             raise ValueError(f"unsupported side: {fill.side}")
         self.fills.append(fill)
 
     def equity(self, bars: tuple[CanonicalBar, ...]) -> float:
         prices = {bar.code: bar.close for bar in bars}
-        return self.cash + sum(self.position(code).quantity * prices.get(code, 0.0) for code in self.positions)
+        return self.cash + sum(
+            self.position(code).quantity * prices.get(code, 0.0)
+            for code in self.positions
+        )

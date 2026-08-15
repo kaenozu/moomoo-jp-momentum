@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 
-FIXTURE = Path(__file__).parent / "fixtures" / "v2_characterization" / "basic_baseline.json"
+FIXTURE = (
+    Path(__file__).parent / "fixtures" / "v2_characterization" / "basic_baseline.json"
+)
 
 
 def load_fixture() -> dict:
@@ -75,4 +77,3 @@ def test_v1_baseline_fixture_metrics_are_not_return_only() -> None:
     }
     assert metrics["turnover"] == 0.02
     assert metrics["exposure"] == 0.5
-
