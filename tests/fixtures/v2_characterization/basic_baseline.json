@@ -1,0 +1,43 @@
+{
+  "schema_version": "v2-001",
+  "description": "Deterministic V1-compatible next-day-open trace for V2 kernel characterization.",
+  "initial_cash": 100000.0,
+  "execution": {
+    "fill_mode": "next_day_open",
+    "slippage_bps": 0.0,
+    "commission": 0.0,
+    "benchmark_code": "JP.BENCH"
+  },
+  "orders": [
+    {"id": "order-1", "signal_date": "2026-01-05", "code": "JP.TEST", "side": "BUY", "quantity": 10, "status": "FILLED"},
+    {"id": "order-2", "signal_date": "2026-01-07", "code": "JP.TEST", "side": "SELL", "quantity": 10, "status": "FILLED"}
+  ],
+  "fills": [
+    {"order_id": "order-1", "filled_at": "2026-01-06", "price": 101.0, "quantity": 10},
+    {"order_id": "order-2", "filled_at": "2026-01-08", "price": 109.0, "quantity": 10}
+  ],
+  "ledger": {
+    "cash": [100000.0, 98990.0, 99980.0],
+    "positions": [
+      {"date": "2026-01-05", "code": "JP.TEST", "quantity": 0, "avg_cost": 0.0},
+      {"date": "2026-01-06", "code": "JP.TEST", "quantity": 10, "avg_cost": 101.0},
+      {"date": "2026-01-08", "code": "JP.TEST", "quantity": 0, "avg_cost": 0.0}
+    ]
+  },
+  "equity": [
+    {"date": "2026-01-05", "total_equity": 100000.0},
+    {"date": "2026-01-06", "total_equity": 100000.0},
+    {"date": "2026-01-07", "total_equity": 100080.0},
+    {"date": "2026-01-08", "total_equity": 99980.0}
+  ],
+  "metrics": {
+    "cagr": -0.000050,
+    "excess_cagr": -0.000100,
+    "sharpe": -0.01,
+    "sortino": -0.01,
+    "max_drawdown": 0.001,
+    "calmar": -0.05,
+    "turnover": 0.02,
+    "exposure": 0.5
+  }
+}
