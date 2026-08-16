@@ -199,4 +199,3 @@ daily_cycle:
 strategies:
   etf_rotation:
     codes: ["JP.2559", "JP.1306", "JP.1320", "JP.2558", "JP.2563"]
-
