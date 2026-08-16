@@ -1,6 +1,6 @@
 """
 Benchmark anomaly diagnosis for momentum backtest.
-Checks for price adjustments, splits, and abnormal returns 
+Checks for price adjustments, splits, and abnormal returns
 in benchmark ETF daily_bars.
 """
 import sqlite3
