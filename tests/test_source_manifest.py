@@ -49,6 +49,21 @@ def test_manifest_excludes_runtime_and_sensitive_files(tmp_path: Path) -> None:
     ]
 
 
+def test_manifest_excludes_env_files_anywhere_and_case_insensitive_data(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "src/app.py", "ok\n")
+    _write(tmp_path, "config/.env", "nested\n")
+    _write(tmp_path, "secrets.env", "secret\n")
+    _write(tmp_path, "Data/private.json", "case-insensitive data\n")
+    _write(tmp_path, "certs/app.cer", "certificate\n")
+    _write(tmp_path, "keys/app.pkcs12", "keystore\n")
+
+    manifest = build_manifest(tmp_path, source_commit="e" * 40)
+
+    assert [member["path"] for member in manifest["members"]] == ["src/app.py"]
+
+
 def test_validate_manifest_rejects_checksum_tampering(tmp_path: Path) -> None:
     _write(tmp_path, "src/app.py", "VALUE = 1\n")
     manifest = build_manifest(tmp_path, source_commit="c" * 40)

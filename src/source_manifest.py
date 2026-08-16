@@ -30,6 +30,8 @@ _EXCLUDED_DIRS = {
 _EXCLUDED_EXACT = {"config.yaml", "config.yml"}
 _ALLOWED_DATA = {"data/symbols.json"}
 _SENSITIVE_SUFFIXES = {
+    ".cer",
+    ".crt",
     ".db",
     ".der",
     ".jks",
@@ -38,6 +40,7 @@ _SENSITIVE_SUFFIXES = {
     ".p12",
     ".pem",
     ".pfx",
+    ".pkcs12",
     ".pyc",
     ".pyo",
     ".sqlite",
@@ -64,6 +67,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_env_path(path: str) -> bool:
+    """Return whether any path component is an environment-file name."""
+
+    for part in path.split("/"):
+        folded = part.casefold()
+        if folded == ".env" or folded.startswith(".env.") or folded.endswith(".env"):
+            return True
+    return False
+
+
 def is_manifest_path(path: str) -> bool:
     """Return whether a relative path is safe to inspect as source."""
 
@@ -72,13 +85,14 @@ def is_manifest_path(path: str) -> bool:
         return False
     if any(part in {"", ".", ".."} for part in path.split("/")):
         return False
-    if path in _EXCLUDED_EXACT or path.startswith(".env"):
+    if path in _EXCLUDED_EXACT or _is_env_path(path):
         return False
-    if path.startswith("data/") and path not in _ALLOWED_DATA:
+    folded_path = path.casefold()
+    if folded_path.startswith("data/") and folded_path != "data/symbols.json":
         return False
     if any(part in _EXCLUDED_DIRS for part in pure.parts):
         return False
-    return not path.casefold().endswith(tuple(_SENSITIVE_SUFFIXES))
+    return not folded_path.endswith(tuple(_SENSITIVE_SUFFIXES))
 
 
 def _source_files(root: Path) -> list[tuple[str, Path]]:
