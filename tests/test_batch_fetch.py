@@ -9,6 +9,7 @@
 
 import sys
 import os
+from datetime import datetime
 from unittest.mock import MagicMock
 
 
@@ -17,8 +18,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pandas as pd
 import pytest
 
-from src.quote_service import QuoteService
 from src.config import Config
+from src.market_calendar import JST
+from src.quote_service import QuoteService
 
 
 class DummyConfig(Config):
@@ -251,9 +253,12 @@ class TestDailyUpdateBatch:
         qs.batch_fetch_daily_klines.return_value = {}
 
         # DBにデータがないのでforce=Falseでもスキップされない
+        # reference_datetimeは固定の平日（2026-08-10 = 月曜）を指定し、
+        # 実行日がJPX休場日でもno-op化されないようにする
         fetch_and_save_daily_klines(
             qs, data_store, ["JP.7203"],
             force=False, mode="history",
+            reference_datetime=datetime(2026, 8, 10, 18, 0, tzinfo=JST),
         )
         # batch_fetch_daily_klines is called because no existing data
         assert qs.batch_fetch_daily_klines.called

@@ -30,6 +30,7 @@ from src.connection import OpenDConnection
 from src.data_freshness import DataFreshnessGuard
 from src.data_store import DataStore
 from src.indicators import calculate_indicators_batch, indicators_to_dataframe
+from src.market_calendar import JST, JPXMarketDayStatus, check_jpx_market_day
 from src.models import Symbol
 from src.quote_service import QuoteService
 from src.screener import Screener
@@ -39,6 +40,7 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 Provider = Literal["auto", "moomoo", "yfinance"]
+CycleResultValue = int | bool | str
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +49,36 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+
+
+def _log_market_day_status(status: JPXMarketDayStatus) -> None:
+    """Write stable, grep-friendly calendar evidence for operations."""
+    for key, value in status.as_result().items():
+        rendered = str(value).lower() if isinstance(value, bool) else value
+        logger.info("%s = %s", key, rendered)
+
+
+def _closed_day_result(status: JPXMarketDayStatus) -> dict[str, CycleResultValue]:
+    result: dict[str, CycleResultValue] = {}
+    result.update(status.as_result())
+    result.update(
+        {
+            "connection_attempted": False,
+            "database_write_attempted": False,
+            "quote_fetch_attempted": False,
+            "signal_generation_attempted": False,
+            "daily_bars": 0,
+            "indicators": 0,
+            "benchmark_prices": 0,
+            "signals": 0,
+            "virtual_orders": 0,
+            "fills": 0,
+            "exits": 0,
+            "price_updates": 0,
+            "alerts": 0,
+        }
+    )
+    return result
 
 
 def _configure_file_logging() -> None:
@@ -198,11 +230,21 @@ def run_cycle(
     skip_fetch: bool = False,
     provider: Provider = "auto",
 ) -> dict:
-    results: dict[str, int | bool] = {}
+    results: dict[str, CycleResultValue] = {}
     if provider not in {"auto", "moomoo", "yfinance"}:
         raise ValueError(f"未対応providerです: {provider}")
 
     config = load_config(config_path)
+    market_day = check_jpx_market_day(target_date)
+    results.update(market_day.as_result())
+    _log_market_day_status(market_day)
+    if not market_day.is_trading_day:
+        logger.info(
+            "JPX休場日のため日次サイクルをno-opで終了します: %s",
+            market_day.target_date.isoformat(),
+        )
+        return _closed_day_result(market_day)
+
     configured_markets, latest_bar_count = get_daily_cycle_settings(config)
     indicator_bar_count = int(
         config.get("daily_cycle.indicator_bar_count", max(120, latest_bar_count))
@@ -231,13 +273,18 @@ def run_cycle(
         )
         if benchmark_count == 0:
             raise RuntimeError("日次対象にbenchmark が0件です")
-        return {
-            "connection_attempted": False,
-            "database_write_attempted": False,
-            "virtual_trade_enabled": bool(config.get("virtual_trade.enabled", True)),
-            "symbols": len(selected),
-            "benchmarks": benchmark_count,
-        }
+        results.update(
+            {
+                "connection_attempted": False,
+                "database_write_attempted": False,
+                "virtual_trade_enabled": bool(
+                    config.get("virtual_trade.enabled", True)
+                ),
+                "symbols": len(selected),
+                "benchmarks": benchmark_count,
+            }
+        )
+        return results
 
     opend_conn: OpenDConnection | None = None
     quote_ctx = None
@@ -403,7 +450,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Moomoo 日次運用サイクル")
     parser.add_argument(
         "--date",
-        default=datetime.now().strftime("%Y-%m-%d"),
+        default=datetime.now(JST).strftime("%Y-%m-%d"),
         help="基準日",
     )
     parser.add_argument("--dry-run", action="store_true", help="テスト実行")
