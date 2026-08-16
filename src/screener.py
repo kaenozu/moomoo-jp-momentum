@@ -289,4 +289,3 @@ class Screener:
             conn.execute("PRAGMA busy_timeout = 5000")
             conn.executemany(sql, params)
         return len(rows)
-
