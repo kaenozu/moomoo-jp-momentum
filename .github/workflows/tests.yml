@@ -83,13 +83,24 @@ jobs:
       - name: Run ruff
         run: >-
           ruff check --output-format=github
-          src/ tests/ scripts/verify_locked_requirements.py run_daily_cycle.py
+          src/ tests/ scripts/validate_source_manifest.py scripts/verify_locked_requirements.py run_daily_cycle.py
 
       - name: Run pyright
         run: pyright
 
       - name: Compile Python sources
         run: python -m compileall -q src scripts tests
+
+      - name: Validate deterministic source manifest twice
+        run: |
+          mkdir -p /tmp/source-manifest
+          python -m scripts.validate_source_manifest \
+            --source-commit "${{ github.sha }}" \
+            --output /tmp/source-manifest/first.json
+          python -m scripts.validate_source_manifest \
+            --source-commit "${{ github.sha }}" \
+            --output /tmp/source-manifest/second.json
+          cmp /tmp/source-manifest/first.json /tmp/source-manifest/second.json
 
       - name: Dry-run with test config
         run: python run_daily_cycle.py --dry-run --config tests/fixtures/config.test.yaml
