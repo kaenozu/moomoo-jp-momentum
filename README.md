@@ -1,61 +1,49 @@
 # Moomoo日本株モメンタム検証ツール
 
-オルカン等のインデックス投資より上振れを狙える短中期戦術を、少額・ミニ株・1株単位で**検証**するためのツールです。
+日本株・ETF・REITを対象に、データ取得、候補抽出、SQLite上の仮想トレード、運用検証を行うための研究・運用支援ツールです。
 
-## 概要
+## 重要な安全境界
 
-- **目的**: データ取得 → 売買候補抽出 → アプリ内仮想検証 → 人間が確認して手動注文
-- **対象**: 日本株、ETF、REIT（東証プライム中心）
-- **初期資金想定**: 5万円〜20万円
-- **主な比較対象**: 2559（オルカン系ETF）、1306（TOPIX ETF）
-
-## 重要な制約
-
-- **自動売買はしません**
-- **REAL注文APIは呼びません**
-- **moomoo APIはデータ取得専用です**
-- 実取引はmoomooアプリで手動実行してください
-- 売買記録は `record_trade.py` またはStreamlitの手動売買ログに入力してください
-- アプリ内仮想トレードは実注文ではありません
-
-## moomoo API注文について
-
-実機検証の結果、moomoo JP / FUTUJP ではOpenAPI経由の日本株SIMULATE注文が利用できない可能性が高いため、本プロジェクトではJP向けAPI注文機能を使いません。
+- **REAL注文APIは使用しません。**
+- 日本株の実取引は moomoo アプリで人間が手動実行します。
+- moomoo OpenAPI は主にデータ取得・接続確認用途です。
+- アプリ内の仮想注文・約定・cash・position は実注文ではありません。
+- `paper_order.py` などUS向けexperimental経路は、JP日次運用と分離して扱います。
+- SIMULATE / REAL注文、trade unlock、Production scheduler、live DB cutover は別の明示承認が必要です。
 
 ```text
-データ取得：moomoo API
-候補抽出：本アプリ
-仮想検証：アプリ内仮想トレード
-実取引：moomooアプリで手動
-手動記録：trades_manual
-API注文：未対応・使用禁止
+データ取得   : moomoo API / 対応データソース
+候補抽出     : 本リポジトリ
+仮想検証     : SQLite virtual trade
+実取引       : moomooアプリで手動
+API注文      : JP運用では使用禁止
 ```
 
-`paper_order.py` はUS市場向けexperimentalとしてのみ残っています。日本株では使いません。
+## 主な機能
+
+- 日次データ更新とベンチマーク比較
+- モメンタム候補抽出
+- Streamlit UI
+- SQLite 仮想注文 / 約定 / position / cash
+- 日次運用サイクル
+- scheduler / alert / backup / recovery の運用検証
+- 戦略研究用 backtest
 
 ## 銘柄ユニバース
 
-`data/symbols.json` では銘柄に以下の属性を持たせます。
+`data/symbols.json` の主な role:
 
-- `benchmark`: 比較専用。買い候補・仮想注文対象外
-- `trade_candidate`: 実売買候補・仮想注文対象
-- `watch_only`: 監視専用。スコアが高くても買い候補にしない
+- `benchmark`: 比較専用
+- `trade_candidate`: 候補・仮想注文対象
+- `watch_only`: 監視専用
 - `excluded`: 対象外
 
-`role=trade_candidate` かつ `tradable=true` かつ価格レンジ内の銘柄だけが買い候補・仮想注文対象です。
-
-初期価格レンジは `config.yaml` の `universe` で設定します。
-
-```yaml
-universe:
-  min_trade_price: 500
-  max_trade_price: 20000
-```
+`role=trade_candidate`、`tradable=true`、価格レンジ内を満たす銘柄だけを候補対象にします。
 
 ## セットアップ
 
 ```bash
-git clone <リポジトリURL>
+git clone <repository-url>
 cd moomoo-jp-momentum
 python -m venv venv
 venv\Scripts\activate  # Windows
@@ -63,118 +51,65 @@ pip install -r requirements.txt
 copy config.example.yaml config.yaml
 ```
 
-moomoo OpenDを起動し、ポート11111でログイン済みの状態にしてください。
+OpenDを使用する操作では、別途OpenDを起動し必要なログイン状態を確認してください。
 
-## 実行方法
-
-### 接続テスト
+## 基本コマンド
 
 ```bash
 python test_connection.py
-python test_quote.py
-```
-
-### 日次更新
-
-benchmark銘柄も取得し、TOPIX等との相対強度を計算します。
-
-```bash
-python daily_update.py
-python daily_update.py --force
 python daily_update.py --dry-run
-```
-
-### 候補抽出
-
-```bash
+python daily_update.py --force
 python screen_candidates.py --save --csv --html
-```
-
-### Streamlit UI
-
-```bash
 streamlit run app.py
 ```
 
-タブ構成：
-
-- ダッシュボード
-- 候補一覧
-- 銘柄詳細
-- 手動売買ログ
-- パフォーマンス
-- 事後検証
-- 注文について
-- 仮想トレード
-- 日次運用
-
-### アプリ内仮想トレード
-
-moomooには注文を送信しません。SQLite上で仮想注文・仮想約定・仮想ポジション・仮想cashを管理します。
+### 仮想トレード
 
 ```bash
-python virtual_order.py --from-signals --date 2026-06-30
-python virtual_order.py --code JP.7203 --side BUY --quantity 1 --order-type MARKET_SIM --date 2026-06-30
-python process_virtual_fills.py --date 2026-07-01
-python virtual_order.py --generate-exits --date 2026-07-01
-python virtual_order.py --list
-python virtual_order.py --positions
-python virtual_order.py --list-fills
-python virtual_order.py --performance
-```
-
-### 日次運用サイクル
-
-```bash
-python run_daily_cycle.py --dry-run
-python run_daily_cycle.py --date 2026-07-01
-```
-
-## 仮想約定仕様
-
-### MARKET_SIM
-
-初期設定では `next_day_open` です。
-
-- BUY: 翌営業日始値 × `(1 + slippage_bps / 10000)`
-- SELL: 翌営業日始値 × `(1 - slippage_bps / 10000)`
-
-### LIMIT_SIM
-
-日足ベースの簡易判定です。
-
-- BUY: `low <= limit_price` で約定
-- SELL: `high >= limit_price` で約定
-
-日足high/lowのみで判定するため、実際の板・約定順序・スプレッドとは異なります。
-
-## 重要な検証上の注意
-
-- 仮想トレードは戦略検証用の近似です
-- 実際の約定価格、板、スプレッド、約定順序、税金、手数料とは異なる可能性があります
-- 同日に複数の価格条件が成立した場合の厳密な順序再現はしません
-- 実運用ではmoomooアプリで手動注文してください
-
-## 相対強度
-
-`daily_update.py` はベンチマーク銘柄も取得し、`return_5d_vs_benchmark` を計算します。初期ベンチマークは `JP.1306` です。
-
-```yaml
-signals:
-  relative_strength:
-    benchmark_code: "JP.1306"
-```
-
-スコアリングでは `return_5d_vs_benchmark` を優先し、欠損時のみ `return_5d` にフォールバックします。
-
-## 主要コマンドまとめ
-
-```bash
-python daily_update.py --force
-python screen_candidates.py --save --csv --html
 python virtual_order.py --from-signals --date YYYY-MM-DD
 python process_virtual_fills.py --date YYYY-MM-DD
 python virtual_order.py --generate-exits --date YYYY-MM-DD
+python virtual_order.py --positions
 python virtual_order.py --performance
-streamlit run app.py
 ```
+
+### 日次サイクル
+
+```bash
+python run_daily_cycle.py --dry-run
+python run_daily_cycle.py --date YYYY-MM-DD
+```
+
+## 仮想約定の前提
+
+`MARKET_SIM` / `LIMIT_SIM` は日足ベースの近似です。板、厳密な約定順序、スプレッド、税金、手数料、実際の流動性は完全には再現しません。
+
+バックテストや仮想成績は、実運用の利益保証として扱わないでください。
+
+## 検証
+
+変更範囲に応じて、current CI の品質ゲートを基準に確認します。
+
+```bash
+python -m pytest tests/ -m "not slow" -q
+ruff check --output-format=github src/ tests/ scripts/validate_source_manifest.py run_daily_cycle.py
+pyright
+python -m compileall -q src scripts run_daily_cycle.py
+git diff --check
+```
+
+加えて、dry-run、skip-fetch、SQLite整合性、scheduler / calendar、artifact hygiene 等の関連ゲートを実行します。
+
+## 運用受入
+
+CIで再現できない環境依存の受入を、コード品質と分離して管理します。
+
+例:
+
+- production相当SQLiteを使うvirtual-only受入
+- backup / restore drill
+- Windows reboot後のscheduler / OpenD回復
+- real webhook failure drill
+- 実schedulerによるJPX休場日no-op確認
+
+最新の依存関係とrelease判定は GitHub Issues / Pull Requests を正としてください。READMEには変動しやすいPR番号・SHA・研究結果を固定しません。
