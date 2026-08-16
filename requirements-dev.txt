@@ -1,5 +1,6 @@
 # Moomoo 開発用依存関係
-# pip install -r requirements-dev.txt
+# Reproducible install:
+# python -m pip install -c constraints/py311.txt -r requirements.txt -r requirements-dev.txt
 
 # CI compatibility baseline
 pandas==2.2.3

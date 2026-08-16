@@ -1,5 +1,7 @@
 # Moomoo日本株モメンタム検証ツール
-# Python 3.11以上を推奨
+# Standard validation runtime: CPython 3.11.15
+# Reproducible install:
+# python -m pip install -c constraints/py311.txt -r requirements.txt
 
 # moomoo OpenAPI SDK
 futu-api>=9.1.0
