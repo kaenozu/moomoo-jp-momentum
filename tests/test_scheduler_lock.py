@@ -32,6 +32,18 @@ def test_acquire_lock_replaces_stale_pid(tmp_path, monkeypatch: pytest.MonkeyPat
         scheduler.release_lock()
 
 
+def test_release_lock_does_not_remove_a_lock_owned_by_another_process(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "scheduler.lock"
+    lock_path.write_text("424242", encoding="utf-8")
+    monkeypatch.setattr(scheduler, "_lock_file", lock_path)
+
+    scheduler.release_lock()
+
+    assert lock_path.read_text(encoding="utf-8") == "424242"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows PID probe only")
 def test_windows_pid_probe_distinguishes_live_and_missing_process() -> None:
     assert scheduler._pid_is_running(os.getpid()) is True
