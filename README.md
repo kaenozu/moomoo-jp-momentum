@@ -88,13 +88,13 @@ python run_daily_cycle.py --date YYYY-MM-DD
 
 ## 検証
 
-変更範囲に応じて、少なくとも次を確認します。
+変更範囲に応じて、current CI の品質ゲートを基準に確認します。
 
 ```bash
-pytest
-ruff check .
+python -m pytest tests/ -m "not slow" -q
+ruff check --output-format=github src/ tests/ scripts/validate_source_manifest.py run_daily_cycle.py
 pyright
-python -m compileall .
+python -m compileall -q src scripts run_daily_cycle.py
 git diff --check
 ```
 
