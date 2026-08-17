@@ -86,13 +86,26 @@ python run_daily_cycle.py --date YYYY-MM-DD
 
 バックテストや仮想成績は、実運用の利益保証として扱わないでください。
 
+## Coordinator Issue 同期
+
+`#77` のような手書き Coordinator Issue の PR/merge 状態は時間とともに必ず stale になります。
+`scripts/sync_coordinator_issue.py` は gh CLI から実 PR 状態を取得して、`<!-- GENERATED -->` セクションを機械生成・更新します（policy 部と生成部の分離）。
+
+```bash
+python scripts/sync_coordinator_issue.py --issue 77 --repo kaenozu/moomoo-jp-momentum --dry-run
+```
+
+- `--dry-run`: 本文を更新せずに生成結果のみ表示
+- `--write`: Issue 本文の生成セクションを置換（workflow はこちらを使用）
+- 未コミット変更は workflow 側の `gh pr list` / `gh api` が正となるため、README に PR 番号を固定しません
+
 ## 検証
 
 変更範囲に応じて、current CI の品質ゲートを基準に確認します。
 
 ```bash
 python -m pytest tests/ -m "not slow" -q
-ruff check --output-format=github src/ tests/ scripts/validate_source_manifest.py run_daily_cycle.py
+ruff check --output-format=github src/ tests/ scripts/validate_source_manifest.py scripts/sync_coordinator_issue.py run_daily_cycle.py
 pyright
 python -m compileall -q src scripts run_daily_cycle.py
 git diff --check
