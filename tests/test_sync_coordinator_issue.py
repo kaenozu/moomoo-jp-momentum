@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import pytest
 
@@ -36,7 +36,7 @@ def make_runner(
         },
     }
 
-    def run(command: list[str]) -> str:
+    def run(command: Sequence[str]) -> str:
         joined = " ".join(command)
         if "--jq .default_branch" in joined:
             return default_branch
