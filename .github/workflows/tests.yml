@@ -83,7 +83,7 @@ jobs:
       - name: Run ruff
         run: >-
           ruff check --output-format=github
-          src/ tests/ scripts/validate_source_manifest.py scripts/verify_locked_requirements.py run_daily_cycle.py
+          src/ tests/ scripts/validate_source_manifest.py scripts/verify_locked_requirements.py scripts/sync_coordinator_issue.py run_daily_cycle.py
 
       - name: Run pyright
         run: pyright
